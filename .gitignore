@@ -1,2 +1,6 @@
 # Project exclude paths
-/.tox/
+/.idea
+/.tox
+/src/scietex.logging.egg-info
+/.coverage
+/.htmlcov
