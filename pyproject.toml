@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scietex.logging"
+dynamic = ["version"]
+description = "Asyncio logging handlers"
+authors = [
+  { name = "Anton Bondarenko", email = "bond.anton@gmail.com" },
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.9"
+dependencies = []
+
+[project.urls]
+"Homepage" = "https://github.com/bond-anton/scietex.logging"
+"Bug Tracker" = "https://github.com/bond-anton/scietex.logging/issues"
+
+[project.optional-dependencies]
+redis = ["redis>=4.2.0"]
+
+# Specify multiple logging options combined
+all = [
+    "redis>=4.2.0",
+]
+test = ["flake8", "pytest", "pytest-asyncio"]
+lint = ["pylint"]
+
+[tool.setuptools.dynamic]
+version = {attr = "scietex.logging.__version__"}
+
+[tool.setuptools.package-data]
+"scietex.logging" = ["py.typed"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.mypy]
+python_version = "3.9"
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "src"
+]
