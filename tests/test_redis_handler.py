@@ -46,6 +46,7 @@ async def test_redis_handler_logs_to_stream():
 
     # Fetch the latest entry from the Redis stream
     messages = await redis_client.xrange(stream_name, count=1)
+    print(messages)
     assert len(messages) == 1, "No messages found in the Redis stream."
 
     # Decode the message data from bytes to strings

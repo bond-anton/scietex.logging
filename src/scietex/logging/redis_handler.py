@@ -1,28 +1,26 @@
 """Asynchronous Redis logging handler for non-blocking logging."""
 
-from typing import Union, TypedDict
-import asyncio
+from typing import Union
+from logging import LogRecord  # type: ignore
 
 try:
     import redis.asyncio as redis
 except ImportError as e:
     raise ImportError(
         "The 'redis' module is required to use this feature. "
-        "Please install it by running:\n\n    pip install mypackage[redis]\n"
+        "Please install it by running:\n\n    pip install scietex.logging[redis]\n"
     ) from e
 
-from .basic_handler import AsyncBaseHandler
+from .message_broker_handler import AsyncBrokerHandler, BrokerConnectionConfig
 
 
-class RedisConfig(TypedDict):
+class RedisConfig(BrokerConnectionConfig):
     """Redis config class."""
 
-    host: str
-    port: int
     db: int
 
 
-class AsyncRedisHandler(AsyncBaseHandler):
+class AsyncRedisHandler(AsyncBrokerHandler):
     """
     Asynchronous Redis logging handler for non-blocking logging.
 
@@ -32,8 +30,6 @@ class AsyncRedisHandler(AsyncBaseHandler):
 
     Attributes:
         stream_name (str): The Redis stream name where log entries are sent.
-        redis_config (dict): Configuration for the Redis client connection.
-        redis_client (redis.client.Redis): Redis client for sending logs.
 
     Methods:
         connect_redis():
@@ -64,18 +60,16 @@ class AsyncRedisHandler(AsyncBaseHandler):
 
         Initializes the Redis logging queue and adds the Redis worker to the list of workers.
         """
-        super().__init__(service_name=service_name, worker_id=worker_id, **kwargs)
+        super().__init__(
+            service_name=service_name,
+            worker_id=worker_id,
+            queue_name="redis",
+            broker_config=redis_config,
+            **kwargs,
+        )
         self.stream_name = stream_name
-        self.redis_config: RedisConfig = redis_config or {
-            "host": "localhost",
-            "port": 6379,
-            "db": 0,
-        }
-        self.redis_client: Union[redis.client.Redis, None] = None
-        self.log_queues["redis"] = asyncio.Queue()  # Add queue for Redis logs
-        self.log_workers.append(self._redis_worker())  # Add Redis worker to the list
 
-    async def connect_redis(self) -> None:
+    async def connect(self) -> None:
         """
         Connect to Redis asynchronously.
 
@@ -85,40 +79,24 @@ class AsyncRedisHandler(AsyncBaseHandler):
         Returns:
             None
         """
-        self.redis_client = await redis.Redis(
-            **self.redis_config, decode_responses=True
-        )
+        if self.client is None:
+            self.client = await redis.Redis(**self.broker_config, decode_responses=True)
 
-    async def _redis_worker(self) -> None:
+    async def disconnect(self) -> None:
         """
-        Asynchronous worker to handle logging to Redis.
-
-        Retrieves log records from the Redis queue, formats them, and sends them
-        to the Redis stream specified by `stream_name`. The worker continues running
-        as long as logging is active or there are records in the queue.
-
-        Returns:
-            None
+        Disconnect from Redis asynchronously.
         """
-        await self.connect_redis()  # Establish Redis connection in the worker
-        while (
-            self.logging_running_event.is_set() or not self.log_queues["redis"].empty()
-        ):
-            try:
-                record = await asyncio.wait_for(self.log_queues["redis"].get(), 1)
-                logger_name: str
-                try:
-                    logger_name = record.worker_name
-                except AttributeError:
-                    logger_name = record.name
-                log_entry: dict[str, Union[str, int, float]] = {
-                    "level": record.levelname,
-                    "message": record.getMessage(),
-                    "name": logger_name,
-                    "time": self.formatter.formatTime(record),
-                }
-                if self.redis_client is not None:
-                    await self.redis_client.xadd(self.stream_name, log_entry)  # type: ignore
-                self.log_queues["redis"].task_done()
-            except asyncio.TimeoutError:
-                pass
+        if self.client is not None:
+            await self.client.aclose()
+            self.client = None
+
+    async def send_message(self, record: LogRecord) -> None:
+        """
+        Send log record to Redis asynchronously.
+
+        Args: record (LogRecord): The log record to send.
+
+        Returns: None
+        """
+        if self.client is not None:
+            await self.client.xadd(self.stream_name, record)  # type: ignore

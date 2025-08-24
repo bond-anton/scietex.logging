@@ -25,10 +25,12 @@ dependencies = []
 
 [project.optional-dependencies]
 redis = ["redis>=4.2.0"]
+valkey = ["valkey-glide~=2.0.0"]
 
 # Specify multiple logging options combined
 all = [
     "redis>=4.2.0",
+    "valkey-glide~=2.0.0",
 ]
 test = ["flake8", "pytest", "pytest-asyncio"]
 lint = ["pylint"]
