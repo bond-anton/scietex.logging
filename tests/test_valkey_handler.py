@@ -4,8 +4,8 @@ import asyncio
 import logging
 import pytest
 from glide import GlideClient, GlideClientConfiguration, NodeAddress, MinId, MaxId
-from scietex.logging.valkey_handler import (
-    AsyncValkeyHandler,
+from scietex.logging import (
+    AsyncValkeyHandler, ValkeyConfig
 )  # Replace with actual module path
 
 
@@ -14,7 +14,7 @@ async def test_valkey_handler_logs_to_stream():
     """Testing logging to stream."""
     # Configuration for the Valkey connection and stream
     stream_name = "test_log_stream"
-    valkey_config = {"host": "localhost", "port": 6379, "db": 0}
+    valkey_config: ValkeyConfig = ValkeyConfig(host="localhost", port=6379, db=0)
 
     # Initialize Valkey client to interact with the stream directly
     addresses = [
@@ -45,31 +45,36 @@ async def test_valkey_handler_logs_to_stream():
     logger.addHandler(handler)
 
     # Log a test message
-    test_message = "Test Valkey log message"
-    logger.info(test_message)
+    messages_number = 10
+    test_messages = [f"Test Valkey log message {i}" for i in range(messages_number)]
+    for message in test_messages:
+        logger.info(message)
 
     # Allow some time for the worker to process the log message
     await asyncio.sleep(1)
 
-    # Fetch the latest entry from the Valkey stream
-    messages = await valkey_client.xrange(stream_name, MinId(), MaxId(), count=1)
-    assert len(messages) == 1, "No messages found in the Valkey stream."
+    messages = await valkey_client.xrange(stream_name, MinId(), MaxId(), count=messages_number)
+    assert len(messages) == messages_number, "No messages found in the Valkey stream."
+    messages_data = iter(messages.values())
 
-    # Decode the message data from bytes to strings
-    message_data = next(iter(messages.values()))
-    print(message_data)
-    decoded_message_data = {
-        key.decode("utf-8"): value.decode("utf-8") for key, value in message_data
-    }
-    print(decoded_message_data)
-    # Check the contents of the log entry
-    assert (
-        decoded_message_data["message"] == test_message
-    ), "Valkey logger:Log message data mismatch."
-    assert decoded_message_data["level"] == "INF", "Valkey logger: Log level mismatch."
-    assert (
-        decoded_message_data["name"] == f"{service_name}:{worker_id}"
-    ), "Valkey logger:Logger name mismatch."
+    # Fetch the latest entry from the Valkey stream
+    for message in test_messages:
+
+        # Decode the message data from bytes to strings
+        message_data = next(messages_data)
+        print(message_data)
+        decoded_message_data = {
+            key.decode("utf-8"): value.decode("utf-8") for key, value in message_data
+        }
+        print(decoded_message_data)
+        # Check the contents of the log entry
+        assert (
+            decoded_message_data["message"] == message
+        ), "Valkey logger:Log message data mismatch."
+        assert decoded_message_data["level"] == "INF", "Valkey logger: Log level mismatch."
+        assert (
+            decoded_message_data["name"] == f"{service_name}:{worker_id}"
+        ), "Valkey logger:Logger name mismatch."
 
     # Clean up
     await handler.stop_logging()
