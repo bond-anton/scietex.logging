@@ -5,7 +5,8 @@ import logging
 import pytest
 from glide import GlideClient, GlideClientConfiguration, NodeAddress, MinId, MaxId
 from scietex.logging import (
-    AsyncValkeyHandler, ValkeyConfig
+    AsyncValkeyHandler,
+    ValkeyConfig,
 )  # Replace with actual module path
 
 
@@ -17,11 +18,9 @@ async def test_valkey_handler_logs_to_stream():
     valkey_config: ValkeyConfig = ValkeyConfig(host="localhost", port=6379, db=0)
 
     # Initialize Valkey client to interact with the stream directly
-    addresses = [
-        NodeAddress(host=valkey_config["host"], port=valkey_config["port"]),
-    ]
     client_config: GlideClientConfiguration = GlideClientConfiguration(
-        addresses, database_id=valkey_config["db"]
+        [NodeAddress(host=valkey_config["host"], port=valkey_config["port"])],
+        database_id=valkey_config["db"],
     )
 
     valkey_client = await GlideClient.create(client_config)
@@ -53,7 +52,9 @@ async def test_valkey_handler_logs_to_stream():
     # Allow some time for the worker to process the log message
     await asyncio.sleep(1)
 
-    messages = await valkey_client.xrange(stream_name, MinId(), MaxId(), count=messages_number)
+    messages = await valkey_client.xrange(
+        stream_name, MinId(), MaxId(), count=messages_number
+    )
     assert len(messages) == messages_number, "No messages found in the Valkey stream."
     messages_data = iter(messages.values())
 
@@ -71,7 +72,9 @@ async def test_valkey_handler_logs_to_stream():
         assert (
             decoded_message_data["message"] == message
         ), "Valkey logger:Log message data mismatch."
-        assert decoded_message_data["level"] == "INF", "Valkey logger: Log level mismatch."
+        assert (
+            decoded_message_data["level"] == "INF"
+        ), "Valkey logger: Log level mismatch."
         assert (
             decoded_message_data["name"] == f"{service_name}:{worker_id}"
         ), "Valkey logger:Logger name mismatch."
