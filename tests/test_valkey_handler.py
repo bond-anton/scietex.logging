@@ -6,7 +6,6 @@ import pytest
 from glide import GlideClient, GlideClientConfiguration, NodeAddress, MinId, MaxId
 from scietex.logging import (
     AsyncValkeyHandler,
-    ValkeyConfig,
 )  # Replace with actual module path
 
 
@@ -15,13 +14,7 @@ async def test_valkey_handler_logs_to_stream():
     """Testing logging to stream."""
     # Configuration for the Valkey connection and stream
     stream_name = "test_log_stream"
-    valkey_config: ValkeyConfig = ValkeyConfig(host="localhost", port=6379, db=0)
-
-    # Initialize Valkey client to interact with the stream directly
-    client_config: GlideClientConfiguration = GlideClientConfiguration(
-        [NodeAddress(host=valkey_config["host"], port=valkey_config["port"])],
-        database_id=valkey_config["db"],
-    )
+    client_config: GlideClientConfiguration = GlideClientConfiguration([NodeAddress()])
 
     valkey_client = await GlideClient.create(client_config)
 
@@ -34,7 +27,7 @@ async def test_valkey_handler_logs_to_stream():
         service_name=service_name,
         worker_id=worker_id,
         stream_name=stream_name,
-        valkey_config=valkey_config,
+        valkey_config=client_config,
     )
     await handler.start_logging()  # Start the handler logging workers
 

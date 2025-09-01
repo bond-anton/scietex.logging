@@ -1,6 +1,6 @@
 """Asynchronous Redis logging handler for non-blocking logging."""
 
-from typing import Union
+from typing import Optional
 from logging import LogRecord  # type: ignore
 
 try:
@@ -11,13 +11,7 @@ except ImportError as e:
         "Please install it by running:\n\n    pip install scietex.logging[redis]\n"
     ) from e
 
-from .message_broker_handler import AsyncBrokerHandler, BrokerConnectionConfig
-
-
-class RedisConfig(BrokerConnectionConfig):
-    """Redis config class."""
-
-    db: int
+from .message_broker_handler import AsyncBrokerHandler
 
 
 class AsyncRedisHandler(AsyncBrokerHandler):
@@ -42,9 +36,9 @@ class AsyncRedisHandler(AsyncBrokerHandler):
     def __init__(
         self,
         stream_name: str,
-        service_name: Union[str, None] = None,
-        worker_id: Union[int, None] = None,
-        redis_config: Union[RedisConfig, None] = None,
+        service_name: Optional[str] = None,
+        worker_id: Optional[int] = None,
+        redis_config: Optional[dict] = None,
         **kwargs,
     ) -> None:
         """
@@ -64,10 +58,14 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             service_name=service_name,
             worker_id=worker_id,
             queue_name="redis",
-            broker_config=redis_config,
             **kwargs,
         )
         self.stream_name = stream_name
+        self.client_config: dict = redis_config or {
+            "host": "localhost",
+            "port": 6379,
+            "db": 0,
+        }
 
     async def connect(self) -> None:
         """
@@ -80,7 +78,7 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             None
         """
         if self.client is None:
-            self.client = await redis.Redis(**self.broker_config, decode_responses=True)
+            self.client = await redis.Redis(**self.client_config, decode_responses=True)
 
     async def disconnect(self) -> None:
         """

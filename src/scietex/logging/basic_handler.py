@@ -3,7 +3,7 @@ Asynchronous base handler for non-blocking logging in Python applications.
 Provides AsyncBaseHandler class.
 """
 
-from typing import Any, Union, Coroutine
+from typing import Any, Optional, Coroutine
 import sys
 import logging
 import asyncio
@@ -48,8 +48,8 @@ class AsyncBaseHandler(logging.Handler):  # type: ignore
     # pylint: disable=too-many-instance-attributes
     def __init__(
         self,
-        service_name: Union[str, None] = None,
-        worker_id: Union[int, None] = None,
+        service_name: Optional[str] = None,
+        worker_id: Optional[int] = None,
         **kwargs,
     ) -> None:
         """

@@ -1,17 +1,10 @@
 """Asynchronous logging handler for non-blocking logging to message broker."""
 
-from typing import Optional, Union, Any, TypedDict
+from typing import Optional, Union, Any
 from logging import LogRecord  # type: ignore
 import asyncio
 
 from .basic_handler import AsyncBaseHandler
-
-
-class BrokerConnectionConfig(TypedDict):
-    """Broker server config class."""
-
-    host: str
-    port: int
 
 
 class AsyncBrokerHandler(AsyncBaseHandler):
@@ -24,7 +17,6 @@ class AsyncBrokerHandler(AsyncBaseHandler):
 
     Attributes:
         queue_name (str): The name of the queue for the handler.
-        broker_config (dict): Configuration for the broker client connection.
         client (Any): The client for sending logs to broker.
 
     Methods:
@@ -46,7 +38,6 @@ class AsyncBrokerHandler(AsyncBaseHandler):
         queue_name: str,
         service_name: Optional[str] = None,
         worker_id: Optional[int] = None,
-        broker_config: Optional[BrokerConnectionConfig] = None,
         **kwargs,
     ) -> None:
         """
@@ -56,18 +47,12 @@ class AsyncBrokerHandler(AsyncBaseHandler):
             queue_name (str): The name of the queue from which log records are read.
             service_name (str, optional): Service name for log identification. Defaults to None.
             worker_id (int, optional): Identifier for the logging worker instance. Defaults to None.
-            broker_config (dict, optional): Configuration dictionary for message broker connection.
-                Defaults to {"host": "localhost", "port": 6379}.
             **kwargs: Additional keyword arguments, such as `stdout_enable`.
 
         Initializes the logging queue and adds the message broker worker to the list of workers.
         """
         super().__init__(service_name=service_name, worker_id=worker_id, **kwargs)
         self.queue_name: str = queue_name
-        self.broker_config: BrokerConnectionConfig = broker_config or {
-            "host": "localhost",
-            "port": 6379,
-        }
         self.client: Optional[Any] = None
         self.log_queues[self.queue_name] = asyncio.Queue()  # Add queue for logs
         self.log_workers.append(self._worker())  # Add worker to the list
@@ -124,9 +109,9 @@ class AsyncBrokerHandler(AsyncBaseHandler):
                     self.log_queues[self.queue_name].get(), 1
                 )
                 logger_name: str
-                try:
+                if hasattr(record, "worker_name"):
                     logger_name = record.worker_name
-                except AttributeError:
+                else:
                     logger_name = record.name
                 log_entry: dict[str, Union[str, int, float]] = {
                     "level": record.levelname,

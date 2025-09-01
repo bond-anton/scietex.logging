@@ -1,6 +1,6 @@
 """Asynchronous Valkey logging handler for non-blocking logging."""
 
-from typing import Union
+from typing import Optional
 from logging import LogRecord  # type: ignore
 
 try:
@@ -11,13 +11,7 @@ except ImportError as e:
         "Please install it by running:\n\n    pip install scietex.logging[valkey]\n"
     ) from e
 
-from .message_broker_handler import AsyncBrokerHandler, BrokerConnectionConfig
-
-
-class ValkeyConfig(BrokerConnectionConfig):
-    """Valkey config class."""
-
-    db: int
+from .message_broker_handler import AsyncBrokerHandler
 
 
 class AsyncValkeyHandler(AsyncBrokerHandler):
@@ -42,9 +36,9 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
     def __init__(
         self,
         stream_name: str,
-        service_name: Union[str, None] = None,
-        worker_id: Union[int, None] = None,
-        valkey_config: Union[ValkeyConfig, None] = None,
+        service_name: Optional[str] = None,
+        worker_id: Optional[int] = None,
+        valkey_config: Optional[GlideClientConfiguration] = None,
         **kwargs,
     ) -> None:
         """
@@ -64,23 +58,15 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
             service_name=service_name,
             worker_id=worker_id,
             queue_name="valkey",
-            broker_config=valkey_config,
+            broker_config=None,
             **kwargs,
         )
         self.stream_name = stream_name
-        self.broker_config: ValkeyConfig = valkey_config or {
-            "host": "localhost",
-            "port": 6379,
-            "db": 0,
-        }
-        addresses = [
-            NodeAddress(
-                host=self.broker_config["host"], port=self.broker_config["port"]
-            ),
-        ]
-        self.client_config: GlideClientConfiguration = GlideClientConfiguration(
-            addresses, database_id=self.broker_config["db"]
-        )
+        self.client_config: GlideClientConfiguration
+        if valkey_config is not None:
+            self.client_config = valkey_config
+        else:
+            self.client_config = GlideClientConfiguration([NodeAddress()])
 
     async def connect(self) -> None:
         """
