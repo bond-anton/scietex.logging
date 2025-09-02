@@ -80,10 +80,17 @@ behaviors.
 
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from .formatter import NTSFormatter
 from .basic_handler import AsyncBaseHandler
 from .message_broker_handler import AsyncBrokerHandler
-from .redis_handler import AsyncRedisHandler
-from .valkey_handler import AsyncValkeyHandler
+
+try:
+    from .redis_handler import AsyncRedisHandler
+except ImportError:
+    pass
+try:
+    from .valkey_handler import AsyncValkeyHandler
+except ImportError:
+    pass
