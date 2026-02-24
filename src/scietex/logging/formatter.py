@@ -2,7 +2,6 @@
 Module with custom logging formatters.
 """
 
-from typing import Union
 from datetime import datetime, timezone
 import logging
 
@@ -43,9 +42,9 @@ class NTSFormatter(logging.Formatter):  # type: ignore
     def __init__(
         self,
         service_name: str,
-        worker_id: Union[int, None] = None,
-        fmt: Union[str, None] = None,
-        datefmt: Union[str, None] = None,
+        worker_id: int | None = None,
+        fmt: str | None = None,
+        datefmt: str | None = None,
     ) -> None:
         """
         Initialize the NTSFormatter instance.

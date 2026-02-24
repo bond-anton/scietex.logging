@@ -1,6 +1,6 @@
 """Asynchronous logging handler for non-blocking logging to message broker."""
 
-from typing import Optional, Union, Any
+from typing import Any
 from logging import LogRecord  # type: ignore
 import asyncio
 
@@ -36,8 +36,8 @@ class AsyncBrokerHandler(AsyncBaseHandler):
     def __init__(
         self,
         queue_name: str,
-        service_name: Optional[str] = None,
-        worker_id: Optional[int] = None,
+        service_name: str | None = None,
+        worker_id: int | None = None,
         **kwargs,
     ) -> None:
         """
@@ -53,7 +53,7 @@ class AsyncBrokerHandler(AsyncBaseHandler):
         """
         super().__init__(service_name=service_name, worker_id=worker_id, **kwargs)
         self.queue_name: str = queue_name
-        self.client: Optional[Any] = None
+        self.client: Any | None = None
         self.log_queues[self.queue_name] = asyncio.Queue()  # Add queue for logs
         self.log_workers.append(self._worker())  # Add worker to the list
 
@@ -113,7 +113,7 @@ class AsyncBrokerHandler(AsyncBaseHandler):
                     logger_name = record.worker_name
                 else:
                     logger_name = record.name
-                log_entry: dict[str, Union[str, int, float]] = {
+                log_entry: dict[str, str | int | float] = {
                     "level": record.levelname,
                     "message": record.getMessage(),
                     "name": logger_name,

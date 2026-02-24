@@ -16,7 +16,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = []
 
 [project.urls]
@@ -24,16 +24,19 @@ dependencies = []
 "Bug Tracker" = "https://github.com/bond-anton/scietex.logging/issues"
 
 [project.optional-dependencies]
-redis = ["redis>=4.2.0"]
-valkey = ["valkey-glide~=2.0.0"]
+redis = ["redis>=5.0.0"]
+valkey = ["valkey-glide~=2.2.0"]
 
 # Specify multiple logging options combined
 all = [
-    "redis>=4.2.0",
-    "valkey-glide~=2.0.0",
+    "redis>=5.0.0",
+    "valkey-glide~=2.2.0",
 ]
 test = ["flake8", "pytest", "pytest-asyncio"]
 lint = ["pylint"]
+dev = [
+    "tox>=4.30.3",
+]
 
 [tool.setuptools.dynamic]
 version = {attr = "scietex.logging.__version__"}
@@ -45,7 +48,7 @@ version = {attr = "scietex.logging.__version__"}
 where = ["src"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 
 [tool.pytest.ini_options]
 pythonpath = [
