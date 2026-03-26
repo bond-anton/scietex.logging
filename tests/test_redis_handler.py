@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+
 import pytest
 from redis.asyncio import Redis
+
 from scietex.logging.redis_handler import (
     AsyncRedisHandler,
 )  # Replace with actual module path
@@ -17,7 +19,9 @@ async def test_redis_handler_logs_to_stream():
     redis_config = {"host": "localhost", "port": 6379, "db": 0}
 
     # Initialize Redis client to interact with the stream directly
-    redis_client = Redis(**redis_config)
+    redis_client = Redis(
+        host=redis_config["host"], port=redis_config["port"], db=redis_config["db"]
+    )
 
     # Clear the test stream if it exists
     await redis_client.delete(stream_name)
@@ -52,18 +56,13 @@ async def test_redis_handler_logs_to_stream():
     # Decode the message data from bytes to strings
     _, message_data = messages[0]
     decoded_message_data = {
-        key.decode("utf-8"): value.decode("utf-8")
-        for key, value in message_data.items()
+        key.decode("utf-8"): value.decode("utf-8") for key, value in message_data.items()
     }
     print(decoded_message_data)
     # Check the contents of the log entry
-    assert (
-        decoded_message_data["message"] == test_message
-    ), "Log message content mismatch."
+    assert decoded_message_data["message"] == test_message, "Log message content mismatch."
     assert decoded_message_data["level"] == "INF", "Log level mismatch."
-    assert (
-        decoded_message_data["name"] == f"{service_name}:{worker_id}"
-    ), "Logger name mismatch."
+    assert decoded_message_data["name"] == f"{service_name}:{worker_id}", "Logger name mismatch."
 
     # Clean up
     await handler.stop_logging()

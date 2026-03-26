@@ -1,8 +1,8 @@
 """Asynchronous logging handler for non-blocking logging to message broker."""
 
-from typing import Any
-from logging import LogRecord  # type: ignore
 import asyncio
+from datetime import datetime, timezone
+from typing import Any
 
 from .basic_handler import AsyncBaseHandler
 
@@ -78,7 +78,7 @@ class AsyncBrokerHandler(AsyncBaseHandler):
         if self.client is not None:
             self.client = None
 
-    async def send_message(self, record: LogRecord) -> None:
+    async def send_message(self, record: dict[str, str]) -> None:
         """
         Send log record to message broker asynchronously.
         Needs to be redefined in subclasses.
@@ -100,27 +100,28 @@ class AsyncBrokerHandler(AsyncBaseHandler):
             None
         """
         await self.connect()  # Establish connection
-        while (
-            self.logging_running_event.is_set()
-            or not self.log_queues[self.queue_name].empty()
-        ):
+        while self.logging_running_event.is_set() or not self.log_queues[self.queue_name].empty():
             try:
-                record = await asyncio.wait_for(
-                    self.log_queues[self.queue_name].get(), 1
-                )
+                record = await asyncio.wait_for(self.log_queues[self.queue_name].get(), 1)
                 logger_name: str
                 if hasattr(record, "worker_name"):
-                    logger_name = record.worker_name
+                    logger_name = (
+                        record.worker_name
+                        if isinstance(record.worker_name, str)
+                        else str(record.worker_name)
+                    )
                 else:
                     logger_name = record.name
-                log_entry: dict[str, str | int | float] = {
+                log_entry: dict[str, str] = {
                     "level": record.levelname,
                     "message": record.getMessage(),
                     "name": logger_name,
-                    "time": self.formatter.formatTime(record),
+                    "time": self.formatter.formatTime(record)
+                    if self.formatter
+                    else datetime.now(timezone.utc).isoformat(),
                 }
                 if self.client is not None:
-                    await self.send_message(log_entry)  # type: ignore
+                    await self.send_message(log_entry)
                 self.log_queues[self.queue_name].task_done()
             except asyncio.TimeoutError:
                 pass

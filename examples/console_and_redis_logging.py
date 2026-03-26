@@ -2,8 +2,9 @@
 
 # examples/console_and_redis_logging.py
 
-import logging
 import asyncio
+import logging
+
 from scietex.logging.basic_handler import AsyncBaseHandler
 from scietex.logging.redis_handler import AsyncRedisHandler
 

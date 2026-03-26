@@ -1,8 +1,5 @@
 """Asynchronous Redis logging handler for non-blocking logging."""
 
-from typing import Optional
-from logging import LogRecord  # type: ignore
-
 try:
     import redis.asyncio as redis
 except ImportError as e:
@@ -36,9 +33,9 @@ class AsyncRedisHandler(AsyncBrokerHandler):
     def __init__(
         self,
         stream_name: str,
-        service_name: Optional[str] = None,
-        worker_id: Optional[int] = None,
-        redis_config: Optional[dict] = None,
+        service_name: str | None = None,
+        worker_id: int | None = None,
+        redis_config: dict | None = None,
         **kwargs,
     ) -> None:
         """
@@ -88,7 +85,7 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             await self.client.aclose()
             self.client = None
 
-    async def send_message(self, record: LogRecord) -> None:
+    async def send_message(self, record: dict[str, str]) -> None:
         """
         Send log record to Redis asynchronously.
 
@@ -97,4 +94,4 @@ class AsyncRedisHandler(AsyncBrokerHandler):
         Returns: None
         """
         if self.client is not None:
-            await self.client.xadd(self.stream_name, record)  # type: ignore
+            await self.client.xadd(self.stream_name, record)

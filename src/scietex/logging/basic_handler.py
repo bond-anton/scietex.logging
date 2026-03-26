@@ -3,15 +3,16 @@ Asynchronous base handler for non-blocking logging in Python applications.
 Provides AsyncBaseHandler class.
 """
 
-from typing import Any, Coroutine
-import sys
-import logging
 import asyncio
+import logging
+import sys
+from collections.abc import Coroutine
+from typing import Any
 
 from .formatter import NTSFormatter
 
 
-class AsyncBaseHandler(logging.Handler):  # type: ignore
+class AsyncBaseHandler(logging.Handler):
     """
     Asynchronous base handler for non-blocking logging in Python applications.
 
@@ -45,7 +46,6 @@ class AsyncBaseHandler(logging.Handler):  # type: ignore
             Worker coroutine to process console log records from the queue.
     """
 
-    # pylint: disable=too-many-instance-attributes
     def __init__(
         self,
         service_name: str | None = None,
@@ -75,7 +75,7 @@ class AsyncBaseHandler(logging.Handler):  # type: ignore
         self.logging_accept_event = asyncio.Event()  # Indicates if logging is running
         self.logging_running_event = asyncio.Event()  # Indicates if logging is running
 
-        self.log_queues: dict[str, asyncio.Queue[logging.LogRecord]] = {}  # type: ignore
+        self.log_queues: dict[str, asyncio.Queue[logging.LogRecord]] = {}
         self.log_workers: list[Coroutine[Any, Any, None]] = []
         if self.stdout_enable:
             self.log_queues["console"] = asyncio.Queue()  # Queue for console logs
@@ -97,11 +97,9 @@ class AsyncBaseHandler(logging.Handler):  # type: ignore
         """
         self.logging_accept_event.set()  # Set the event to indicate logs are accepted
         self.logging_running_event.set()  # Set the event to indicate logging is active
-        self.log_workers_tasks = [
-            asyncio.create_task(worker) for worker in self.log_workers
-        ]
+        self.log_workers_tasks = [asyncio.create_task(worker) for worker in self.log_workers]
 
-    def emit(self, record: logging.LogRecord) -> None:  # type: ignore
+    def emit(self, record: logging.LogRecord) -> None:
         """
         Queue a log record for each backend when logging is active.
 
@@ -121,9 +119,7 @@ class AsyncBaseHandler(logging.Handler):  # type: ignore
                 try:
                     # Use asyncio.create_task to handle each put asynchronously
                     queue_put_task = asyncio.create_task(queue.put(record))
-                    self.log_queue_put_tasks.append(
-                        queue_put_task
-                    )  # Track the put task
+                    self.log_queue_put_tasks.append(queue_put_task)  # Track the put task
                     # Cleanup completed tasks from the list to prevent memory buildup
                     self.log_queue_put_tasks = [
                         task for task in self.log_queue_put_tasks if not task.done()
@@ -135,7 +131,6 @@ class AsyncBaseHandler(logging.Handler):  # type: ignore
                 except asyncio.InvalidStateError:
                     # Happens if the event loop is in an invalid state for this operation
                     pass
-                # pylint: disable=broad-exception-caught
                 except Exception:
                     # Log unexpected errors for visibility without halting other tasks
                     pass
@@ -179,9 +174,9 @@ class AsyncBaseHandler(logging.Handler):  # type: ignore
                 await asyncio.wait_for(queue.join(), timeout=timeout)
                 # Create an INFO LogRecord for successful completion
                 if self.stdout_enable:
-                    log_record = logging.LogRecord(  # type: ignore
+                    log_record = logging.LogRecord(
                         name=f"{name.capitalize()}Logger",
-                        level=logging.INFO,  # type: ignore
+                        level=logging.INFO,
                         pathname=__file__,
                         lineno=0,
                         msg=f"{name.capitalize()} Logger has completed processing its queue.",
@@ -192,9 +187,9 @@ class AsyncBaseHandler(logging.Handler):  # type: ignore
             except asyncio.TimeoutError:
                 # Create an ERROR LogRecord for timeout
                 if self.stdout_enable:
-                    log_record = logging.LogRecord(  # type: ignore
+                    log_record = logging.LogRecord(
                         name=f"{name.capitalize()}Logger",
-                        level=logging.ERROR,  # type: ignore
+                        level=logging.ERROR,
                         pathname=__file__,
                         lineno=0,
                         msg=f"Timeout while waiting for {name} logger to complete its queue.",
@@ -202,13 +197,12 @@ class AsyncBaseHandler(logging.Handler):  # type: ignore
                         exc_info=None,
                     )
                     await self.log_queues["console"].put(log_record)
-            # pylint: disable=broad-exception-caught
             except Exception as e:
                 # Create an ERROR LogRecord for other exceptions
                 if self.stdout_enable:
-                    log_record = logging.LogRecord(  # type: ignore
+                    log_record = logging.LogRecord(
                         name=f"{name.capitalize()}Logger",
-                        level=logging.ERROR,  # type: ignore
+                        level=logging.ERROR,
                         pathname=__file__,
                         lineno=0,
                         msg=f"Error while waiting for {name} Logger: {e}",
@@ -220,12 +214,9 @@ class AsyncBaseHandler(logging.Handler):  # type: ignore
         # Process the console queue last
         if self.stdout_enable:
             try:
-                await asyncio.wait_for(
-                    self.log_queues["console"].join(), timeout=timeout
-                )
+                await asyncio.wait_for(self.log_queues["console"].join(), timeout=timeout)
             except asyncio.TimeoutError:
                 pass
-            # pylint: disable=broad-exception-caught
             except Exception:
                 pass
         # Wait for all worker tasks to complete
@@ -244,10 +235,7 @@ class AsyncBaseHandler(logging.Handler):  # type: ignore
         Returns:
             None
         """
-        while (
-            self.logging_running_event.is_set()
-            or not self.log_queues["console"].empty()
-        ):
+        while self.logging_running_event.is_set() or not self.log_queues["console"].empty():
             try:
                 record = await asyncio.wait_for(self.log_queues["console"].get(), 1)
                 if self.formatter:

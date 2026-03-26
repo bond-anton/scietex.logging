@@ -1,10 +1,7 @@
 """Asynchronous Valkey logging handler for non-blocking logging."""
 
-from typing import Optional
-from logging import LogRecord  # type: ignore
-
 try:
-    from glide import GlideClient, GlideClientConfiguration, NodeAddress, ClosingError
+    from glide import ClosingError, GlideClient, GlideClientConfiguration, NodeAddress
 except ImportError as e:
     raise ImportError(
         "The 'valkey-glide' module is required to use this feature. "
@@ -36,9 +33,9 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
     def __init__(
         self,
         stream_name: str,
-        service_name: Optional[str] = None,
-        worker_id: Optional[int] = None,
-        valkey_config: Optional[GlideClientConfiguration] = None,
+        service_name: str | None = None,
+        worker_id: int | None = None,
+        valkey_config: GlideClientConfiguration | None = None,
         **kwargs,
     ) -> None:
         """
@@ -92,7 +89,7 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
             await self.client.close()
             self.client = None
 
-    async def send_message(self, record: LogRecord) -> None:
+    async def send_message(self, record: dict[str, str]) -> None:
         """
         Send log record to Valkey asynchronously.
 
@@ -100,5 +97,6 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
 
         Returns: None
         """
+
         if self.client is not None:
-            await self.client.xadd(self.stream_name, record.items())  # type: ignore
+            await self.client.xadd(self.stream_name, record.items())

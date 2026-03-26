@@ -80,17 +80,27 @@ behaviors.
 
 """
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
-from .formatter import NTSFormatter
 from .basic_handler import AsyncBaseHandler
+from .formatter import NTSFormatter
 from .message_broker_handler import AsyncBrokerHandler
+
+__all__ = [
+    "AsyncBaseHandler",
+    "AsyncBrokerHandler",
+    "NTSFormatter",
+]
 
 try:
     from .redis_handler import AsyncRedisHandler
+
+    __all__ += ["AsyncRedisHandler"]
 except ImportError:
     pass
 try:
     from .valkey_handler import AsyncValkeyHandler
+
+    __all__ += ["AsyncValkeyHandler"]
 except ImportError:
     pass

@@ -2,8 +2,8 @@
 Module with custom logging formatters.
 """
 
-from datetime import datetime, timezone
 import logging
+from datetime import datetime, timezone
 
 
 def level_abbreviation(log_level: int) -> str:
@@ -18,16 +18,16 @@ def level_abbreviation(log_level: int) -> str:
              if the level is unrecognized.
     """
     level_map: dict[int, str] = {
-        logging.DEBUG: "DBG",  # type: ignore
-        logging.INFO: "INF",  # type: ignore
-        logging.WARNING: "WRN",  # type: ignore
-        logging.ERROR: "ERR",  # type: ignore
-        logging.CRITICAL: "CRT",  # type: ignore
+        logging.DEBUG: "DBG",
+        logging.INFO: "INF",
+        logging.WARNING: "WRN",
+        logging.ERROR: "ERR",
+        logging.CRITICAL: "CRT",
     }
     return level_map.get(log_level, f"{log_level:03d}")
 
 
-class NTSFormatter(logging.Formatter):  # type: ignore
+class NTSFormatter(logging.Formatter):
     """
     Custom logging formatter for NTS services.
 
@@ -80,7 +80,7 @@ class NTSFormatter(logging.Formatter):  # type: ignore
             return dt.isoformat()
         return super().formatTime(record, datefmt)
 
-    def format(self, record: logging.LogRecord) -> str:  # type: ignore
+    def format(self, record: logging.LogRecord) -> str:
         """
         Format the specified log record as text.
 

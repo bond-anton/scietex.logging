@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
+
 from scietex.logging.formatter import NTSFormatter, level_abbreviation
 
 
@@ -37,8 +38,6 @@ def test_nts_formatter_format_with_worker_name():
 def test_nts_formatter_format_with_debug_level():
     """Test the formatter with DEBUG level."""
     formatter = NTSFormatter(service_name="TestService", worker_id=42)
-    record = logging.LogRecord(
-        "test", logging.DEBUG, "", 0, "Debug message", None, None
-    )
+    record = logging.LogRecord("test", logging.DEBUG, "", 0, "Debug message", None, None)
     formatted_message = formatter.format(record)
     assert " - DBG -" in formatted_message

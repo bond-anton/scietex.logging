@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+
 import pytest
-from glide import GlideClient, GlideClientConfiguration, NodeAddress, MinId, MaxId
+from glide import GlideClient, GlideClientConfiguration, MaxId, MinId, NodeAddress
+
 from scietex.logging import (
     AsyncValkeyHandler,
 )  # Replace with actual module path
@@ -14,7 +16,9 @@ async def test_valkey_handler_logs_to_stream():
     """Testing logging to stream."""
     # Configuration for the Valkey connection and stream
     stream_name = "test_log_stream"
-    client_config: GlideClientConfiguration = GlideClientConfiguration([NodeAddress()])
+    client_config: GlideClientConfiguration = GlideClientConfiguration(
+        [NodeAddress(host="localhost", port=6379)]
+    )
 
     valkey_client = await GlideClient.create(client_config)
 
@@ -45,15 +49,13 @@ async def test_valkey_handler_logs_to_stream():
     # Allow some time for the worker to process the log message
     await asyncio.sleep(1)
 
-    messages = await valkey_client.xrange(
-        stream_name, MinId(), MaxId(), count=messages_number
-    )
+    messages = await valkey_client.xrange(stream_name, MinId(), MaxId(), count=messages_number)
+    assert messages is not None, "No messages found in the Valkey stream."
     assert len(messages) == messages_number, "No messages found in the Valkey stream."
     messages_data = iter(messages.values())
 
     # Fetch the latest entry from the Valkey stream
     for message in test_messages:
-
         # Decode the message data from bytes to strings
         message_data = next(messages_data)
         print(message_data)
@@ -62,17 +64,15 @@ async def test_valkey_handler_logs_to_stream():
         }
         print(decoded_message_data)
         # Check the contents of the log entry
-        assert (
-            decoded_message_data["message"] == message
-        ), "Valkey logger:Log message data mismatch."
-        assert (
-            decoded_message_data["level"] == "INF"
-        ), "Valkey logger: Log level mismatch."
-        assert (
-            decoded_message_data["name"] == f"{service_name}:{worker_id}"
-        ), "Valkey logger:Logger name mismatch."
+        assert decoded_message_data["message"] == message, (
+            "Valkey logger:Log message data mismatch."
+        )
+        assert decoded_message_data["level"] == "INF", "Valkey logger: Log level mismatch."
+        assert decoded_message_data["name"] == f"{service_name}:{worker_id}", (
+            "Valkey logger:Logger name mismatch."
+        )
 
     # Clean up
     await handler.stop_logging()
-    await valkey_client.delete([stream_name])  # Clear the test stream after the test
+    # await valkey_client.delete([stream_name])  # Clear the test stream after the test
     await valkey_client.close()  # Close the Valkey client connection

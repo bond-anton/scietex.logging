@@ -6,15 +6,13 @@ build-backend = "setuptools.build_meta"
 name = "scietex.logging"
 dynamic = ["version"]
 description = "Asyncio logging handlers"
-authors = [
-  { name = "Anton Bondarenko", email = "bond.anton@gmail.com" },
-]
+authors = [{ name = "Anton Bondarenko", email = "bond.anton@gmail.com" }]
 license = { file = "LICENSE" }
 readme = "README.md"
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
 ]
 requires-python = ">=3.10"
 dependencies = []
@@ -28,29 +26,16 @@ redis = ["redis>=5.0.0"]
 valkey = ["valkey-glide~=2.2.0"]
 
 # Specify multiple logging options combined
-all = [
-    "redis>=5.0.0",
-    "valkey-glide~=2.2.0",
-]
-test = ["flake8", "pytest", "pytest-asyncio"]
-lint = ["pylint"]
-dev = [
-    "tox>=4.30.3",
-]
+all = ["redis>=5.0.0", "valkey-glide~=2.2.0"]
+test = ["pytest", "pytest-asyncio"]
+lint = ["ruff"]
+dev = ["tox>=4.30.3", "redis>=5.0.0", "valkey-glide~=2.2.0"]
 
 [tool.setuptools.dynamic]
-version = {attr = "scietex.logging.__version__"}
+version = { attr = "scietex.logging.__version__" }
 
 [tool.setuptools.package-data]
 "scietex.logging" = ["py.typed"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.mypy]
-python_version = "3.10"
-
-[tool.pytest.ini_options]
-pythonpath = [
-  "src"
-]

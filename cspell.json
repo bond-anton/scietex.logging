@@ -1,9 +1,26 @@
 {
-    "version": "0.2",
-    "ignorePaths": [],
-    "dictionaryDefinitions": [],
-    "dictionaries": [],
-    "words": ["scietex", "redis", "valkey"],
-    "ignoreWords": [],
-    "import": []
+  "version": "0.2",
+  "ignorePaths": [],
+  "dictionaryDefinitions": [],
+  "dictionaries": [],
+  "words": [
+    "Bondarenko",
+    "scietex",
+    "redis",
+    "valkey",
+    "htmlcov",
+    "pycache",
+    "mypy",
+    "venv",
+    "posargs",
+    "pytest",
+    "asyncio",
+    "setuptools",
+    "xadd",
+    "xrange",
+    "pythonpath",
+    "addopts"
+  ],
+  "ignoreWords": [],
+  "import": []
 }

@@ -1,8 +1,10 @@
 """Tests for AsyncBaseHandler class."""
 
-import logging
 import asyncio
+import logging
+
 import pytest
+
 from scietex.logging import AsyncBaseHandler
 
 
@@ -12,9 +14,7 @@ async def test_basic_handler_initialization():
     handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
     await handler.start_logging()
     assert handler.stdout_enable is True
-    assert (
-        "console" in handler.log_queues
-    )  # Console queue should be initialized by default
+    assert "console" in handler.log_queues  # Console queue should be initialized by default
     await handler.stop_logging()
 
 

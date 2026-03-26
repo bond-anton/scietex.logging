@@ -8,3 +8,7 @@ __pycache__
 /.mypy_cache
 /.venv
 uv.lock
+/.pytest_cache
+/.ruff_cache
+/.vscode
+/build
