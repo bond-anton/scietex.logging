@@ -74,5 +74,5 @@ async def test_valkey_handler_logs_to_stream():
 
     # Clean up
     await handler.stop_logging()
-    # await valkey_client.delete([stream_name])  # Clear the test stream after the test
+    await valkey_client.delete([stream_name])  # Clear the test stream after the test
     await valkey_client.close()  # Close the Valkey client connection
