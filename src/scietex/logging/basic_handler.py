@@ -250,8 +250,9 @@ class AsyncBaseHandler(logging.Handler):  # type: ignore
         ):
             try:
                 record = await asyncio.wait_for(self.log_queues["console"].get(), 1)
-                sys.stdout.write(self.formatter.format(record) + "\n")
-                sys.stdout.flush()
+                if self.formatter:
+                    sys.stdout.write(self.formatter.format(record) + "\n")
+                    sys.stdout.flush()
                 self.log_queues["console"].task_done()
             except asyncio.TimeoutError:
                 pass
