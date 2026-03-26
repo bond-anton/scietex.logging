@@ -4,3 +4,4 @@
 /src/scietex.logging.egg-info
 /.coverage
 /.htmlcov
+__pycache__
