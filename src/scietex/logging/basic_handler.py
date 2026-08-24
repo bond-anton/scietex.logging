@@ -31,6 +31,7 @@ class AsyncBaseHandler(logging.Handler):
         log_workers (list): List of worker coroutine functions for processing log messages.
         log_workers_tasks (list): List of asyncio tasks for each worker, created in `start_logging`.
         log_queue_put_tasks (list): List of asyncio tasks for queue put operations.
+            Periodically cleaned up when threshold is reached.
 
     Methods:
         start_logging():
@@ -60,10 +61,13 @@ class AsyncBaseHandler(logging.Handler):
                 Defaults to "Service".
             worker_id (int, optional): Identifier for the worker instance. Defaults to 1.
             kwargs (dict): Additional arguments, including `stdout_enable`
-                to enable/disable console logging.
+                to enable/disable console logging and `queue_put_cleanup_threshold`
+                to configure the threshold for periodic cleanup of pending tasks.
 
         Attributes:
             stdout_enable (bool): Flag to enable console logging (defaults to True).
+            _queue_put_cleanup_threshold (int): Threshold for triggering periodic cleanup
+                of put tasks.
         """
         super().__init__()
         self.stdout_enable: bool = kwargs.get("stdout_enable", True)
@@ -83,6 +87,9 @@ class AsyncBaseHandler(logging.Handler):
 
         self.log_workers_tasks: list[asyncio.Task[None]] = []
         self.log_queue_put_tasks: list[asyncio.Task[None]] = []
+        self._queue_put_cleanup_threshold: int = max(
+            kwargs.get("queue_put_cleanup_threshold", 100), 1
+        )
 
     async def start_logging(self) -> None:
         """
@@ -120,10 +127,9 @@ class AsyncBaseHandler(logging.Handler):
                     # Use asyncio.create_task to handle each put asynchronously
                     queue_put_task = asyncio.create_task(queue.put(record))
                     self.log_queue_put_tasks.append(queue_put_task)  # Track the put task
-                    # Cleanup completed tasks from the list to prevent memory buildup
-                    self.log_queue_put_tasks = [
-                        task for task in self.log_queue_put_tasks if not task.done()
-                    ]
+                    # Periodic cleanup to prevent unbounded growth
+                    if len(self.log_queue_put_tasks) >= self._queue_put_cleanup_threshold:
+                        self._cleanup_queue_put_tasks()
                 except asyncio.QueueFull:
                     # Queue is full; could log an error or drop the message based on policy
                     pass
@@ -158,9 +164,7 @@ class AsyncBaseHandler(logging.Handler):
         # Wait for all pending put tasks to complete
         if self.log_queue_put_tasks:
             await asyncio.gather(*self.log_queue_put_tasks)
-            self.log_queue_put_tasks = [
-                task for task in self.log_queue_put_tasks if not task.done()
-            ]
+            self.log_queue_put_tasks = []  # Reset the list
 
         # Signal workers to stop processing
         self.logging_running_event.clear()
@@ -223,6 +227,10 @@ class AsyncBaseHandler(logging.Handler):
         if self.log_workers_tasks:
             await asyncio.gather(*self.log_workers_tasks)
         self.close()
+
+    def _cleanup_queue_put_tasks(self) -> None:
+        """Remove completed tasks from log_queue_put_tasks to prevent memory leaks."""
+        self.log_queue_put_tasks = [task for task in self.log_queue_put_tasks if not task.done()]
 
     async def _console_logging_worker(self) -> None:
         """
