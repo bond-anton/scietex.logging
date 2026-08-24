@@ -55,7 +55,6 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
             service_name=service_name,
             worker_id=worker_id,
             queue_name="valkey",
-            broker_config=None,
             **kwargs,
         )
         self.stream_name = stream_name
