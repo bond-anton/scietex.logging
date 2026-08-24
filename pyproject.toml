@@ -1,25 +1,21 @@
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "scietex.logging"
-dynamic = ["version"]
 description = "Asyncio logging handlers"
-authors = [{ name = "Anton Bondarenko", email = "bond.anton@gmail.com" }]
-license = { file = "LICENSE" }
 readme = "README.md"
+requires-python = ">=3.10"
+license-files = ["LICENSE"]
+authors = [{ name = "Anton Bondarenko", email = "bond.anton@gmail.com" }]
 classifiers = [
-  "Programming Language :: Python :: 3",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
 ]
-requires-python = ">=3.10"
 dependencies = []
+dynamic = ["version"]
 
 [project.urls]
-"Homepage" = "https://github.com/bond-anton/scietex.logging"
 "Bug Tracker" = "https://github.com/bond-anton/scietex.logging/issues"
+"Homepage" = "https://github.com/bond-anton/scietex.logging"
 
 [project.optional-dependencies]
 redis = ["redis>=5.0.0"]
@@ -27,9 +23,13 @@ valkey = ["valkey-glide~=2.2.0"]
 
 # Specify multiple logging options combined
 all = ["redis>=5.0.0", "valkey-glide~=2.2.0"]
-test = ["pytest", "pytest-asyncio"]
-lint = ["ruff"]
 dev = ["tox>=4.30.3", "redis>=5.0.0", "valkey-glide~=2.2.0"]
+lint = ["ruff"]
+test = ["pytest", "pytest-asyncio"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools.dynamic]
 version = { attr = "scietex.logging.__version__" }
