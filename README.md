@@ -56,10 +56,12 @@ logger.setLevel(logging.DEBUG)
 handler = AsyncBaseHandler()
 logger.addHandler(handler)
 
+
 async def main():
     await handler.start_logging()
     logger.info("This is an asynchronous log message")
     await handler.stop_logging()
+
 
 asyncio.run(main())
 ```
@@ -78,10 +80,12 @@ logger.setLevel(logging.DEBUG)
 handler = AsyncRedisHandler(stream_name="my_log_stream")
 logger.addHandler(handler)
 
+
 async def main():
     await handler.start_logging()
     logger.error("This error message will be logged to Redis!")
     await handler.stop_logging()
+
 
 asyncio.run(main())
 ```
@@ -94,8 +98,7 @@ Formatting: Use Python’s standard logging Formatter to customize output. For e
 
 ```python
 formatter = logging.Formatter(
-    fmt="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%SZ"
+    fmt="%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ"
 )
 handler.setFormatter(formatter)
 ```
@@ -110,6 +113,7 @@ To add support for additional logging backends, subclass AsyncBaseHandler and im
 from scietex.logging import AsyncBaseHandler
 import asyncpg
 
+
 class AsyncPostgresHandler(AsyncBaseHandler):
     def __init__(self, db_url):
         super().__init__()
@@ -121,7 +125,11 @@ class AsyncPostgresHandler(AsyncBaseHandler):
         self.conn = await asyncpg.connect(self.db_url)
         while self.logging_running_event.is_set() or not self.queues["postgres"].empty():
             record = await self.queues["postgres"].get()
-            await self.conn.execute("INSERT INTO logs (level, message) VALUES ($1, $2)", record.levelname, record.getMessage())
+            await self.conn.execute(
+                "INSERT INTO logs (level, message) VALUES ($1, $2)",
+                record.levelname,
+                record.getMessage(),
+            )
             self.queues["postgres"].task_done()
 
     def emit(self, record):

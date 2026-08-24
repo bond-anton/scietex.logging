@@ -19,11 +19,11 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 redis = ["redis>=5.0.0"]
-valkey = ["valkey-glide~=2.2.0"]
+valkey = ["valkey-glide~=2.5.0"]
 
 # Specify multiple logging options combined
-all = ["redis>=5.0.0", "valkey-glide~=2.2.0"]
-dev = ["tox>=4.30.3", "redis>=5.0.0", "valkey-glide~=2.2.0"]
+all = ["redis>=5.0.0", "valkey-glide~=2.5.0"]
+dev = ["tox>=4.30.3", "redis>=5.0.0", "valkey-glide~=2.5.0"]
 lint = ["ruff"]
 test = ["pytest", "pytest-asyncio"]
 
