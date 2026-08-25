@@ -24,9 +24,22 @@ scietex.logging/
 │   ├── message_broker_handler.py # AsyncBrokerHandler (base class for broker backends)
 │   ├── redis_handler.py         # AsyncRedisHandler (Redis backend)
 │   └── valkey_handler.py        # AsyncValkeyHandler (Valkey backend)
+├── tests/
+│   ├── test_basic_handler.py
+│   ├── test_redis_handler.py
+│   ├── test_valkey_handler.py
+│   ├── test_formatter.py
+│   └── test_version.py
+├── docs/
+│   ├── index.md
+│   ├── examples.md
+│   ├── advanced.md
+│   ├── backends.md
+│   └── configuration.md
 ├── examples/
 │   ├── basic_console_logging.py
 │   ├── redis_logging.py
+│   ├── valkey_logging.py
 │   ├── console_and_redis_logging.py
 │   └── README.md
 ├── pyproject.toml               # Project configuration
@@ -99,6 +112,9 @@ uv run python examples/basic_console_logging.py
 # Redis logging (requires Redis running locally)
 uv run python examples/redis_logging.py
 
+# Valkey logging (requires Valkey running locally)
+uv run python examples/valkey_logging.py
+
 # Both console and Redis
 uv run python examples/console_and_redis_logging.py
 ```
@@ -148,5 +164,6 @@ uv run ruff format .
 ## Related Files
 
 - `/home/anton/Projects/scietex.logging/README.md` - User-facing documentation
+- `/home/anton/Projects/scietex.logging/docs/index.md` - Detailed documentation
 - `/home/anton/Projects/scietex.logging/pyproject.toml` - Build configuration
-- `/home/anton/Projects/scietex.logging/examples/README.md` - Example documentation (note: contains package name inconsistencies)
+- `/home/anton/Projects/scietex.logging/examples/README.md` - Example documentation
