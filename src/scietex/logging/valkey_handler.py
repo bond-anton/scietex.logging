@@ -17,17 +17,19 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
 
     This handler sends log records to a Valkey stream, enabling asynchronous
     logging without blocking the main application. The handler maintains a
-    separate worker to process Redis log records queued in an asyncio queue.
+    separate worker to process Valkey log records queued in an asyncio queue.
 
     Attributes:
         stream_name (str): The Valkey stream name where log entries are sent.
+        client (GlideClient | None): The Valkey client connection, or None if not connected.
 
     Methods:
-        connect_valkey():
+        connect():
             Connect to Valkey asynchronously.
-
-        _valkey_worker():
-            Worker to retrieve and send log records from the queue to Valkey.
+        disconnect():
+            Disconnect from Valkey asynchronously.
+        send_message():
+            Send log record to Valkey asynchronously.
     """
 
     def __init__(
@@ -45,11 +47,13 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
             stream_name (str): The Valkey stream name to which log records are sent.
             service_name (str, optional): Service name for log identification. Defaults to None.
             worker_id (int, optional): Identifier for the logging worker instance. Defaults to None.
-            valkey_config (dict, optional): Configuration dictionary for Valkey connection.
-                Defaults to {"host": "localhost", "port": 6379, "db": 0}.
+            valkey_config (GlideClientConfiguration, optional): Configuration for Valkey connection.
+                Defaults to a basic configuration with default host and port.
             **kwargs: Additional keyword arguments, such as `stdout_enable`.
 
-        Initializes the Valkey logging queue and adds the Valkey worker to the list of workers.
+        Attributes:
+            stream_name (str): The Valkey stream name where log entries are sent.
+            client (GlideClient | None): The Valkey client connection, or None if not connected.
         """
         super().__init__(
             service_name=service_name,
@@ -69,7 +73,6 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
         Connect to Valkey asynchronously.
 
         Initializes the Valkey client connection using the provided Valkey configuration.
-        Sets `decode_responses=True` for handling Valkey data in string format.
 
         Returns:
             None
@@ -92,9 +95,11 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
         """
         Send log record to Valkey asynchronously.
 
-        Args: record (LogRecord): The log record to send.
+        Args:
+            record (dict[str, str]): The log record to send as a dictionary.
 
-        Returns: None
+        Returns:
+            None
         """
 
         if self.client is not None:

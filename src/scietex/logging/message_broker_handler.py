@@ -17,18 +17,15 @@ class AsyncBrokerHandler(AsyncBaseHandler):
 
     Attributes:
         queue_name (str): The name of the queue for the handler.
-        client (Any): The client for sending logs to broker.
+        client (Any | None): The client for sending logs to broker, or None if not connected.
 
     Methods:
         connect():
             Connect to message broker asynchronously.
-
         disconnect():
             Disconnect from message broker asynchronously.
-
         send_message():
             Send message to message broker asynchronously.
-
         _worker():
             Worker to retrieve and send log records from the queue to broker.
     """
@@ -49,7 +46,9 @@ class AsyncBrokerHandler(AsyncBaseHandler):
             worker_id (int, optional): Identifier for the logging worker instance. Defaults to None.
             **kwargs: Additional keyword arguments, such as `stdout_enable`.
 
-        Initializes the logging queue and adds the message broker worker to the list of workers.
+        Attributes:
+            queue_name (str): The name of the queue for the handler.
+            client (Any | None): The client for sending logs to broker, or None if not connected.
         """
         super().__init__(service_name=service_name, worker_id=worker_id, **kwargs)
         self.queue_name: str = queue_name
@@ -73,7 +72,8 @@ class AsyncBrokerHandler(AsyncBaseHandler):
         Disconnect from Message broker asynchronously.
         Needs to be redefined in subclasses.
 
-        Returns: None
+        Returns:
+            None
         """
         if self.client is not None:
             self.client = None
@@ -83,9 +83,11 @@ class AsyncBrokerHandler(AsyncBaseHandler):
         Send log record to message broker asynchronously.
         Needs to be redefined in subclasses.
 
-        Args: record (LogRecord): The log record to send.
+        Args:
+            record (dict[str, str]): The log record to send as a dictionary.
 
-        Returns: None
+        Returns:
+            None
         """
 
     async def _worker(self) -> None:

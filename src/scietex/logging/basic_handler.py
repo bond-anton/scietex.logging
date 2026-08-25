@@ -21,17 +21,23 @@ class AsyncBaseHandler(logging.Handler):
         that process log records without blocking the main application flow.
         By default, `AsyncBaseHandler` provides a console logging backend that
         outputs log messages to the standard output. This backend can be disabled
-        if desired, and additional backends (such as Redis) can be added in
+        if desired, and additional backends (such as Redis or Valkey) can be added in
         subclasses.
 
     Attributes:
-        log_queues (dict): A dictionary of asyncio.Queue objects for each logging backend.
-        logging_accept_event (asyncio.Event): Event to signal when the handler can accept new logs.
+        log_queues (dict[str, asyncio.Queue]): A dictionary of asyncio.Queue objects
+            for each logging backend.
+        logging_accept_event (asyncio.Event): Event to signal when the handler can
+            accept new logs.
         logging_running_event (asyncio.Event): Event to signal when logging is active.
-        log_workers (list): List of worker coroutine functions for processing log messages.
-        log_workers_tasks (list): List of asyncio tasks for each worker, created in `start_logging`.
-        log_queue_put_tasks (list): List of asyncio tasks for queue put operations.
-            Periodically cleaned up when threshold is reached.
+        log_workers (list[Coroutine]): List of worker coroutine functions for processing
+            log messages.
+        log_workers_tasks (list[asyncio.Task]): List of asyncio tasks for each worker,
+            created in `start_logging`.
+        log_queue_put_tasks (list[asyncio.Task]): List of asyncio tasks for queue put
+            operations. Periodically cleaned up when threshold is reached.
+        _queue_put_cleanup_threshold (int): Threshold for triggering periodic cleanup
+            of put tasks.
 
     Methods:
         start_logging():
@@ -60,7 +66,7 @@ class AsyncBaseHandler(logging.Handler):
             service_name (str, optional): Name of the service for log identification.
                 Defaults to "Service".
             worker_id (int, optional): Identifier for the worker instance. Defaults to 1.
-            kwargs (dict): Additional arguments, including `stdout_enable`
+            **kwargs: Additional arguments, including `stdout_enable`
                 to enable/disable console logging and `queue_put_cleanup_threshold`
                 to configure the threshold for periodic cleanup of pending tasks.
 
@@ -229,7 +235,9 @@ class AsyncBaseHandler(logging.Handler):
         self.close()
 
     def _cleanup_queue_put_tasks(self) -> None:
-        """Remove completed tasks from log_queue_put_tasks to prevent memory leaks."""
+        """
+        Remove completed tasks from log_queue_put_tasks to prevent memory leaks.
+        """
         self.log_queue_put_tasks = [task for task in self.log_queue_put_tasks if not task.done()]
 
     async def _console_logging_worker(self) -> None:

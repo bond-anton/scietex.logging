@@ -21,13 +21,15 @@ class AsyncRedisHandler(AsyncBrokerHandler):
 
     Attributes:
         stream_name (str): The Redis stream name where log entries are sent.
+        client (redis.Redis | None): The Redis client connection, or None if not connected.
 
     Methods:
-        connect_redis():
+        connect():
             Connect to Redis asynchronously.
-
-        _redis_worker():
-            Worker to retrieve and send log records from the queue to Redis.
+        disconnect():
+            Disconnect from Redis asynchronously.
+        send_message():
+            Send log record to Redis asynchronously.
     """
 
     def __init__(
@@ -49,7 +51,9 @@ class AsyncRedisHandler(AsyncBrokerHandler):
                 Defaults to {"host": "localhost", "port": 6379, "db": 0}.
             **kwargs: Additional keyword arguments, such as `stdout_enable`.
 
-        Initializes the Redis logging queue and adds the Redis worker to the list of workers.
+        Attributes:
+            stream_name (str): The Redis stream name where log entries are sent.
+            client (redis.Redis | None): The Redis client connection, or None if not connected.
         """
         super().__init__(
             service_name=service_name,
@@ -89,9 +93,11 @@ class AsyncRedisHandler(AsyncBrokerHandler):
         """
         Send log record to Redis asynchronously.
 
-        Args: record (LogRecord): The log record to send.
+        Args:
+            record (dict[str, str]): The log record to send as a dictionary.
 
-        Returns: None
+        Returns:
+            None
         """
         if self.client is not None:
             await self.client.xadd(self.stream_name, record)

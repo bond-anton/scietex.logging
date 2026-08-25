@@ -1,16 +1,17 @@
 """
 scietex.logging: An Asynchronous Logging Package
 
-This package provides a flexible framework for asynchronous logging, supporting multiple logging
-backends, such as the console and Redis. It leverages `asyncio` to allow non-blocking logging,
-ideal for applications requiring high-performance logging without impacting main application tasks.
+This package provides a flexible framework for asynchronous logging, supporting
+multiple logging backends, such as the console, Redis, and Valkey. It leverages
+`asyncio` to allow non-blocking logging, ideal for applications requiring
+high-performance logging without impacting main application tasks.
 
 Features:
 ---------
 - **Asynchronous Logging**: Log messages are queued and handled asynchronously, ensuring minimal
   interference with the main application flow.
-- **Multiple Backends**: Console and Redis logging are supported out of the box, with an option
-  to extend to other backends like PostgreSQL or other databases.
+- **Multiple Backends**: Console, Redis, and Valkey logging are supported out of the box, with an
+  option to extend to other backends.
 - **Configurable Logging Levels**: Supports all standard logging levels
   (e.g., DEBUG, INFO, WARNING, ERROR, CRITICAL).
 - **Optional Dependency Management**: Only install the necessary dependencies for the backends
@@ -18,11 +19,10 @@ Features:
 
 Dependencies:
 -------------
-This package requires Python 3.7+ and the standard `logging` library.
+This package requires Python 3.10+ and the standard `logging` library.
 Additional dependencies are required for certain backends:
 - **Redis support**: Install with `pip install scietex.logging[redis]` to enable Redis logging.
-- **PostgreSQL support**: *Coming Soon!* Install with `pip install scietex.logging[postgres]`
-  to enable PostgreSQL logging.
+- **Valkey support**: Install with `pip install scietex.logging[valkey]` to enable Valkey logging.
 
 Installation:
 -------------
@@ -30,9 +30,9 @@ Install the base package with:
     pip install scietex.logging
 
 To install optional dependencies for specific backends, use the extras syntax:
-    pip install scietex.logging[redis]     # To enable Redis backend
-    pip install scietex.logging[postgres]  # To enable PostgreSQL backend
-    pip install scietex.logging[all]       # To enable all backends
+    pip install scietex.logging[redis]   # To enable Redis backend
+    pip install scietex.logging[valkey]  # To enable Valkey backend
+    pip install scietex.logging[all]     # To enable all backends
 
 Example Usage:
 --------------
@@ -70,10 +70,27 @@ Advanced usage with Redis logging:
 
     asyncio.run(main())
 
+Advanced usage with Valkey logging:
+
+    import logging
+    from scietex.logging import AsyncValkeyHandler
+
+    logger = logging.getLogger("MyAsyncLogger")
+    logger.setLevel(logging.DEBUG)
+    handler = AsyncValkeyHandler(stream_name="my_log_stream")
+    logger.addHandler(handler)
+
+    async def main():
+        await handler.start_logging()
+        logger.error("This error message will be logged to Valkey!")
+        await handler.stop_logging()
+
+    asyncio.run(main())
+
 Extending the Package:
 ----------------------
-Custom backends can be implemented by subclassing `AsyncBaseHandler` and adding new worker methods
-for additional queues.
+Custom backends can be implemented by subclassing `AsyncBrokerHandler` and implementing the
+`connect()`, `disconnect()`, and `send_message()` methods.
 
 See the package documentation for more details on extending and configuring custom logging
 behaviors.

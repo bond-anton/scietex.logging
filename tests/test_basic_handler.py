@@ -135,40 +135,38 @@ def test_cleanup_threshold_custom():
 async def test_emit_high_volume_cleanup():
     """Test that periodic cleanup is triggered when threshold is reached."""
     handler = AsyncBaseHandler(
-        service_name="TestService", 
-        worker_id=1,
-        queue_put_cleanup_threshold=5
+        service_name="TestService", worker_id=1, queue_put_cleanup_threshold=5
     )
     await handler.start_logging()
-    
+
     logger = logging.getLogger("TestLogger")
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
-    
+
     # Track cleanup calls
     cleanup_count = 0
     original_cleanup = handler._cleanup_queue_put_tasks
-    
+
     def tracked_cleanup():
         nonlocal cleanup_count
         cleanup_count += 1
         original_cleanup()
-    
+
     handler._cleanup_queue_put_tasks = tracked_cleanup
-    
+
     # Emit more logs than threshold
     for i in range(10):
         logger.info("Test log message %d", i)
-    
+
     # Verify that cleanup was triggered (at least once, likely multiple times)
     assert cleanup_count >= 1, "Cleanup should have been triggered when threshold was reached"
-    
+
     # After cleanup is triggered, the list should be cleaned up (remove completed tasks)
     # Wait for worker to process tasks
     await asyncio.sleep(0.2)
     handler._cleanup_queue_put_tasks()
-    
+
     # Cleanup should have removed some completed tasks
     assert len(handler.log_queue_put_tasks) < 10
-    
+
     await handler.stop_logging()

@@ -1,12 +1,12 @@
 # scietex.logging
 
-**scietex.logging** is an asynchronous logging package designed for high-performance applications that require non-blocking logging. It uses `asyncio` to manage log message queues and provides multiple backends, such as console and Redis logging, allowing for easy extension to other logging targets.
+**scietex.logging** is an asynchronous logging package designed for high-performance applications that require non-blocking logging. It uses `asyncio` to manage log message queues and provides multiple backends, such as console, Redis, and Valkey logging, allowing for easy extension to other logging targets.
 
 ## Features
 
 - **Asynchronous Logging**: Log messages are queued and handled asynchronously, reducing impact on application performance.
-- **Multiple Backends**: Supports console and Redis logging out of the box.
-- **Flexible Logging Levels**: Compatible with Python’s standard logging levels (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).
+- **Multiple Backends**: Supports console, Redis, and Valkey logging out of the box.
+- **Flexible Logging Levels**: Compatible with Python's standard logging levels (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).
 - **Optional Dependencies**: Only installs dependencies for the specific backends you need.
 
 ## Examples
@@ -17,10 +17,10 @@ For detailed descriptions of each example, refer to the [Examples README](./exam
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.10+
 - Additional dependencies for specific backends:
-  - **Redis support**: `redis.asyncio` (`pip install scietex.logging[redis]`)
-  - **PostgreSQL support**: *Coming Soon!* `asyncpg` (`pip install scietex.logging[postgres]`)
+  - **Redis support**: `redis` (`pip install scietex.logging[redis]`)
+  - **Valkey support**: `valkey-glide` (`pip install scietex.logging[valkey]`)
 
 ## Installation
 
@@ -29,15 +29,15 @@ Install the base package with:
 pip install scietex.logging
 ```
 
-To install all optional dependencies (including Redis and upcoming PostgreSQL support), use:
+To install all optional dependencies (including Redis and Valkey support), use:
 ```bash
 pip install scietex.logging[all]
 ```
 
 Or, to install individual dependencies as needed:
 ```bash
-pip install scietex.logging[redis]     # For Redis logging
-pip install scietex.logging[postgres]  # For PostgreSQL logging
+pip install scietex.logging[redis]   # For Redis logging
+pip install scietex.logging[valkey]  # For Valkey logging
 ```
 
 ## Basic Usage
@@ -90,6 +90,30 @@ async def main():
 asyncio.run(main())
 ```
 
+### Valkey Logging
+This example demonstrates logging to a Valkey stream.
+
+```python
+import logging
+from scietex.logging import AsyncValkeyHandler
+import asyncio
+
+# Set up logger and Valkey handler
+logger = logging.getLogger("MyAsyncLogger")
+logger.setLevel(logging.DEBUG)
+handler = AsyncValkeyHandler(stream_name="my_log_stream")
+logger.addHandler(handler)
+
+
+async def main():
+    await handler.start_logging()
+    logger.error("This error message will be logged to Valkey!")
+    await handler.stop_logging()
+
+
+asyncio.run(main())
+```
+
 ## Configuration
 
 scietex.logging is designed to allow easy configuration of additional backends and custom logging formats:
@@ -105,36 +129,35 @@ handler.setFormatter(formatter)
 
 ## Extending scietex.logging
 
-To add support for additional logging backends, subclass AsyncBaseHandler and implement new workers as shown in the Redis example. The structure of the package allows for seamless extension by adding new worker methods for different logging destinations.
+To add support for additional logging backends, subclass `AsyncBrokerHandler` and implement `connect()`, `disconnect()`, and `send_message()` methods. The `AsyncBaseHandler` class provides console logging by default, while `AsyncBrokerHandler` is designed for message broker backends like Redis or Valkey.
 
 ### Example: Custom Database Handler
 
 ```python
-from scietex.logging import AsyncBaseHandler
-import asyncpg
+from scietex.logging import AsyncBrokerHandler
 
 
-class AsyncPostgresHandler(AsyncBaseHandler):
+class AsyncPostgresHandler(AsyncBrokerHandler):
     def __init__(self, db_url):
-        super().__init__()
+        super().__init__(queue_name="postgres")
         self.db_url = db_url
-        self.queues["postgres"] = asyncio.Queue()
-        self.workers.append(self._postgres_worker())
+        self._db_conn = None
 
-    async def _postgres_worker(self):
-        self.conn = await asyncpg.connect(self.db_url)
-        while self.logging_running_event.is_set() or not self.queues["postgres"].empty():
-            record = await self.queues["postgres"].get()
-            await self.conn.execute(
-                "INSERT INTO logs (level, message) VALUES ($1, $2)",
-                record.levelname,
-                record.getMessage(),
-            )
-            self.queues["postgres"].task_done()
+    async def connect(self):
+        import asyncpg
 
-    def emit(self, record):
-        super().emit(record)
-        asyncio.create_task(self.queues["postgres"].put(record))
+        self._db_conn = await asyncpg.connect(self.db_url)
+
+    async def disconnect(self):
+        if self._db_conn:
+            await self._db_conn.close()
+
+    async def send_message(self, record):
+        await self._db_conn.execute(
+            "INSERT INTO logs (level, message) VALUES ($1, $2)",
+            record["level"],
+            record["message"],
+        )
 ```
 
 ## Contributing

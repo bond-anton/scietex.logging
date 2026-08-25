@@ -37,6 +37,12 @@ class ScietexFormatter(logging.Formatter):
 
     Attributes:
         worker_name (str): A formatted string that includes the service name and worker ID.
+
+    Methods:
+        formatTime:
+            Format the timestamp for the log record in ISO 8601 UTC by default.
+        format:
+            Format the specified log record as text with worker name and abbreviated levels.
     """
 
     def __init__(
@@ -52,8 +58,8 @@ class ScietexFormatter(logging.Formatter):
         Args:
             service_name (str): The name of the service using this formatter.
             worker_id (int, optional): The worker ID. Defaults to 1 if not specified.
-            fmt (str, optional): The log message format string. Defaults to a
-                                 specific format if not provided.
+            fmt (str, optional): The log message format string. Defaults to
+                "%(asctime)s - %(levelname)s - [%(worker_name)s] - %(message)s".
             datefmt (str, optional): The date format string. Defaults to None.
         """
         if worker_id is None:
