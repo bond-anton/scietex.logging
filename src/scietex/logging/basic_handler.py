@@ -82,7 +82,7 @@ class AsyncBaseHandler(logging.Handler):
         if service_name is None:
             service_name = "Service"
         self.formatter = ScietexFormatter(service_name=service_name, worker_id=worker_id)
-        self.logging_accept_event = asyncio.Event()  # Indicates if logging is running
+        self.logging_accept_event = asyncio.Event()  # Indicates if logging accepting events
         self.logging_running_event = asyncio.Event()  # Indicates if logging is running
 
         self.log_queues: dict[str, asyncio.Queue[logging.LogRecord]] = {}
@@ -126,28 +126,28 @@ class AsyncBaseHandler(logging.Handler):
         Returns:
             None
         """
-        if self.logging_accept_event.is_set():
-            # Schedule an asynchronous task to put the message in each queue
-            for _, queue in self.log_queues.items():
-                try:
-                    # Use asyncio.create_task to handle each put asynchronously
-                    queue_put_task = asyncio.create_task(queue.put(record))
-                    self.log_queue_put_tasks.append(queue_put_task)  # Track the put task
-                    # Periodic cleanup to prevent unbounded growth
-                    if len(self.log_queue_put_tasks) >= self._queue_put_cleanup_threshold:
-                        self._cleanup_queue_put_tasks()
-                except asyncio.QueueFull:
-                    # Queue is full; could log an error or drop the message based on policy
-                    pass
+        if not self.logging_accept_event.is_set():
+            return
 
-                except asyncio.InvalidStateError:
-                    # Happens if the event loop is in an invalid state for this operation
-                    pass
-                except Exception:
-                    # Log unexpected errors for visibility without halting other tasks
-                    pass
-        else:
-            pass
+        # Schedule an asynchronous task to put the message in each queue
+        for _, queue in self.log_queues.items():
+            try:
+                # Use asyncio.create_task to handle each put asynchronously
+                queue_put_task = asyncio.create_task(queue.put(record))
+                self.log_queue_put_tasks.append(queue_put_task)  # Track the put task
+                # Periodic cleanup to prevent unbounded growth
+                if len(self.log_queue_put_tasks) >= self._queue_put_cleanup_threshold:
+                    self._cleanup_queue_put_tasks()
+            except asyncio.QueueFull:
+                # Queue is full; could log an error or drop the message based on policy
+                pass
+
+            except asyncio.InvalidStateError:
+                # Happens if the event loop is in an invalid state for this operation
+                pass
+            except Exception:
+                # Log unexpected errors for visibility without halting other tasks
+                pass
 
     async def stop_logging(self, timeout: float = 5.0) -> None:
         """
