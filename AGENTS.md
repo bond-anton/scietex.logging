@@ -20,7 +20,7 @@ scietex.logging/
 ├── src/scietex/logging/
 │   ├── __init__.py              # Public API exports
 │   ├── basic_handler.py         # AsyncBaseHandler (base class with console backend)
-│   ├── formatter.py             # NTSFormatter and level_abbreviation helper
+│   ├── formatter.py             # ScietexFormatter and level_abbreviation helper
 │   ├── message_broker_handler.py # AsyncBrokerHandler (base class for broker backends)
 │   ├── redis_handler.py         # AsyncRedisHandler (Redis backend)
 │   └── valkey_handler.py        # AsyncValkeyHandler (Valkey backend)
@@ -40,7 +40,7 @@ scietex.logging/
 
 - `AsyncBaseHandler` - Base handler with console logging backend (always available)
 - `AsyncBrokerHandler` - Base handler for message broker backends
-- `NTSFormatter` - Custom formatter with worker name and 3-letter log level abbreviations
+- `ScietexFormatter` - Custom formatter with worker name and 3-letter log level abbreviations
 - `AsyncRedisHandler` - Redis logging backend (optional, requires `[redis]` extra)
 - `AsyncValkeyHandler` - Valkey logging backend (optional, requires `[valkey]` extra)
 
@@ -74,7 +74,7 @@ logging.Handler (standard library)
 3. **Worker Pattern**: Each backend has its own queue and worker coroutine
 4. **Graceful Shutdown**: `stop_logging()` waits for queues to drain with configurable timeout (default 5s)
 
-### NTSFormatter
+### ScietexFormatter
 
 - Service name and worker ID included in logs: `{service_name}:{worker_id}`
 - Log levels abbreviated: `DBG`, `INF`, `WRN`, `ERR`, `CRT`
@@ -126,9 +126,8 @@ uv run ruff check .
 
 ## Known Issues & Gotchas
 
-1. The example `README.md` references `nts.logging` instead of `scietex.logging` - this is a documentation inconsistency
-2. PostgreSQL support is mentioned in docs but not yet implemented (no `postgres` extra defined)
-3. The `__init__.py` imports Redis/Valkey handlers conditionally - ensure the `[redis]` or `[valkey]` extras are installed
+1. PostgreSQL support is mentioned in docs but not yet implemented (no `postgres` extra defined)
+2. The `__init__.py` imports Redis/Valkey handlers conditionally - ensure the `[redis]` or `[valkey]` extras are installed
 
 ## Development Commands
 

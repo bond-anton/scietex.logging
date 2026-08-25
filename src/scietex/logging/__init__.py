@@ -80,16 +80,16 @@ behaviors.
 
 """
 
-__version__ = "0.1.3"
+__version__ = "0.2.0"
 
 from .basic_handler import AsyncBaseHandler
-from .formatter import NTSFormatter
+from .formatter import ScietexFormatter
 from .message_broker_handler import AsyncBrokerHandler
 
 __all__ = [
     "AsyncBaseHandler",
     "AsyncBrokerHandler",
-    "NTSFormatter",
+    "ScietexFormatter",
 ]
 
 try:

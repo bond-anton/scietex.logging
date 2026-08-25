@@ -9,7 +9,7 @@ import sys
 from collections.abc import Coroutine
 from typing import Any
 
-from .formatter import NTSFormatter
+from .formatter import ScietexFormatter
 
 
 class AsyncBaseHandler(logging.Handler):
@@ -75,7 +75,7 @@ class AsyncBaseHandler(logging.Handler):
             worker_id = 1
         if service_name is None:
             service_name = "Service"
-        self.formatter = NTSFormatter(service_name=service_name, worker_id=worker_id)
+        self.formatter = ScietexFormatter(service_name=service_name, worker_id=worker_id)
         self.logging_accept_event = asyncio.Event()  # Indicates if logging is running
         self.logging_running_event = asyncio.Event()  # Indicates if logging is running
 

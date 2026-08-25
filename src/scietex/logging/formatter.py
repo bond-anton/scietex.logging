@@ -27,9 +27,9 @@ def level_abbreviation(log_level: int) -> str:
     return level_map.get(log_level, f"{log_level:03d}")
 
 
-class NTSFormatter(logging.Formatter):
+class ScietexFormatter(logging.Formatter):
     """
-    Custom logging formatter for NTS services.
+    Custom logging formatter for Scietex services.
 
     This formatter enriches log records with additional information such as
     the worker identifier, formats log levels into 3-letter abbreviations,
@@ -47,7 +47,7 @@ class NTSFormatter(logging.Formatter):
         datefmt: str | None = None,
     ) -> None:
         """
-        Initialize the NTSFormatter instance.
+        Initialize the ScietexFormatter instance.
 
         Args:
             service_name (str): The name of the service using this formatter.
