@@ -1,17 +1,15 @@
 """Asynchronous Valkey logging handler for non-blocking logging."""
 
+from .config import LoggingConfig, ValkeyConfig, optional_dependency_error
+
 try:
     from glide import GlideClient, GlideClientConfiguration, NodeAddress
 except ImportError as e:
-    raise ImportError(
-        "The 'valkey-glide' module is required to use this feature. "
-        "Please install it by running:\n\n    pip install scietex.logging[valkey]\n"
-    ) from e
+    raise ImportError(optional_dependency_error("valkey-glide", "valkey")) from e
 
 import logging
 from collections.abc import Callable
 
-from .config import LoggingConfig, ValkeyConfig
 from .message_broker_handler import AsyncBrokerHandler
 
 

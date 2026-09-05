@@ -47,5 +47,6 @@ The package is small: ~1085 lines of source across 8 modules under
 - **Class hierarchy**: `logging.Handler` → `AsyncLoggingHandler` (pure
   machinery, no sink) → `AsyncBaseHandler` (registers `ConsoleBackend` peer) →
   `AsyncBrokerHandler` → {`AsyncRedisHandler`, `AsyncValkeyHandler`}
-- **Tests**: pytest + pytest-asyncio; Redis/Valkey tests require live servers
+- **Tests**: pytest + pytest-asyncio; Redis tests require a live server, and the
+  Valkey end-to-end test skips when no Valkey server is reachable
 - **Tooling**: uv (lockfile), tox (format/lint/type/py314), ruff, `ty` type checker

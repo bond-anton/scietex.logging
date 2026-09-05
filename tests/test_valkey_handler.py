@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import socket
 
 import pytest
 from glide import GlideClient, GlideClientConfiguration, MaxId, MinId, NodeAddress
@@ -11,6 +12,19 @@ from scietex.logging import (
 )  # Replace with actual module path
 
 
+def _valkey_server_reachable() -> bool:
+    """Return True when a TCP connection to the local Valkey node can be established."""
+    try:
+        with socket.create_connection(("localhost", 6379), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(
+    not _valkey_server_reachable(),
+    reason="No Valkey server reachable at localhost:6379; skipping end-to-end test.",
+)
 @pytest.mark.asyncio
 async def test_valkey_handler_logs_to_stream():
     """Testing logging to stream."""

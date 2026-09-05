@@ -175,7 +175,11 @@ connect/disconnect/send_message contract concrete backends implement.
 - `async connect()` — `message_broker_handler.py:63`. Abstract; subclass hook.
 - `async disconnect()` — `message_broker_handler.py:76`. Abstract; subclass hook.
 - `async send_message(record: dict[str, str])` — `message_broker_handler.py:89`.
-  Abstract; subclass hook.
+  Abstract; subclass hook. `record` is a serializable log entry keyed by
+  `level`, `message`, `name`, and `time`. Each concrete adapter translates it to
+  the argument shape its client expects (Redis `xadd` takes the dict directly;
+  Valkey-glide `xadd` takes `record.items()`). This adapter difference is
+  intentional and documented.
 - `async _worker()` — `message_broker_handler.py:104`. Calls `connect()`, loops
   draining the broker queue, builds a `dict` log entry, calls `send_message`,
   then `disconnect()` on exit.
@@ -212,6 +216,8 @@ apps implementing custom backends (per docs).
   decode_responses=True)` if `client is None`.
 - `async disconnect()` — `redis_handler.py:84`. `await client.aclose()`.
 - `async send_message(record)` — `redis_handler.py:92`. `await client.xadd(stream_name, record)`.
+  Redis `xadd` accepts the `dict[str, str]` log entry directly (see the adapter
+  note under `AsyncBrokerHandler.send_message`).
 
 **Depends on.** `redis.asyncio` (hard import, raises descriptive ImportError if
 absent); `message_broker_handler.AsyncBrokerHandler`.
@@ -238,6 +244,9 @@ the `valkey-glide` client.
   if `client is None`; swallows `ClosingError`.
 - `async disconnect()` — `valkey_handler.py:86`. `await client.close()`.
 - `async send_message(record)` — `valkey_handler.py:94`. `await client.xadd(stream_name, record.items())`.
+  Valkey-glide `xadd` expects `record.items()` rather than the dict itself — an
+  intentional, documented adapter difference (see the adapter note under
+  `AsyncBrokerHandler.send_message`).
 
 **Depends on.** `glide` (`ClosingError`, `GlideClient`, `GlideClientConfiguration`,
 `NodeAddress`) — hard import, raises descriptive ImportError if absent;

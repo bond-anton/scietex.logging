@@ -111,11 +111,16 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         """
         Send a log record to the message broker asynchronously.
 
-        Subclasses must deliver the record to the broker. A failure must raise so the
-        worker can report it without acknowledging the queue task.
+        ``record`` is a serializable log entry: a ``dict[str, str]`` mapping the keys
+        ``level``, ``message``, ``name``, and ``time`` to their string values. Each
+        concrete adapter translates the entry to the argument shape its client expects
+        (e.g. Redis ``xadd`` accepts the dict directly, while Valkey-glide ``xadd``
+        expects ``record.items()``). A failure must raise so the worker can report it
+        without acknowledging the queue task.
 
         Args:
-            record (dict[str, str]): The log record to send as a dictionary.
+            record (dict[str, str]): The log record to send, keyed by ``level``,
+                ``message``, ``name``, and ``time``.
 
         Returns:
             None

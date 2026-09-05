@@ -91,7 +91,10 @@ None detected. The import graph is acyclic and strictly layered.
    `pyproject.toml` extras (`[redis]`, `[valkey]`, `[all]`) → third-party
    clients → guarded imports in `redis_handler.py` / `valkey_handler.py` →
    guarded re-exports in `__init__.py`. The guard chain is what keeps the base
-   install dependency-free.
+   install dependency-free. Each backend module raises its descriptive
+   `ImportError` via the shared `optional_dependency_error(module_name, extra)`
+   helper in `config.py`, so the two-layer guard (module-level raise +
+   package-level catch in `__init__.py`) cannot drift in message text.
 
 ## Third-party runtime dependencies (by module)
 
@@ -104,10 +107,8 @@ None detected. The import graph is acyclic and strictly layered.
 ## Dev / tooling dependencies (not runtime)
 
 `tox` (format/lint/type/py314 envs), `ruff`, `pytest`, `pytest-asyncio`,
-`pytest-sugar`, `coverage`, `ty` (type checker). Note: `tox.ini` pins
-`valkey-glide~=2.2.0` in the `type` and default envs while `pyproject.toml`
-declares `~=2.5.0` — a version skew between tox and packaging config
-(see hotspots.md).
+`pytest-sugar`, `coverage`, `ty` (type checker). `tox.ini` and `pyproject.toml`
+both pin `valkey-glide~=2.5.0` (see hotspots.md).
 
 ## External infrastructure dependencies (runtime)
 

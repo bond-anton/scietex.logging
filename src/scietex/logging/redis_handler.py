@@ -1,17 +1,15 @@
 """Asynchronous Redis logging handler for non-blocking logging."""
 
+from .config import LoggingConfig, RedisConfig, optional_dependency_error
+
 try:
     import redis.asyncio as redis
 except ImportError as e:
-    raise ImportError(
-        "The 'redis' module is required to use this feature. "
-        "Please install it by running:\n\n    pip install scietex.logging[redis]\n"
-    ) from e
+    raise ImportError(optional_dependency_error("redis", "redis")) from e
 
 import logging
 from collections.abc import Callable
 
-from .config import LoggingConfig, RedisConfig
 from .message_broker_handler import AsyncBrokerHandler
 
 

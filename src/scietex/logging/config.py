@@ -62,3 +62,11 @@ def validate_queue_maxsize(value: int) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise ValueError(f"queue_maxsize must be a positive int, got {value!r}")
     return value
+
+
+def optional_dependency_error(module_name: str, extra: str) -> str:
+    """Return the descriptive ImportError message for a missing optional backend dependency."""
+    return (
+        f"The '{module_name}' module is required to use this feature. "
+        f"Please install it by running:\n\n    pip install scietex.logging[{extra}]\n"
+    )

@@ -6,6 +6,7 @@ from scietex.logging.config import (
     LoggingConfig,
     RedisConfig,
     ValkeyConfig,
+    optional_dependency_error,
     validate_queue_maxsize,
 )
 
@@ -46,3 +47,13 @@ def test_validate_queue_maxsize_accepts_positive_int():
 def test_validate_queue_maxsize_rejects_non_positive_int(bad):
     with pytest.raises(ValueError):
         validate_queue_maxsize(bad)
+
+
+@pytest.mark.parametrize(
+    ("module_name", "extra"),
+    [("redis", "redis"), ("valkey-glide", "valkey")],
+)
+def test_optional_dependency_error_message(module_name, extra):
+    msg = optional_dependency_error(module_name, extra)
+    assert module_name in msg
+    assert f"pip install scietex.logging[{extra}]" in msg

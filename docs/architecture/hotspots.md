@@ -140,8 +140,11 @@ implement them. The two concrete implementations differ in signature details
 (e.g. Valkey passes `record.items()` to `xadd`, Redis passes `record`).
 
 **Why significant.** The extension contract is now enforced by the type system
-(`abc`), but the Redis/Valkey `xadd` argument difference (`dict` vs
-`dict.items()`) is a subtle asymmetry.
+(`abc`). The Redis/Valkey `xadd` argument difference (`dict` vs `dict.items()`)
+is an **intentional, documented adapter difference**: the abstract
+`send_message` contract states `record` is a serializable `dict[str, str]` of
+`{level, message, name, time}`, and each concrete adapter translates it to the
+argument shape its client expects. No uniform client wrapper was added.
 
 **Related.** `components.md`; `docs/advanced.md` (custom backend examples).
 
@@ -156,11 +159,12 @@ imports in `__init__.py:112-123`.
 raises a descriptive `ImportError`; `__init__.py` wraps each import in
 try/except `ImportError` to conditionally expose the class.
 
-**Why significant.** The guard logic is split across two layers (module-level
-raise + package-level catch). Importing `redis_handler` directly (as tests and
-examples do) raises if `redis` is absent, while importing from the package root
-silently omits the class. This dual behavior is a subtle seam in the
-optional-dependency design.
+**Why significant.** **Resolved.** The two-layer guard structure (module-level
+raise + package-level catch) is intentional and retained, but the error-message
+text is now centralized in the shared `optional_dependency_error(module_name,
+extra)` helper in `config.py`, which both backend modules call when raising
+(`raise ImportError(optional_dependency_error(...)) from e`). The layers can no
+longer drift in message text.
 
 **Related.** `dependencies.md`; `tests/test_redis_handler.py`,
 `tests/test_valkey_handler.py` (import from submodules directly).
@@ -169,15 +173,15 @@ optional-dependency design.
 
 ## 9. Version skew between tox and packaging config
 
-**Location.** `tox.ini` (`valkey-glide~=2.2.0` in `type` and default envs,
-lines 29, 37) vs `pyproject.toml` (`valkey-glide~=2.5.0`, line 22).
+**Location.** `tox.ini` (`valkey-glide~=2.5.0` in `type` and default envs,
+lines 29, 37) and `pyproject.toml` (`valkey-glide~=2.5.0`, line 22).
 
-**What it appears to do.** tox installs a different `valkey-glide` version
-range than the package declares.
+**What it appears to do.** tox and the package declare the same `valkey-glide`
+version range.
 
-**Why significant.** CI/tox environments may exercise a different client
-version than what end users install, potentially masking or introducing
-incompatibilities. A config-level inconsistency worth reconciling.
+**Why significant.** **Resolved.** `tox.ini` was aligned from `~=2.2.0` to
+`~=2.5.0`, matching `pyproject.toml`. CI/tox now exercises the same client
+version range that end users install.
 
 **Related.** `pyproject.toml`, `tox.ini`.
 
@@ -191,10 +195,12 @@ lines 17-30).
 **What it appears to do.** CI runs the full pytest suite with a Redis service
 but no Valkey service.
 
-**Why significant.** `tests/test_valkey_handler.py` requires a live Valkey
-server and is not skipped when absent, so it would fail in CI unless Valkey is
-otherwise available. The test suite's external-server dependency is not
-uniformly provisioned.
+**Why significant.** **Resolved.** The Valkey end-to-end test in
+`tests/test_valkey_handler.py` now carries a connectivity-probe skip guard
+(`@pytest.mark.skipif` via a `_valkey_server_reachable()` socket probe), so it
+skips cleanly when no Valkey server is reachable instead of failing. Valkey is
+still not provisioned in CI — the skip-guard approach was chosen over CI
+provisioning.
 
 **Related.** `tests/test_valkey_handler.py`, `tests/test_redis_handler.py`.
 
