@@ -255,15 +255,16 @@ apps implementing custom backends (per docs).
   — passes `queue_name="redis"` to super. Converts `redis_config` into a typed
   `RedisConfig` stored as `self.config.backend_config`; `RedisConfig` mirrors
   the full plain-option surface of `redis.Redis`, so legitimate client options
-  are accepted (unknown keys raise `TypeError`). `self.client_config` remains
-  the raw dict for the redis client call, defaulting to
+  are accepted (unknown keys raise `TypeError`). `self.client_config` is a
+  read-only `asdict` view of `backend_config`, defaulting to
   `{"host": "localhost", "port": 6379, "db": 0}`. Accepts an optional
   `formatter=` kwarg (AR-024).
-- `async connect()` — `redis_handler.py:91`. Creates `redis.Redis(**config,
-  decode_responses=True)` if `client is None`, then pings to probe connectivity
-  before setting `self.client`. If `ping()` fails, the locally created client is
-  closed via `aclose()` before re-raising, so no pool leaks on a failed connect
-  (AR-033).
+- `async connect()` — `redis_handler.py:91`. Builds `redis.Redis(**cfg)` from
+  `self.config.backend_config` if `client is None`, honoring the user's
+  `decode_responses` value instead of forcing it, then pings to probe
+  connectivity before setting `self.client`. If `ping()` fails, the locally
+  created client is closed via `aclose()` before re-raising, so no pool leaks on
+  a failed connect (AR-033).
 - `async disconnect()` — `redis_handler.py:111`. `await client.aclose()`.
 - `async send_message(record)` — `redis_handler.py:119`. Raises `RuntimeError`
   when `self.client is None` (AR-034); otherwise `await client.xadd(stream_name, record)`.
@@ -289,15 +290,16 @@ the `valkey-glide` client.
   valkey_config=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)`
   — passes `queue_name="valkey"` to super. `valkey_config` is a **dict**
   (mirroring Redis's seam, AR-025) whose keys mirror
-  `GlideClientConfiguration`'s plain options; `addresses` is a list of
+  `GlideClientConfiguration`'s scalar plain options; `addresses` is a list of
   `(host, port)` tuples defaulting to `[("localhost", 6379)]`. A typed
-  `ValkeyConfig` (the addresses) is stored as `self.config.backend_config`;
-  `self.client_config` remains the raw dict, translated into a
-  `GlideClientConfiguration` inside `connect()`. Accepts an optional
-  `formatter=` kwarg (AR-024).
-- `async connect()` — `valkey_handler.py:94`. Translates the raw `client_config`
-  dict into a `GlideClientConfiguration` (`addresses` tuples → `NodeAddress`
-  objects) and calls `await GlideClient.create(config)` if `client is None`.
+  `ValkeyConfig` is stored as `self.config.backend_config`; `self.client_config`
+  is a read-only `asdict` view of it. Accepts an optional `formatter=` kwarg
+  (AR-024).
+- `async connect()` — `valkey_handler.py:94`. Translates
+  `self.config.backend_config` into a `GlideClientConfiguration` (`addresses`
+  tuples → `NodeAddress` objects, `None`-valued fields dropped so glide applies
+  its own defaults) and calls `await GlideClient.create(config)` if `client is
+  None`.
 - `async disconnect()` — `valkey_handler.py:117`. `await client.close()`.
 - `async send_message(record)` — `valkey_handler.py:125`. Raises `RuntimeError`
   when `self.client is None` (AR-034); otherwise `await client.xadd(stream_name, record.items())`.

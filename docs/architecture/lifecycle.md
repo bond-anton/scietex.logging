@@ -24,8 +24,10 @@ then registers `log_queues[queue_name]` and `self._worker` via
 `register_backend`. Sets `client = None`.
 
 **`AsyncRedisHandler.__init__`** / **`AsyncValkeyHandler.__init__`**: call super
-with `queue_name="redis"` / `"valkey"`, store `stream_name` and `client_config`.
-No connection is opened at construction.
+with `queue_name="redis"` / `"valkey"` and `backend_config` (a typed
+`RedisConfig` / `ValkeyConfig`), then store `stream_name`. `client_config` is a
+derived read-only `asdict` view of `backend_config`, not a stored raw dict. No
+connection is opened at construction.
 
 **State after construction.** Events unset; queues empty; worker factories
 registered (not yet invoked); no client connection. The handler is inert until

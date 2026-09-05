@@ -127,6 +127,11 @@ formatter = logging.Formatter(
 handler.setFormatter(formatter)
 ```
 
+A formatter affects the **console (stdout) output only**; broker backends build
+their payloads from the handler's `service_name`/`worker_id` config and the
+record directly, so they are invariant under `setFormatter`. See
+[docs/configuration.md](docs/configuration.md#formatter-scope-console-output-only).
+
 ## Extending scietex.logging
 
 To add support for additional logging backends, subclass `AsyncBrokerHandler` and implement `connect()`, `disconnect()`, and `send_message()` methods. `AsyncLoggingHandler` is the pure-machinery base that owns the queue/worker infrastructure but no sink of its own; `AsyncBaseHandler` builds on it and registers the console as a peer backend (enabled by default via `stdout_enable`), while `AsyncBrokerHandler` is designed for message broker backends like Redis or Valkey.

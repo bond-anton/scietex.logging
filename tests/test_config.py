@@ -77,6 +77,43 @@ def test_valkey_config_defaults():
     assert cfg.addresses == [("localhost", 6379)]
 
 
+def test_valkey_config_accepts_scalar_plain_options():
+    """ValkeyConfig mirrors GlideClientConfiguration's scalar plain options."""
+    cfg = ValkeyConfig(
+        addresses=[("example.com", 7000)],
+        use_tls=True,
+        request_timeout=5000,
+        database_id=3,
+        client_name="my-client",
+        inflight_requests_limit=100,
+        client_az="az-1",
+        lazy_connect=True,
+        read_only=True,
+    )
+    assert cfg.addresses == [("example.com", 7000)]
+    assert cfg.use_tls is True
+    assert cfg.request_timeout == 5000
+    assert cfg.database_id == 3
+    assert cfg.client_name == "my-client"
+    assert cfg.inflight_requests_limit == 100
+    assert cfg.client_az == "az-1"
+    assert cfg.lazy_connect is True
+    assert cfg.read_only is True
+
+
+def test_valkey_config_scalar_options_default_to_none():
+    """ValkeyConfig scalar options default to None so glide applies its own defaults."""
+    cfg = ValkeyConfig()
+    assert cfg.use_tls is None
+    assert cfg.request_timeout is None
+    assert cfg.database_id is None
+    assert cfg.client_name is None
+    assert cfg.inflight_requests_limit is None
+    assert cfg.client_az is None
+    assert cfg.lazy_connect is None
+    assert cfg.read_only is None
+
+
 def test_validate_queue_maxsize_accepts_positive_int():
     assert validate_queue_maxsize(5000) == 5000
 

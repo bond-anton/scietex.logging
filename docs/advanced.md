@@ -64,6 +64,12 @@ The record is a dictionary with the following keys:
 - `name`: Service and worker name
 - `time`: Formatted timestamp
 
+This record schema is **independent of the formatter**. Broker payloads are
+built from the handler's `service_name`/`worker_id` config and the log record
+directly, so they are invariant under `setFormatter`/`formatter=`. A custom
+formatter affects the console (stdout) sink only — see
+[Formatter scope: console output only](configuration.md#formatter-scope-console-output-only).
+
 ## Worker Configuration
 
 ### Threading Contract

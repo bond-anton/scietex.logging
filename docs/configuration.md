@@ -154,23 +154,28 @@ aliases over `self.config`, so there is no parallel state to drift.
   for the pure-machinery/console-only handlers). `backend_config` is typed
   `RedisConfig | ValkeyConfig | None` — a real union, not `Any`.
 - `RedisConfig` — Redis connection settings. It mirrors the full plain-option
-  surface of `redis.Redis` (40 fields: `host`/`port`/`db` plus `username`,
+  surface of `redis.Redis` (34 fields: `host`/`port`/`db` plus `username`,
   `password`, socket/ssl/encoding/retry/health-check/client-name/protocol
   options), so a `redis_config` dict carrying legitimate client options is
   accepted rather than rejected. Stored as `self.config.backend_config` on
   `AsyncRedisHandler`.
-- `ValkeyConfig` — Valkey node addresses (a list of `(host, port)` tuples).
-  Stored as `self.config.backend_config` on `AsyncValkeyHandler`.
+- `ValkeyConfig` — Valkey connection settings. It mirrors
+  `GlideClientConfiguration`'s scalar plain options (`addresses` plus `use_tls`,
+  `request_timeout`, `database_id`, `client_name`, `inflight_requests_limit`,
+  `client_az`, `lazy_connect`, `read_only`); enum- and object-valued options are
+  intentionally not modeled. Stored as `self.config.backend_config` on
+  `AsyncValkeyHandler`.
 
 The handler constructors **no longer accept `**kwargs`**. Unknown or typo'd
 keyword arguments now raise `TypeError` at construction time instead of being
 silently swallowed. `AsyncRedisHandler` converts its `redis_config` dict into a
 typed `RedisConfig`; keys outside the modeled option surface still raise
-`TypeError`. The raw client input is kept separately as `self.client_config` —
-a plain dict for both Redis and Valkey — and is what `connect()` passes to the
-underlying client. For Redis the dict is passed directly to `redis.Redis(**config)`;
-for Valkey the dict is translated into a `GlideClientConfiguration` inside
-`connect()`.
+`TypeError`. `connect()` reads `self.config.backend_config` — the single source
+of truth — rather than a parallel raw dict; `self.client_config` is a derived,
+read-only `asdict` view kept for backward compatibility. The user's
+`decode_responses` value is respected, not forced to `True`. For Valkey,
+`connect()` translates the typed config into a `GlideClientConfiguration`,
+dropping `None`-valued fields so glide applies its own defaults.
 
 ### Threading Contract
 
@@ -195,6 +200,27 @@ handler.setFormatter(formatter)
 
 For a runnable example of customizing `ScietexFormatter` and applying it with
 `setFormatter`, see `examples/custom_formatter.py`.
+
+### Formatter scope: console output only
+
+A formatter — whether injected via the `formatter=` constructor keyword or
+applied later with `setFormatter` — affects **console (stdout) output only**.
+It does **not** affect broker payloads.
+
+Broker backends (`AsyncRedisHandler`, `AsyncValkeyHandler`, and any
+`AsyncBrokerHandler` subclass) build their wire record from the handler's
+`service_name`/`worker_id` config and the log record directly, producing a
+fixed schema (`level`, `message`, `name`, `time`). That payload is **invariant**
+under `setFormatter`/`formatter=`, so the broker output is deterministic and
+independent of any formatter you install.
+
+Consequences to be aware of:
+
+- On a broker handler, a custom formatter changes console output only when
+  `stdout_enable=True` (the console sink the broker inherits by default). With
+  `stdout_enable=False` the formatter has no visible effect at all.
+- If you need to change what a broker backend sends, that is a property of the
+  backend's `send_message` implementation, not of the formatter.
 
 ## Complete Example
 

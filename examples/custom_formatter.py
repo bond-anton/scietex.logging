@@ -22,8 +22,11 @@ async def main():
         fmt="%(asctime)s | %(levelname)s | [%(worker_name)s] | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    # setFormatter replaces the handler's formatter for both the console and any
-    # broker backends, so the custom layout appears in every sink.
+    # setFormatter replaces the handler's formatter for the console (stdout)
+    # sink only. Broker backends build their payloads from the handler's
+    # service_name/worker_id config and the record directly, so they are
+    # invariant under setFormatter. This example uses AsyncBaseHandler, whose
+    # only sink is the console, so the custom layout appears in its output.
     handler.setFormatter(formatter)
 
     await handler.start_logging()

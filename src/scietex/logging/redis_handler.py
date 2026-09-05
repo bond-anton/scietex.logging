@@ -7,8 +7,10 @@ try:
 except ImportError as e:
     raise ImportError(optional_dependency_error("redis", "redis"), name="redis") from e
 
+import dataclasses
 import logging
 from collections.abc import Callable
+from typing import cast
 
 from .message_broker_handler import AsyncBrokerHandler
 
@@ -55,17 +57,21 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             worker_id (int, optional): Identifier for the logging worker instance. Defaults to None.
             redis_config (dict, optional): Configuration dictionary for Redis connection.
                 Defaults to {"host": "localhost", "port": 6379, "db": 0}. Keys are
-                passed through to ``redis.Redis`` unchanged; a faithful typed projection
-                is stored as ``self.config.backend_config``.
+                converted into a typed ``RedisConfig`` stored as
+                ``self.config.backend_config``, which is the single source passed to
+                ``redis.Redis`` by ``connect()``.
             error_handler (callable, optional): Callback invoked with ``(record, exc)``
                 when a log record cannot be delivered. Defaults to None, in which case
                 errors are reported via the ``scietex.logging`` module logger.
             stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can hold.
                 Defaults to 10000.
-            formatter (logging.Formatter | None): Formatter used to render records.
-                Defaults to None, in which case a default ``ScietexFormatter`` is
-                constructed from ``service_name`` and ``worker_id``.
+            formatter (logging.Formatter | None): Formatter used to render records
+                for the console (stdout) sink only. Broker payloads are built from
+                the handler's ``service_name``/``worker_id`` config and the record
+                directly, so they are invariant under this formatter. Defaults to
+                None, in which case a default ``ScietexFormatter`` is constructed
+                from ``service_name`` and ``worker_id``.
 
         Attributes:
             stream_name (str): The Redis stream name where log entries are sent.
@@ -86,21 +92,27 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             formatter=formatter,
         )
         self.stream_name = stream_name
-        self.client_config: dict = raw
+
+    @property
+    def client_config(self) -> dict:
+        """Read-only view of the backend config as a dict (backward compat)."""
+        return dataclasses.asdict(cast(RedisConfig, self.config.backend_config))
 
     async def connect(self) -> None:
         """
         Connect to Redis asynchronously.
 
-        Initializes the Redis client connection using the provided Redis configuration.
-        Sets `decode_responses=True` for handling Redis data in string format. A ping
-        probes connectivity before the client is considered connected.
+        Builds the client from ``self.config.backend_config`` (the typed
+        ``RedisConfig``, the single source of truth), honoring the user's
+        ``decode_responses`` value rather than forcing it True. A ping probes
+        connectivity before the client is considered connected.
 
         Returns:
             None
         """
         if self.client is None:
-            client = await redis.Redis(**self.client_config, decode_responses=True)
+            cfg = dataclasses.asdict(cast(RedisConfig, self.config.backend_config))
+            client = await redis.Redis(**cfg)
             try:
                 await client.ping()
             except Exception:

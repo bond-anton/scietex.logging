@@ -3,10 +3,12 @@
 import asyncio
 import logging
 import socket
+from dataclasses import asdict
 
 import pytest
 from redis.asyncio import Redis
 
+from scietex.logging.config import RedisConfig
 from scietex.logging.redis_handler import (
     AsyncRedisHandler,
 )  # Replace with actual module path
@@ -93,8 +95,8 @@ def test_redis_config_is_typed_and_validated():
     assert handler.config.backend_config.host == "example.com"
     assert handler.config.backend_config.port == 7000
     assert handler.config.backend_config.db == 2
-    # client_config remains a dict for the redis client call.
-    assert handler.client_config == {"host": "example.com", "port": 7000, "db": 2}
+    # client_config is a read-only asdict view of the typed config.
+    assert handler.client_config == asdict(RedisConfig(host="example.com", port=7000, db=2))
 
 
 def test_redis_unknown_kwarg_raises_type_error():
@@ -117,14 +119,10 @@ def test_redis_config_accepts_valid_extra_options():
     assert handler.config.backend_config.host == "example.com"
     assert handler.config.backend_config.password == "secret"
     assert handler.config.backend_config.ssl is True
-    # client_config remains the raw dict passed to redis.Redis.
-    assert handler.client_config == {
-        "host": "example.com",
-        "port": 7000,
-        "db": 2,
-        "password": "secret",
-        "ssl": True,
-    }
+    # client_config is a read-only asdict view of the typed config.
+    assert handler.client_config == asdict(
+        RedisConfig(host="example.com", port=7000, db=2, password="secret", ssl=True)
+    )
 
 
 @pytest.mark.asyncio
@@ -151,6 +149,44 @@ async def test_redis_connect_closes_client_when_ping_fails(monkeypatch):
         await handler.connect()
     assert handler.client is None
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_redis_connect_respects_decode_responses_true(monkeypatch):
+    """connect() honors a user-supplied decode_responses=True (AR-101)."""
+    captured = {}
+
+    class FakeClient:
+        async def ping(self):
+            return True
+
+    async def fake_redis(**kwargs):
+        captured.update(kwargs)
+        return FakeClient()
+
+    monkeypatch.setattr("redis.asyncio.Redis", fake_redis)
+    handler = AsyncRedisHandler(stream_name="s", redis_config={"decode_responses": True})
+    await handler.connect()
+    assert captured["decode_responses"] is True
+
+
+@pytest.mark.asyncio
+async def test_redis_connect_decode_responses_defaults_false(monkeypatch):
+    """connect() no longer forces decode_responses=True; the default is False (AR-101)."""
+    captured = {}
+
+    class FakeClient:
+        async def ping(self):
+            return True
+
+    async def fake_redis(**kwargs):
+        captured.update(kwargs)
+        return FakeClient()
+
+    monkeypatch.setattr("redis.asyncio.Redis", fake_redis)
+    handler = AsyncRedisHandler(stream_name="s")
+    await handler.connect()
+    assert captured["decode_responses"] is False
 
 
 @pytest.mark.asyncio
