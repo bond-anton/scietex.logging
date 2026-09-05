@@ -56,10 +56,26 @@ handler = AsyncBaseHandler(service_name="MyService", worker_id=1)
 
 ### Console Logging Control
 
-Console logging can be disabled by setting `stdout_enable=False`:
+Console logging is a **peer backend** (`ConsoleBackend`) that `AsyncBaseHandler`
+registers by default. It can be disabled by setting `stdout_enable=False`:
 
 ```python
 handler = AsyncBaseHandler(stdout_enable=False)
+```
+
+For a handler with **no console sink at all**, subclass the pure-machinery base
+`AsyncLoggingHandler` directly instead of `AsyncBaseHandler`. It owns the shared
+queue/worker/event machinery but registers no backend of its own, so you add
+only the backends you want:
+
+```python
+from scietex.logging import AsyncLoggingHandler
+
+
+class MyHandler(AsyncLoggingHandler):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # register your own backend(s) via self.register_backend(...)
 ```
 
 ### Error Handler

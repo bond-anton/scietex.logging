@@ -6,6 +6,32 @@ import logging
 import pytest
 
 from scietex.logging import AsyncBaseHandler
+from scietex.logging.message_broker_handler import AsyncBrokerHandler
+
+
+def _make_record(message: str = "test message") -> logging.LogRecord:
+    return logging.LogRecord(
+        name="TestLogger",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=0,
+        msg=message,
+        args=None,
+        exc_info=None,
+    )
+
+
+class _NoopBrokerHandler(AsyncBrokerHandler):
+    """Minimal broker that connects instantly and acknowledges every record."""
+
+    async def connect(self) -> None:
+        self.client = object()
+
+    async def disconnect(self) -> None:
+        self.client = None
+
+    async def send_message(self, record: dict[str, str]) -> None:
+        pass
 
 
 @pytest.mark.asyncio
@@ -148,3 +174,46 @@ async def test_error_channel_invoked_on_emit_failure(monkeypatch):
     assert isinstance(errors[0], RuntimeError)
 
     await handler.stop_logging()
+
+
+@pytest.mark.asyncio
+async def test_console_backend_registered_as_peer():
+    """The console is registered through register_backend, not special-cased."""
+    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    backend = handler._console_backend
+    assert backend is not None
+
+    assert "console" in handler.log_queues
+    assert handler.log_queues["console"] is backend.queue
+    assert len(handler.log_workers) == 1
+    # The console's drain hook is registered like any other backend's.
+    assert handler._drain_hooks == [backend.drain]
+
+    await handler.start_logging()
+    await handler.stop_logging()
+
+
+def test_console_backend_absent_when_stdout_disabled():
+    """stdout_enable=False leaves no console queue (console is a peer, not privileged)."""
+    handler = AsyncBaseHandler(service_name="TestService", worker_id=1, stdout_enable=False)
+
+    assert handler.stdout_enable is False
+    assert handler._console_backend is None
+    assert "console" not in handler.log_queues
+    assert handler.log_queues == {}
+    assert handler.log_workers == []
+    assert handler._drain_hooks == []
+
+
+@pytest.mark.asyncio
+async def test_stop_logging_drains_all_backends_generically(capsys):
+    """stop_logging drains console and broker through the same generic mechanism."""
+    handler = _NoopBrokerHandler(queue_name="broker", service_name="TestService", worker_id=1)
+    await handler.start_logging()
+    handler.emit(_make_record("hello"))
+    await handler.stop_logging(timeout=5)
+
+    captured = capsys.readouterr().out
+    # The broker drain completed and the console reported its outcome as a status record.
+    assert "Broker Logger has completed processing its queue." in captured
+    assert handler.log_queues["broker"].empty()

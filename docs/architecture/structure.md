@@ -24,9 +24,11 @@ scietex.logging/
 | Module | Responsibility |
 |---|---|
 | `__init__.py` | Public API. Re-exports `AsyncBaseHandler`, `AsyncBrokerHandler`, `ScietexFormatter`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler`; defines `__version__ = "0.2.0"`. |
-| `basic_handler.py` | `AsyncBaseHandler` — core async queue/worker/event machinery + console backend. |
+| `async_logging_handler.py` | `AsyncLoggingHandler` — pure shared async machinery (queues/events/workers, `register_backend`, `start_logging`/`emit`/`stop_logging`, error channel); no sink of its own. |
+| `console_backend.py` | `ConsoleBackend` — the console (stdout) sink as a peer backend (queue + worker + drain hook). |
+| `basic_handler.py` | `AsyncBaseHandler` — thin concrete subclass of `AsyncLoggingHandler` that registers the console backend as a peer when `stdout_enable=True`. |
 | `formatter.py` | `ScietexFormatter` (`logging.Formatter` subclass) + `level_abbreviation` helper. |
-| `message_broker_handler.py` | `AsyncBrokerHandler` — abstract broker backend base (queue + worker + connect/disconnect/send_message contract). |
+| `message_broker_handler.py` | `AsyncBrokerHandler` — abstract broker backend base (registers queue + worker; connect/disconnect/send_message contract). |
 | `redis_handler.py` | `AsyncRedisHandler` — Redis stream backend via `redis.asyncio`. |
 | `valkey_handler.py` | `AsyncValkeyHandler` — Valkey stream backend via `valkey-glide`. |
 | `py.typed` | Marker file (empty) enabling PEP 561 type info. |
@@ -35,7 +37,9 @@ scietex.logging/
 
 ```
 formatter.py            (no intra-package imports)
-basic_handler.py        → formatter.py
+async_logging_handler.py → formatter.py
+console_backend.py      → async_logging_handler.py
+basic_handler.py        → async_logging_handler.py, console_backend.py
 message_broker_handler.py → basic_handler.py
 redis_handler.py        → message_broker_handler.py
 valkey_handler.py       → message_broker_handler.py
@@ -44,8 +48,9 @@ __init__.py             → basic_handler.py, formatter.py,
                           redis_handler.py (guarded), valkey_handler.py (guarded)
 ```
 
-Dependency direction is strictly **top-down / one-way**: formatter ← base ←
-broker ← concrete backends ← `__init__`. There are no cycles.
+Dependency direction is strictly **top-down / one-way**: formatter ← machinery
+← console/handler ← broker ← concrete backends ← `__init__`. There are no
+cycles.
 
 ## Tests: `tests/`
 

@@ -129,7 +129,7 @@ handler.setFormatter(formatter)
 
 ## Extending scietex.logging
 
-To add support for additional logging backends, subclass `AsyncBrokerHandler` and implement `connect()`, `disconnect()`, and `send_message()` methods. The `AsyncBaseHandler` class provides console logging by default, while `AsyncBrokerHandler` is designed for message broker backends like Redis or Valkey.
+To add support for additional logging backends, subclass `AsyncBrokerHandler` and implement `connect()`, `disconnect()`, and `send_message()` methods. `AsyncLoggingHandler` is the pure-machinery base that owns the queue/worker infrastructure but no sink of its own; `AsyncBaseHandler` builds on it and registers the console as a peer backend (enabled by default via `stdout_enable`), while `AsyncBrokerHandler` is designed for message broker backends like Redis or Valkey.
 
 ### Example: Custom Database Handler
 

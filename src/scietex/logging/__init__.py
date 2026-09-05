@@ -99,13 +99,17 @@ behaviors.
 
 __version__ = "0.2.0"
 
+from .async_logging_handler import AsyncLoggingHandler
 from .basic_handler import AsyncBaseHandler
+from .console_backend import ConsoleBackend
 from .formatter import ScietexFormatter
 from .message_broker_handler import AsyncBrokerHandler
 
 __all__ = [
     "AsyncBaseHandler",
     "AsyncBrokerHandler",
+    "AsyncLoggingHandler",
+    "ConsoleBackend",
     "ScietexFormatter",
 ]
 

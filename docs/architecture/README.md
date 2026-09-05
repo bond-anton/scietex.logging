@@ -12,13 +12,15 @@ custom `logging.Handler` subclasses. Log records are queued in `asyncio.Queue`
 objects and drained by background worker coroutines, so application code never
 blocks on I/O.
 
-Three backends are supported, layered on a two-level class hierarchy:
+Three backends are supported, layered on a class hierarchy whose shared
+machinery is separated from the sinks:
 
-- **Console** (stdout) — always available, no extra dependency.
+- **Console** (stdout) — always available, no extra dependency. A peer backend
+  (`ConsoleBackend`) registered by `AsyncBaseHandler`.
 - **Redis** (streams) — optional, requires the `redis` package.
 - **Valkey** (streams) — optional, requires the `valkey-glide` package.
 
-The package is small: ~830 lines of source across 6 modules under
+The package is small: ~1085 lines of source across 8 modules under
 `src/scietex/logging/`.
 
 ## Document Index
@@ -42,7 +44,8 @@ The package is small: ~830 lines of source across 6 modules under
 - **Public API** (`__init__.py`): `AsyncBaseHandler`, `AsyncBrokerHandler`,
   `ScietexFormatter`; `AsyncRedisHandler` / `AsyncValkeyHandler` added
   conditionally on successful import
-- **Class hierarchy**: `logging.Handler` → `AsyncBaseHandler` →
+- **Class hierarchy**: `logging.Handler` → `AsyncLoggingHandler` (pure
+  machinery, no sink) → `AsyncBaseHandler` (registers `ConsoleBackend` peer) →
   `AsyncBrokerHandler` → {`AsyncRedisHandler`, `AsyncValkeyHandler`}
 - **Tests**: pytest + pytest-asyncio; Redis/Valkey tests require live servers
 - **Tooling**: uv (lockfile), tox (format/lint/type/py314), ruff, `ty` type checker

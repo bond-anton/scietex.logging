@@ -5,6 +5,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
+from .async_logging_handler import BackendDrainResult, DrainStatus
 from .basic_handler import AsyncBaseHandler
 from .formatter import level_abbreviation
 
@@ -57,8 +58,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         super().__init__(service_name=service_name, worker_id=worker_id, **kwargs)
         self.queue_name: str = queue_name
         self.client: Any | None = None
-        self.log_queues[self.queue_name] = asyncio.Queue()  # Add queue for logs
-        self.log_workers.append(self._worker())  # Add worker to the list
+        self.register_backend(self.queue_name, asyncio.Queue(), self._worker(), self.drain)
 
     @abc.abstractmethod
     async def connect(self) -> None:
@@ -146,3 +146,28 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
             await self.disconnect()
         except Exception as exc:
             self._report_error(None, exc)
+
+    async def drain(self, timeout: float, results: list[BackendDrainResult]) -> None:
+        """
+        Drain the broker queue and record the outcome for status reporting.
+
+        Waits for every queued record to be acknowledged by the worker, then appends
+        a result describing how the drain concluded so a status-reporting backend
+        (e.g. the console) can surface it during shutdown.
+
+        Args:
+            timeout (float): Timeout for the queue to drain.
+            results (list[BackendDrainResult]): Shared list to which the outcome is
+                appended.
+
+        Returns:
+            None
+        """
+        try:
+            await asyncio.wait_for(self.log_queues[self.queue_name].join(), timeout=timeout)
+        except asyncio.TimeoutError:
+            results.append(BackendDrainResult(self.queue_name, DrainStatus.TIMEOUT))
+        except Exception as exc:
+            results.append(BackendDrainResult(self.queue_name, DrainStatus.ERROR, exc))
+        else:
+            results.append(BackendDrainResult(self.queue_name, DrainStatus.COMPLETED))

@@ -9,10 +9,16 @@ direction, not an exhaustive list of third-party packages.
 formatter.py
    ▲
    │ (imports ScietexFormatter)
-basic_handler.py ──────────────┐
-   ▲                           │ (extends AsyncBaseHandler)
-   │ (imports AsyncBaseHandler)│
-message_broker_handler.py ─────┘
+async_logging_handler.py ─────────┐
+   ▲                             │ (imports AsyncLoggingHandler)
+   │ (imports AsyncLoggingHandler)│
+console_backend.py ───────────────┤
+   ▲                             │ (imports ConsoleBackend)
+   │ (imports ConsoleBackend)    │
+basic_handler.py ─────────────────┘
+   ▲
+   │ (extends AsyncBaseHandler)
+message_broker_handler.py
    ▲
    │ (extends AsyncBrokerHandler)
    ├── redis_handler.py
@@ -22,20 +28,25 @@ message_broker_handler.py ─────┘
 __init__.py  (public API)
 ```
 
-Direction is strictly **one-way, top-down**: `formatter` → `basic_handler` →
+Direction is strictly **one-way, top-down**: `formatter` →
+`async_logging_handler` → `console_backend` / `basic_handler` →
 `message_broker_handler` → concrete backends → `__init__`. There are **no
 circular dependencies** within the package.
 
 ## Core → infrastructure dependencies
 
 The package has a clean layering where "core" (queue/worker/event machinery in
-`AsyncBaseHandler`) depends only on the stdlib and on its own formatter, and
+`AsyncLoggingHandler`) depends only on the stdlib and on its own formatter, and
 never on any concrete backend or third-party client.
 
-- **Core** (`AsyncBaseHandler`) → stdlib `asyncio`, `logging`, `sys`; → own
+- **Core** (`AsyncLoggingHandler`) → stdlib `asyncio`, `logging`; → own
   `ScietexFormatter`. No third-party runtime deps.
-- **Broker abstraction** (`AsyncBrokerHandler`) → core; stdlib `asyncio`,
-  `datetime`. No third-party runtime deps.
+- **Console peer** (`ConsoleBackend`) → core types (`BackendDrainResult`,
+  `DrainStatus`); stdlib `asyncio`, `logging`, `sys`. No third-party runtime deps.
+- **Concrete console handler** (`AsyncBaseHandler`) → core + console peer; it
+  registers the console backend when `stdout_enable` is set.
+- **Broker abstraction** (`AsyncBrokerHandler`) → `AsyncBaseHandler`; stdlib
+  `asyncio`, `datetime`. No third-party runtime deps.
 - **Concrete backends** (`AsyncRedisHandler`, `AsyncValkeyHandler`) → broker
   abstraction + their respective third-party clients (`redis`, `glide`).
 - **Public API** (`__init__.py`) → all modules, but the two concrete-backend
@@ -47,7 +58,11 @@ to the leaf backend modules.
 
 ## Cross-module dependencies
 
-- `basic_handler.py` → `formatter.py` (constructs `ScietexFormatter`).
+- `async_logging_handler.py` → `formatter.py` (constructs `ScietexFormatter`).
+- `console_backend.py` → `async_logging_handler.py` (imports `BackendDrainResult`,
+  `DrainStatus` for shutdown-status reporting).
+- `basic_handler.py` → `async_logging_handler.py` (inheritance) and
+  `console_backend.py` (registers the console backend).
 - `message_broker_handler.py` → `basic_handler.py` (inheritance + reuse of
   queues/events/workers).
 - `redis_handler.py`, `valkey_handler.py` → `message_broker_handler.py`
@@ -61,15 +76,16 @@ None detected. The import graph is acyclic and strictly layered.
 ## Important dependency chains
 
 1. **Logging call chain (runtime):**
-   `logging.Logger` → `AsyncBaseHandler.emit` → `asyncio.Queue` → worker
+   `logging.Logger` → `AsyncLoggingHandler.emit` → `asyncio.Queue` → worker
    coroutine → `ScietexFormatter` → backend sink. This is the primary data
    path (see data-flow.md).
 
 2. **Class hierarchy chain (compile/design time):**
-   `logging.Handler` → `AsyncBaseHandler` → `AsyncBrokerHandler` →
-   `AsyncRedisHandler` / `AsyncValkeyHandler`. Each level adds one concern:
-   stdlib integration → async machinery + console → broker abstraction →
-   concrete transport.
+   `logging.Handler` → `AsyncLoggingHandler` → `AsyncBaseHandler` →
+   `AsyncBrokerHandler` → `AsyncRedisHandler` / `AsyncValkeyHandler`, with
+   `ConsoleBackend` as a peer sink registered by `AsyncBaseHandler`. Each level
+   adds one concern: stdlib integration → async machinery (no sink) → console
+   peer registration → broker abstraction → concrete transport.
 
 3. **Optional-dependency chain (packaging):**
    `pyproject.toml` extras (`[redis]`, `[valkey]`, `[all]`) → third-party
@@ -81,7 +97,7 @@ None detected. The import graph is acyclic and strictly layered.
 
 | Module | Third-party dep | Optional? |
 |---|---|---|
-| `basic_handler.py`, `formatter.py`, `message_broker_handler.py` | none | — |
+| `async_logging_handler.py`, `basic_handler.py`, `console_backend.py`, `formatter.py`, `message_broker_handler.py` | none | — |
 | `redis_handler.py` | `redis>=5.0.0` | yes (`[redis]`) |
 | `valkey_handler.py` | `valkey-glide~=2.5.0` | yes (`[valkey]`) |
 

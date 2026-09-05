@@ -7,54 +7,52 @@ do, why it is significant, and related files.
 
 ---
 
-## 1. `AsyncBaseHandler` — multi-responsibility core
+## 1. `AsyncLoggingHandler` — the shared machinery core
 
-**Location.** `src/scietex/logging/basic_handler.py` (`AsyncBaseHandler`, 262-line module).
+**Location.** `src/scietex/logging/async_logging_handler.py` (`AsyncLoggingHandler`, 267-line module).
 
-**What it appears to do.** One class owns: the stdlib `logging.Handler`
+**What it appears to do.** One class owns the stdlib `logging.Handler`
 integration (`emit`), the async queue/event machinery, worker task lifecycle,
-the console backend worker, put-task bookkeeping, and the entire graceful
-shutdown sequence.
+the generic `register_backend` mechanism, and the generic `stop_logging` that
+drains every backend through per-backend `drain(timeout, results)` hooks.
 
-**Why significant.** It is simultaneously the base class for all backends and
-the concrete console backend. Backend-agnostic machinery and a specific
-backend (console) live in the same class. `stop_logging` also contains
-backend-specific logic (it special-cases the `"console"` queue and injects
-synthetic status records). This conflation is the central structural decision
-of the package.
+**Why significant.** It is the backend-agnostic machinery base with **no sink
+of its own**; every concrete backend (console, broker) is registered on top of
+it as a peer. The console sink now lives in `ConsoleBackend`, and
+`AsyncBaseHandler` is a thin subclass that registers it. This separation is the
+central structural decision of the package.
 
-**Related.** `message_broker_handler.py`, `formatter.py`.
+**Related.** `console_backend.py`, `message_broker_handler.py`, `formatter.py`.
 
 ---
 
-## 2. `stop_logging` — complex, backend-aware shutdown
+## 2. `stop_logging` — generic drain via per-backend hooks
 
-**Location.** `AsyncBaseHandler.stop_logging`, `basic_handler.py:152-235`.
+**Location.** `AsyncLoggingHandler.stop_logging`, `async_logging_handler.py:209-241`.
 
-**What it appears to do.** Clears events, drains put tasks, then iterates
-`log_queues` skipping `"console"`, waiting on each non-console queue's
-`join()` with a timeout, and synthesizing INFO/ERROR `LogRecord`s into the
-console queue to report each backend's drain outcome. Finally drains the
-console queue and gathers workers.
+**What it appears to do.** Clears both events, then iterates the registered
+`drain` hooks in **reverse registration order**, awaiting each with the shared
+timeout and collecting `BackendDrainResult`s. Finally gathers worker tasks and
+closes the handler.
 
-**Why significant.** The shutdown logic is coupled to the queue *names*
-(`"console"` special-cased) and reaches into per-backend behavior. It mixes
-control-flow reporting (synthetic records) onto the same data path as user
-logs. The ordering (non-console queues first, console last) and the timeout
-handling are subtle and hard to extend for new backends.
+**Why significant.** Shutdown is now generic — no queue-name special-casing.
+Each backend controls its own drain; the console backend (registered first)
+drains last so it can observe every other backend's outcome and synthesize
+status records. The reverse-registration ordering and the timeout handling are
+subtle and worth confirming for new backends.
 
-**Related.** `data-flow.md` Flow 4; `message_broker_handler.py`.
+**Related.** `data-flow.md` Flow 4; `console_backend.py`; `message_broker_handler.py`.
 
 ---
 
 ## 3. Worker coroutine lifecycle — created once, not restartable
 
-**Location.** `AsyncBaseHandler.__init__` (`basic_handler.py:89-92`),
-`start_logging` (`basic_handler.py:113`), `stop_logging`.
+**Location.** `AsyncLoggingHandler.__init__` (`async_logging_handler.py:120-125`),
+`start_logging` (`async_logging_handler.py:170`), `stop_logging`.
 
-**What it appears to do.** Worker *coroutines* are created in `__init__` and
-appended to `log_workers`. `start_logging` schedules them with
-`asyncio.create_task`. `stop_logging` gathers the tasks.
+**What it appears to do.** Worker *coroutines* are created in `__init__` (by
+each backend's registration) and appended to `log_workers`. `start_logging`
+schedules them with `asyncio.create_task`. `stop_logging` gathers the tasks.
 
 **Why significant.** Because coroutines are consumed when scheduled, a second
 `start_logging()` after `stop_logging()` would schedule already-consumed
@@ -66,29 +64,27 @@ boundary worth clarifying.
 
 ---
 
-## 4. `emit` — fire-and-forget put tasks with silent error swallowing
+## 4. `emit` — synchronous puts with error reporting
 
-**Location.** `AsyncBaseHandler.emit`, `basic_handler.py:115-150`.
+**Location.** `AsyncLoggingHandler.emit`, `async_logging_handler.py:172-207`.
 
-**What it appears to do.** For each queue, creates an `asyncio.Task` for
-`queue.put(record)`, tracks it, and prunes completed tasks at a threshold.
-Catches `QueueFull`, `InvalidStateError`, and a bare `Exception` — all with
-empty `pass` bodies.
+**What it appears to do.** For each registered queue, calls
+`queue.put_nowait(record)` synchronously. A failed put is reported through the
+error channel (`_report_error`), not swallowed.
 
-**Why significant.** The put tasks are unbounded in number between cleanups
-(threshold default 100). The bare `except Exception: pass` swallows all errors
-silently. `QueueFull` is caught but the queues are unbounded (no `maxsize`), so
-that branch is effectively dead. This is the hot path for every log record and
-the error-handling policy here is opaque.
+**Why significant.** `emit` is the hot path for every log record. It must be
+called from the event-loop thread (off-loop raises `RuntimeError`). The
+error-handling policy routes failures to the configured `error_handler` or the
+`scieetex.logging` module logger.
 
-**Related.** `data-flow.md`; `tests/test_basic_handler.py` (cleanup tests).
+**Related.** `data-flow.md`; `tests/test_basic_handler.py`.
 
 ---
 
 ## 5. Unbounded queues / no backpressure
 
-**Location.** `asyncio.Queue()` construction in `basic_handler.py:91` and
-`message_broker_handler.py:56` (no `maxsize`).
+**Location.** `asyncio.Queue()` construction in `console_backend.py:74` and
+`message_broker_handler.py:61` (no `maxsize`).
 
 **What it appears to do.** All backend queues are unbounded.
 
@@ -103,19 +99,19 @@ that is not realized.
 
 ## 6. Console as a peer backend vs. a shared sink
 
-**Location.** `basic_handler.py` (console queue + worker); `stop_logging`
-special-casing; `message_broker_handler.py`.
+**Location.** `console_backend.py` (queue + worker + drain); `basic_handler.py`
+(registers the console backend); `message_broker_handler.py`.
 
 **What it appears to do.** Every handler instance that has `stdout_enable=True`
-runs its own console worker and console queue. Broker handlers therefore run
-console + broker workers independently. `stop_logging` treats console as
-"last" and injects broker status into it.
+registers its own `ConsoleBackend` (queue + worker). Broker handlers therefore
+run console + broker workers independently. `stop_logging` drains backends in
+reverse registration order, so the console (registered first) drains last and
+reports the other backends' outcomes.
 
 **Why significant.** The console backend is both a standalone backend
 (`AsyncBaseHandler`) and an auxiliary output attached to broker handlers. This
-dual role drives the queue-name special-casing and the synthetic-record
-reporting. The relationship between "console" and "broker" backends is the
-least explicit part of the model.
+dual role is now explicit: console is a peer backend registered the same way a
+broker backend is, rather than a privileged sink baked into the base machinery.
 
 **Related.** `overview.md`, `data-flow.md` Flow 3.
 
@@ -123,20 +119,17 @@ least explicit part of the model.
 
 ## 7. Duplicated connect/disconnect/send_message contract
 
-**Location.** `message_broker_handler.py` (abstract no-op methods),
+**Location.** `message_broker_handler.py` (abstract methods),
 `redis_handler.py`, `valkey_handler.py`.
 
-**What it appears to do.** `AsyncBrokerHandler.connect`/`disconnect`/
-`send_message` are empty base methods (documented as "redefine in subclass").
-Redis and Valkey each implement them. There is no abstract-method enforcement
-(`abc`), no shared validation, and the two concrete implementations differ in
-signature details (e.g. Valkey passes `record.items()` to `xadd`, Redis passes
-`record`).
+**What it appears to do.** `AsyncBrokerHandler` is `abc.ABC`; `connect`/
+`disconnect`/`send_message` are `@abc.abstractmethod`. Redis and Valkey each
+implement them. The two concrete implementations differ in signature details
+(e.g. Valkey passes `record.items()` to `xadd`, Redis passes `record`).
 
-**Why significant.** The extension contract is enforced only by convention and
-documentation, not by the type system. A subclass that forgets to implement
-`send_message` would silently no-op. The Redis/Valkey `xadd` argument
-difference (`dict` vs `dict.items()`) is a subtle asymmetry.
+**Why significant.** The extension contract is now enforced by the type system
+(`abc`), but the Redis/Valkey `xadd` argument difference (`dict` vs
+`dict.items()`) is a subtle asymmetry.
 
 **Related.** `components.md`; `docs/advanced.md` (custom backend examples).
 
@@ -211,13 +204,13 @@ service/worker identities, mutation could leak. The broker worker reads
 `record.worker_name` / `record.levelname` that the formatter set — an implicit
 ordering dependency between formatting and dict-building.
 
-**Related.** `data-flow.md` Flow 2; `message_broker_handler.py:109-124`.
+**Related.** `data-flow.md` Flow 2; `message_broker_handler.py:127-138`.
 
 ---
 
 ## 12. `AsyncBrokerHandler._worker` — connection + drain coupling
 
-**Location.** `message_broker_handler.py:93-130`.
+**Location.** `message_broker_handler.py:104-148`.
 
 **What it appears to do.** The worker calls `connect()` once at start, then
 loops draining the queue and calling `send_message`, then `disconnect()` at

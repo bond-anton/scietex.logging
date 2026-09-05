@@ -46,68 +46,122 @@ identity and abbreviated levels, and formats timestamps as ISO-8601 UTC.
 
 **Depends on.** stdlib `logging`, `datetime`.
 
-**Depended on by.** `AsyncBaseHandler` (constructs one in `__init__`);
+**Depended on by.** `AsyncLoggingHandler` (constructs one in `__init__`);
 `AsyncBrokerHandler._worker` (calls `self.formatter.formatTime`); tests.
 
 ---
 
-## 3. Base handler — `basic_handler.py`
+## 3. Machinery base — `async_logging_handler.py`
 
-**Purpose.** Core async logging machinery + the console backend. Subclass of
-`logging.Handler`. Owns queues, events, worker tasks, and graceful shutdown.
+**Purpose.** Pure shared async machinery with **no sink of its own**. Subclass
+of `logging.Handler`. Owns formatter construction, the accept/running events,
+per-backend queues/workers, the error channel, and the generic
+`register_backend` / `start_logging` / `emit` / `stop_logging` lifecycle.
 
-**Class.** `AsyncBaseHandler(logging.Handler)` — `basic_handler.py:15`
+**Class.** `AsyncLoggingHandler(logging.Handler)` — `async_logging_handler.py:48`
 
 **Public interface.**
-- `AsyncBaseHandler(service_name=None, worker_id=None, **kwargs)`
-  - kwargs: `stdout_enable` (default True), `queue_put_cleanup_threshold`
-    (default 100, clamped to >= 1).
-- `async start_logging()` — `basic_handler.py:100`. Sets both events, spawns
-  worker tasks.
-- `emit(record)` — `basic_handler.py:115`. Synchronous; called by the logging
-  framework. No-op if `logging_accept_event` not set. For each queue, schedules
-  `asyncio.create_task(queue.put(record))`, tracks the task, and periodically
-  prunes completed put tasks.
-- `async stop_logging(timeout=5.0)` — `basic_handler.py:152`. Clears accept
-  event, drains pending put tasks, clears running event, waits for each
-  non-console queue to join (timeout-bounded), drains console queue, gathers
-  worker tasks, calls `close()`.
-- `_cleanup_queue_put_tasks()` — `basic_handler.py:237`.
-- `async _console_logging_worker()` — `basic_handler.py:243`.
+- `AsyncLoggingHandler(service_name=None, worker_id=None, *, error_handler=None, **kwargs)`
+  - Constructs a `ScietexFormatter(service_name, worker_id)`.
+- `register_backend(name, queue, worker, drain=None)` —
+  `async_logging_handler.py:127`. Registers a backend's queue, worker
+  coroutine, and optional `drain(timeout, results)` hook.
+- `async start_logging()` — `async_logging_handler.py:156`. Sets both events,
+  spawns worker tasks.
+- `emit(record)` — `async_logging_handler.py:172`. Synchronous; called by the
+  logging framework. No-op if `logging_accept_event` not set. For each
+  registered queue, calls `queue.put_nowait(record)`; a failed put is reported
+  through the error channel.
+- `async stop_logging(timeout=5.0)` — `async_logging_handler.py:209`. Clears
+  both events, then drains every registered backend through its `drain` hook
+  (in reverse registration order), gathers worker tasks, calls `close()`.
 
-**Key instance state.** `stdout_enable`, `formatter` (ScietexFormatter),
+**Key instance state.** `formatter` (ScietexFormatter),
 `logging_accept_event`, `logging_running_event` (asyncio.Events),
 `log_queues: dict[str, asyncio.Queue]`, `log_workers: list[Coroutine]`,
-`log_workers_tasks`, `log_queue_put_tasks`, `_queue_put_cleanup_threshold`.
+`log_workers_tasks`, `_drain_hooks`, `error_handler`.
 
-**Depends on.** `formatter.ScietexFormatter`; stdlib `asyncio`, `logging`, `sys`.
+**Depends on.** `formatter.ScietexFormatter`; stdlib `asyncio`, `logging`.
+
+**Depended on by.** `AsyncBaseHandler` (extends); `ConsoleBackend` (its drain
+hook is registered here); `AsyncBrokerHandler` (via `AsyncBaseHandler`).
+
+---
+
+## 4. Console backend — `console_backend.py`
+
+**Purpose.** The console (stdout) sink as a **peer backend**. Owns its queue,
+its worker coroutine, and its shutdown-status reporting.
+
+**Class.** `ConsoleBackend` — `console_backend.py:47`
+
+**Public interface.**
+- `ConsoleBackend(formatter, running_event)` — `console_backend.py:62`. Creates
+  its own `asyncio.Queue`; holds a reference to the handler's formatter and the
+  shared `logging_running_event`.
+- `async _worker()` — `console_backend.py:78`. Loops while the running event is
+  set or the queue is non-empty, formatting records and writing them to stdout.
+- `async drain(timeout, results)` — `console_backend.py:99`. Enqueues a
+  synthetic status `LogRecord` for each other backend's drain outcome, then
+  drains its own queue.
+
+**Depends on.** stdlib `asyncio`, `logging`, `sys`; `async_logging_handler`
+(`BackendDrainResult`, `DrainStatus`).
+
+**Depended on by.** `AsyncBaseHandler` (registers it as a peer backend when
+`stdout_enable=True`).
+
+---
+
+## 5. Concrete handler — `basic_handler.py`
+
+**Purpose.** Thin concrete subclass of `AsyncLoggingHandler` that registers the
+console backend as a peer. Public signature unchanged.
+
+**Class.** `AsyncBaseHandler(AsyncLoggingHandler)` — `basic_handler.py:15`
+
+**Public interface.**
+- `AsyncBaseHandler(service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, **kwargs)`
+  - When `stdout_enable` is True, constructs a `ConsoleBackend` and registers it
+    under the name `"console"` via `register_backend`.
+- Inherits `start_logging`, `emit`, `stop_logging` from `AsyncLoggingHandler`.
+
+**Key instance state.** `stdout_enable`, `_console_backend` (ConsoleBackend |
+None).
+
+**Depends on.** `async_logging_handler.AsyncLoggingHandler`;
+`console_backend.ConsoleBackend`.
 
 **Depended on by.** `AsyncBrokerHandler` (extends); host apps using console
 logging; tests.
 
 ---
 
-## 4. Broker handler base — `message_broker_handler.py`
+## 6. Broker handler base — `message_broker_handler.py`
 
-**Purpose.** Abstract base for message-broker backends. Adds a named broker
+**Purpose.** Abstract base for message-broker backends. Registers a named broker
 queue + worker on top of `AsyncBaseHandler`, and defines the
 connect/disconnect/send_message contract concrete backends implement.
 
-**Class.** `AsyncBrokerHandler(AsyncBaseHandler)` — `message_broker_handler.py:10`
+**Class.** `AsyncBrokerHandler(AsyncBaseHandler, abc.ABC)` — `message_broker_handler.py:13`
 
 **Public interface.**
 - `AsyncBrokerHandler(queue_name, service_name=None, worker_id=None, **kwargs)`
-  - Adds `log_queues[queue_name]` and appends `self._worker()` to `log_workers`.
+  - Registers `log_queues[queue_name]` and `self._worker()` via
+    `register_backend`.
   - `client` attribute (Any | None) — connection slot.
-- `async connect()` — `message_broker_handler.py:59`. No-op base; subclass hook.
-- `async disconnect()` — `message_broker_handler.py:70`. Base clears `client`.
-- `async send_message(record: dict[str, str])` — `message_broker_handler.py:81`.
-  No-op base; subclass hook.
-- `async _worker()` — `message_broker_handler.py:93`. Calls `connect()`, loops
+- `async connect()` — `message_broker_handler.py:63`. Abstract; subclass hook.
+- `async disconnect()` — `message_broker_handler.py:76`. Abstract; subclass hook.
+- `async send_message(record: dict[str, str])` — `message_broker_handler.py:89`.
+  Abstract; subclass hook.
+- `async _worker()` — `message_broker_handler.py:104`. Calls `connect()`, loops
   draining the broker queue, builds a `dict` log entry, calls `send_message`,
   then `disconnect()` on exit.
+- `async drain(timeout, results)` — `message_broker_handler.py:150`. Waits for
+  the broker queue to join and appends a `BackendDrainResult` describing the
+  outcome.
 
-**Log-entry dict shape** (built in `_worker`, `message_broker_handler.py:117`):
+**Log-entry dict shape** (built in `_worker`, `message_broker_handler.py:131`):
 `{"level": record.levelname, "message": record.getMessage(), "name": logger_name,
 "time": formatter.formatTime(record)}`. `logger_name` is `record.worker_name`
 if present else `record.name`.
@@ -119,7 +173,7 @@ apps implementing custom backends (per docs).
 
 ---
 
-## 5. Redis backend — `redis_handler.py`
+## 7. Redis backend — `redis_handler.py`
 
 **Purpose.** Concrete broker backend writing log entries to a Redis stream.
 
@@ -141,7 +195,7 @@ absent); `message_broker_handler.AsyncBrokerHandler`.
 
 ---
 
-## 6. Valkey backend — `valkey_handler.py`
+## 8. Valkey backend — `valkey_handler.py`
 
 **Purpose.** Concrete broker backend writing log entries to a Valkey stream via
 the `valkey-glide` client.
@@ -165,7 +219,7 @@ the `valkey-glide` client.
 
 ---
 
-## 7. Supporting / non-runtime components
+## 9. Supporting / non-runtime components
 
 - **Tests** (`tests/`) — depend on the package; Redis/Valkey tests also depend
   on live servers and the third-party clients directly.
