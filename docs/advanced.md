@@ -75,8 +75,9 @@ formatter affects the console (stdout) sink only — see
 ### Threading Contract
 
 `emit()` must be called from the asyncio event-loop thread. The handler captures the event
-loop in `start_logging()` and raises `RuntimeError` if `emit()` is called from a different
-thread. Off-loop logging is not supported.
+loop in `start_logging()`; an off-loop `emit()` (from a different thread, or with no running
+loop) drops the record and reports it through the error channel instead of raising.
+Off-loop logging is not supported.
 
 ### Timeout on Shutdown
 

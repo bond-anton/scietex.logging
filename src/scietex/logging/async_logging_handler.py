@@ -9,6 +9,7 @@ register their own queues and workers on top of it.
 
 import asyncio
 import logging
+import sys
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from enum import Enum
@@ -184,6 +185,7 @@ class AsyncLoggingHandler(logging.Handler):
 
         self.log_workers_tasks: list[asyncio.Task[None]] = []
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._closed = False
 
     @property
     def error_handler(
@@ -266,6 +268,11 @@ class AsyncLoggingHandler(logging.Handler):
         Returns:
             None
         """
+        if self._closed:
+            raise RuntimeError(
+                "AsyncLoggingHandler.start_logging() called after close(); "
+                "a closed handler cannot be restarted"
+            )
         if self.logging_running_event.is_set():
             raise RuntimeError("AsyncLoggingHandler.start_logging() called while already running")
         self._loop = asyncio.get_running_loop()
@@ -283,8 +290,8 @@ class AsyncLoggingHandler(logging.Handler):
         is set, queues the record in the queues. Each backend can have
         a unique queue, allowing separate handling in different workers.
 
-        Must be called from the asyncio event-loop thread; off-loop logging raises
-        `RuntimeError`.
+        Must be called from the asyncio event-loop thread; off-loop logging drops
+        the record and reports it through the error channel (never raises).
 
         Args:
             record (logging.LogRecord): The log record to be processed.
@@ -300,10 +307,21 @@ class AsyncLoggingHandler(logging.Handler):
         except RuntimeError:
             current_loop = None
         if current_loop is not self._loop:
-            raise RuntimeError(
-                "AsyncLoggingHandler.emit() must be called from the asyncio event-loop "
-                "thread; off-loop logging is not supported"
-            )
+            # Off-loop emit cannot enqueue: asyncio.Queue.put_nowait is not
+            # thread-safe and the queues are bound to the loop captured at
+            # start_logging. Raise into handleError (mirroring the stdlib's own
+            # emit/except/handleError pattern) so the record is dropped and
+            # reported through the error channel — matching the overflow policy —
+            # instead of propagating into the caller, which stdlib Handler.handle
+            # does not catch (AR-102).
+            try:
+                raise RuntimeError(
+                    "AsyncLoggingHandler.emit() must be called from the asyncio event-loop "
+                    "thread; off-loop logging is not supported"
+                )
+            except RuntimeError:
+                self.handleError(record)
+            return
 
         # Put the record in each queue synchronously; failures are reported, not swallowed.
         for queue in self.log_queues.values():
@@ -338,7 +356,8 @@ class AsyncLoggingHandler(logging.Handler):
         be started again via `start_logging`.
 
         Args:
-            timeout (float): Timeout for each backend drain, defaults to 5s.
+            timeout (float): Shared timeout for the concurrent backend drains and
+                the worker gather, defaults to 5s.
 
         Returns:
             None
@@ -349,15 +368,16 @@ class AsyncLoggingHandler(logging.Handler):
         # Stop accepting new log records
         self.logging_accept_event.clear()
 
-        # Drain every backend generically while the workers are still running. The
-        # coordinator owns result collection: each drain hook returns its own
-        # BackendDrainResult, and the collected results are handed to the registered
-        # status reporters (e.g. the console) as an explicit post-drain step. This
-        # removes the reverse-registration-order coupling between a status reporter
-        # and the backends it reports on.
-        results: list[BackendDrainResult] = []
-        for drain in self._drain_hooks:
-            results.append(await drain(timeout))
+        # Drain every backend concurrently under one shared timeout (AR-105).
+        # gather schedules all drain hooks at once and preserves registration
+        # order in the returned list, so the status reporters still receive
+        # results in the order the backends were registered — no status-reporter
+        # semantics change. This removes the reverse-registration-order coupling
+        # between a status reporter and the backends it reports on, and keeps a
+        # slow backend from serializing the whole shutdown.
+        results: list[BackendDrainResult] = list(
+            await asyncio.gather(*(drain(timeout) for drain in self._drain_hooks))
+        )
         for reporter in self._status_reporters:
             await reporter(results)
 
@@ -384,6 +404,12 @@ class AsyncLoggingHandler(logging.Handler):
                 await asyncio.gather(*self.log_workers_tasks, return_exceptions=True)
         self.log_workers_tasks = []
 
+        # Release the captured loop reference now that teardown is complete
+        # (AR-113). It is kept until this point so a record still in flight during
+        # the drain window can be enqueued; the next start_logging re-captures the
+        # running loop.
+        self._loop = None
+
         # Drop any records still undelivered after the drain window and worker
         # teardown (AR-020). A stalled worker or unreachable broker can leave
         # records queued; without this they would replay on the next start, so the
@@ -393,6 +419,48 @@ class AsyncLoggingHandler(logging.Handler):
             while not queue.empty():
                 queue.get_nowait()
                 queue.task_done()
+
+    def close(self) -> None:
+        """
+        Mark the handler closed and refuse any later start (AR-103).
+
+        Called by the stdlib ``logging.shutdown()`` hook, which runs
+        synchronously. Closing cannot await, so it does NOT stop the workers or
+        close a broker client — graceful teardown still requires
+        ``await stop_logging()``. It clears the accept event so no new records are
+        enqueued, but a ``close()`` while running leaves the workers running until
+        the host calls ``await stop_logging()`` (which is not blocked by
+        ``_closed``).
+        """
+        super().close()
+        self._closed = True
+        self.logging_accept_event.clear()
+
+    def flush(self) -> None:
+        """
+        Documented no-op.
+
+        The stdlib ``shutdown()`` hook calls ``flush()`` before ``close()``.
+        Records are flushed by the async workers during ``stop_logging()``, which
+        cannot be awaited from this synchronous hook, so there is nothing to do
+        here.
+        """
+
+    def handleError(self, record: logging.LogRecord) -> None:
+        """
+        Route a handler-level error through the configured error channel.
+
+        The stdlib ``Handler.handle`` does not catch exceptions raised by ``emit``,
+        so ``emit`` calls this explicitly when it cannot enqueue a record (the
+        off-loop case). ``sys.exc_info()`` recovers the in-flight exception (the
+        3.10-compatible form of ``sys.exception()``) and hands it to the single
+        ``_report_error`` channel, delivering the error to the configured
+        ``error_handler`` or the module logger instead of the stdlib default of
+        printing a traceback to stderr.
+        """
+        exc = sys.exc_info()[1]
+        if isinstance(exc, Exception):
+            self._report_error(record, exc)
 
     def _report_error(self, record: logging.LogRecord | None, exc: Exception) -> None:
         """

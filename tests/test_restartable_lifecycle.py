@@ -163,6 +163,30 @@ async def test_double_start_raises():
 
 
 @pytest.mark.asyncio
+async def test_close_refuses_later_start():
+    """A closed handler refuses start_logging (AR-103)."""
+    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    handler.close()
+
+    with pytest.raises(RuntimeError):
+        await handler.start_logging()
+
+
+@pytest.mark.asyncio
+async def test_close_while_running_then_stop_is_safe():
+    """close() while running leaves workers up until stop_logging, which is not blocked."""
+    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    await handler.start_logging()
+
+    handler.close()
+    assert not handler.logging_accept_event.is_set()
+
+    await handler.stop_logging()
+    assert not handler.logging_running_event.is_set()
+    assert handler.log_workers_tasks == []
+
+
+@pytest.mark.asyncio
 async def test_stop_without_start_is_noop():
     """stop_logging on a fresh handler is a no-op that leaves events unset."""
     handler = AsyncBaseHandler(service_name="TestService", worker_id=1)

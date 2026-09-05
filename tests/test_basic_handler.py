@@ -221,15 +221,23 @@ async def test_emit_puts_records_synchronously():
     assert handler.log_queues["custom"].qsize() == 1
 
 
-def test_emit_raises_when_called_off_loop():
-    """Test that emit raises RuntimeError when called outside the event-loop thread."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1, stdout_enable=False)
+def test_emit_off_loop_drops_and_reports_not_raises():
+    """Off-loop emit drops the record and reports via the error channel, never raising."""
+    errors = []
+    handler = AsyncBaseHandler(
+        service_name="TestService",
+        worker_id=1,
+        stdout_enable=False,
+        error_handler=lambda record, exc: errors.append(exc),
+    )
     handler._loop = object()  # Sentinel loop that never matches a running loop
     handler.logging_accept_event.set()
 
     record = logging.LogRecord("test", logging.INFO, "", 0, "msg", None, None)
-    with pytest.raises(RuntimeError):
-        handler.emit(record)
+    handler.emit(record)  # must not raise
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], RuntimeError)
 
 
 @pytest.mark.asyncio

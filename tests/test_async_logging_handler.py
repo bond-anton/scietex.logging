@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 
 import pytest
 
@@ -234,3 +235,58 @@ async def test_report_error_falls_back_to_module_logger_when_error_handler_raise
         record.name == "scietex.logging" and "failed to deliver a log record" in record.getMessage()
         for record in caplog.records
     )
+
+
+@pytest.mark.asyncio
+async def test_emit_off_loop_drops_and_reports_via_error_channel():
+    """Off-loop emit drops the record and reports a RuntimeError, never raising (AR-102)."""
+    errors = []
+    handler = BareHandler(error_handler=lambda record, exc: errors.append(exc))
+    handler._loop = object()  # Sentinel loop that never matches a running loop
+    handler.logging_accept_event.set()
+
+    handler.emit(_make_record("off-loop"))  # must not raise
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], RuntimeError)
+
+
+@pytest.mark.asyncio
+async def test_stop_logging_drains_backends_concurrently():
+    """Backend drains run concurrently under one shared timeout (AR-105)."""
+
+    class SlowDrainHandler(AsyncLoggingHandler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.register_backend("a", asyncio.Queue(), self._noop_worker, self._slow_drain)
+            self.register_backend("b", asyncio.Queue(), self._noop_worker, self._slow_drain)
+
+        async def _noop_worker(self) -> None:
+            while self.logging_running_event.is_set():
+                await asyncio.sleep(0.01)
+
+        async def _slow_drain(self, timeout: float) -> BackendDrainResult:
+            await asyncio.sleep(0.2)
+            return BackendDrainResult("x", DrainStatus.COMPLETED)
+
+    handler = SlowDrainHandler()
+    await handler.start_logging()
+
+    start = time.monotonic()
+    await handler.stop_logging(timeout=5.0)
+    elapsed = time.monotonic() - start
+
+    # Two 0.2s drains serialized would take ~0.4s; concurrent they share the
+    # window and finish in ~0.2s.
+    assert elapsed < 0.35
+
+
+def test_close_sets_closed_flag_and_calls_super():
+    """close() marks the handler closed and is idempotent (AR-103)."""
+    handler = BareHandler()
+
+    handler.close()
+    assert handler._closed is True
+
+    handler.close()  # idempotent
+    assert handler._closed is True

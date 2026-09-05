@@ -91,16 +91,29 @@ per-backend queues/workers, the error channel, and the generic
   logging framework. No-op if `logging_accept_event` not set. For each
   registered queue, calls `queue.put_nowait(record)`; a failed put is reported
   through the error channel.
-- `async stop_logging(timeout=5.0)` — `async_logging_handler.py:320`. Clears
-  the accept event, drains every registered backend through its `drain` hook in
-  registration order (collecting each returned `BackendDrainResult`), invokes
-  each registered status reporter with the collected results, clears the
-  running event, gathers worker tasks, resets `log_workers_tasks`, and clears
-  any records still queued after the drain window and worker teardown
-  (`get_nowait()` + `task_done()`, `async_logging_handler.py:387-395`) so
-  undelivered records are dropped, not replayed (AR-020). Idempotent (no-op
-  when not running); does **not** call `close()`. The handler may be restarted
-  via `start_logging` on the same loop.
+- `async stop_logging(timeout=5.0)` — `async_logging_handler.py:338`. Clears
+  the accept event, drains every registered backend **concurrently** through
+  its `drain` hook under one shared timeout (collecting each returned
+  `BackendDrainResult` in registration order), invokes each registered status
+  reporter with the collected results, clears the running event, gathers worker
+  tasks, resets `log_workers_tasks`, and clears any records still queued after
+  the drain window and worker teardown (`get_nowait()` + `task_done()`,
+  `async_logging_handler.py:415-420`) so undelivered records are dropped, not
+  replayed (AR-020). Idempotent (no-op when not running); does **not** call
+  `close()`. The handler may be restarted via `start_logging` on the same loop.
+- `close()` — `async_logging_handler.py:422`. Stdlib `logging.shutdown()` hook.
+  Marks the handler closed (a later `start_logging()` raises `RuntimeError`) and
+  clears the accept event. Does **not** stop workers or close a broker client —
+  graceful teardown still requires `await stop_logging()`. `close()` is a
+  separate terminal operation for `logging.shutdown()`: it does not call
+  `stop_logging()`, and `stop_logging()` does not call `close()`.
+- `flush()` — `async_logging_handler.py:438`. Documented no-op; records are
+  flushed by the async workers during `stop_logging()`, which cannot be awaited
+  from this synchronous hook.
+- `handleError(record)` — `async_logging_handler.py:448`. Routes a handler-level
+  error (e.g. off-loop `emit`) through the single `_report_error` channel via
+  `sys.exc_info()[1]`, delivering it to the configured `error_handler` or the
+  module logger instead of the stdlib stderr traceback.
 
 **Key instance state.** `formatter` (ScietexFormatter),
 `logging_accept_event`, `logging_running_event` (asyncio.Events),

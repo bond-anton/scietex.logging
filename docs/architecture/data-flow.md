@@ -77,10 +77,12 @@ by the console worker (formatted to stdout) and once by the broker worker
 
 **Processing.**
 1. `logging_accept_event.clear()` — stops `emit` from enqueuing new records.
-2. For each registered backend's `drain(timeout)` hook, in **registration
-   order** (while the workers are still running): the hook waits for its queue
-   to drain and returns a `BackendDrainResult` describing the outcome. The
-   coordinator collects the results.
+2. Schedule every registered backend's `drain(timeout)` hook **concurrently**
+   via `asyncio.gather` under one shared timeout (while the workers are still
+   running): each hook waits for its queue to drain and returns a
+   `BackendDrainResult` describing the outcome. `gather` preserves registration
+   order, so the coordinator collects the results in the order the backends were
+   registered.
 3. After every drain concludes, invoke each registered status reporter with the
    collected results. The console backend is registered as a status reporter
    (`basic_handler.py:94`), so `ConsoleBackend.report_status(results)`
@@ -96,7 +98,10 @@ by the console worker (formatted to stdout) and once by the broker worker
    (`async_logging_handler.py:387-395`). Undelivered records are **dropped, not
    replayed**, so the next `start_logging` begins from an actually-empty queue
    (AR-020). `stop_logging` does **not** call `close()`; the handler may be
-   restarted via `start_logging` on the same loop.
+   restarted via `start_logging` on the same loop. `close()` is a separate
+   terminal operation for stdlib `logging.shutdown()`: it marks the handler
+   closed (refusing a later `start_logging()`) but does not stop workers or
+   close a broker client, and it does not call `stop_logging()`.
 
 **Destination.** All queues drained (leftovers cleared); workers terminated;
 handler idle and restartable.

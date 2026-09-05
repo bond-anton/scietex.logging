@@ -179,8 +179,8 @@ dropping `None`-valued fields so glide applies its own defaults.
 
 ### Threading Contract
 
-`emit()` must be called from the asyncio event-loop thread. The handler raises
-`RuntimeError` if `emit()` is called off-loop.
+`emit()` must be called from the asyncio event-loop thread. An off-loop `emit()`
+drops the record and reports it through the error channel (never raises).
 
 ## Custom Formatters
 

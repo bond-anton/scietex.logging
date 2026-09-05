@@ -33,15 +33,15 @@ central structural decision of the package.
 
 **Location.** `AsyncLoggingHandler.stop_logging`, `async_logging_handler.py:320-395`.
 
-**What it appears to do.** Clears the accept event, then iterates the registered
-`drain` hooks in **registration order**, awaiting each with the shared timeout
-and collecting the `BackendDrainResult` each hook returns. After every drain
-concludes, it invokes each registered status reporter with the collected
-results. Finally it clears the running event, gathers worker tasks, resets
-`log_workers_tasks`, and clears any records still queued after the drain window
-and worker teardown via `get_nowait()` + `task_done()`
-(`async_logging_handler.py:387-395`) — undelivered records are dropped, not
-replayed on the next start (AR-020).
+**What it appears to do.** Clears the accept event, then schedules every
+registered `drain` hook **concurrently** via `asyncio.gather` under one shared
+timeout (AR-105), collecting the `BackendDrainResult` each hook returns in
+registration order. After every drain concludes, it invokes each registered
+status reporter with the collected results. Finally it clears the running
+event, gathers worker tasks, resets `log_workers_tasks`, and clears any records
+still queued after the drain window and worker teardown via `get_nowait()` +
+`task_done()` (`async_logging_handler.py:387-395`) — undelivered records are
+dropped, not replayed on the next start (AR-020).
 
 **Why significant.** Shutdown is now generic — no queue-name special-casing.
 Each backend controls its own drain and returns its own result; the coordinator
@@ -86,7 +86,8 @@ boundary that makes the lifecycle restartable.
 error channel (`_report_error`), not swallowed.
 
 **Why significant.** `emit` is the hot path for every log record. It must be
-called from the event-loop thread (off-loop raises `RuntimeError`). The
+called from the event-loop thread; an off-loop `emit()` drops the record and
+reports it through the error channel (never raises). The
 error-handling policy routes failures to the configured `error_handler` or the
 `scieetex.logging` module logger.
 

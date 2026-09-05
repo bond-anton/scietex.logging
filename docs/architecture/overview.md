@@ -125,11 +125,12 @@ The `examples/` directory contains runnable scripts demonstrating this
   `logging_running_event` gates worker loops. Both are set in
   `start_logging()` and cleared in `stop_logging()`.
 - **Graceful shutdown.** `stop_logging()` clears the accept event, then drains
-  every registered backend through its per-backend `drain(timeout)` hook in
-  registration order (collecting each returned `BackendDrainResult`), invokes
-  each registered status reporter with the collected results, and gathers worker
-  tasks. It does not call `close()`; the handler may be restarted via
-  `start_logging` on the same loop.
+  every registered backend **concurrently** through its per-backend
+  `drain(timeout)` hook under one shared timeout (AR-105), collecting each
+  returned `BackendDrainResult` in registration order, invokes each registered
+  status reporter with the collected results, and gathers worker tasks. It does
+  not call `close()`; the handler may be restarted via `start_logging` on the
+  same loop.
 
 ## Notable runtime characteristics
 

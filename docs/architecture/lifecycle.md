@@ -69,13 +69,14 @@ semantics below).
 `AsyncLoggingHandler.stop_logging(timeout=5.0)` (`async_logging_handler.py:301`)
 — see data-flow.md Flow 4 for the full sequence. Summary:
 1. Stop accepting new records (`accept_event.clear()`).
-2. Drain every registered backend through its `drain(timeout)` hook in
-   registration order while the workers are still running, collecting each
-   hook's returned `BackendDrainResult`. After all drains conclude, invoke each
-   registered status reporter with the collected results — the console backend
-   is registered as a status reporter and enqueues synthetic records describing
-   how every backend fared. The coordinator owns result collection, so no
-   backend depends on drain registration order.
+2. Drain every registered backend **concurrently** under one shared timeout while
+   the workers are still running: `stop_logging` schedules every `drain(timeout)`
+   hook via `asyncio.gather`, which preserves registration order in the collected
+   results. After all drains conclude, invoke each registered status reporter
+   with the collected results — the console backend is registered as a status
+   reporter and enqueues synthetic records describing how every backend fared.
+   The coordinator owns result collection, so no backend depends on drain
+   registration order.
 3. Signal workers to stop (`running_event.clear()`).
 4. Gather worker tasks, bounded by the same `timeout` used for the drains
    (`asyncio.wait_for`). A worker blocked inside `connect()`/`send_message()`
@@ -107,8 +108,12 @@ coroutines or replaying undelivered records.
 | Call | When | Behavior |
 |---|---|---|
 | `start_logging()` | already running | raises `RuntimeError` |
+| `start_logging()` | after `close()` | raises `RuntimeError` (a closed handler cannot be restarted) |
 | `stop_logging()` | never started / already stopped | no-op (idempotent) |
+| `stop_logging()` | after `close()` | still runs (not blocked by `_closed`) |
+| `close()` | any | marks closed, clears accept event; workers continue until `await stop_logging()` |
 | `emit(record)` | between stop and next start | silent no-op (records dropped by design; accept event unset) |
+| `emit(record)` | off event-loop thread | drop + report via error channel (never raises) |
 | restart | same event loop | supported |
 | restart | different event loop | unsupported — events/queues are loop-bound; reconstruct the handler |
 
@@ -131,6 +136,23 @@ handler. There is no global state and no shared resource across handler
 instances. The host application is responsible for calling `start_logging` /
 `stop_logging` in the correct order and within an event loop.
 
+### Cleanup via stdlib `logging.shutdown()`
+
+At interpreter exit, stdlib `logging.shutdown()` calls `flush()` then `close()`
+on every handler. Those hooks are synchronous and cannot `await`, so the async
+teardown contract (`await stop_logging()`) cannot run there. The overrides
+reconcile the two contracts:
+
+- `close()` marks the handler closed (a later `start_logging()` raises
+  `RuntimeError`) and clears the accept event. It does **not** stop the workers
+  or close a broker client — graceful teardown still requires
+  `await stop_logging()`, which is **not** blocked by `_closed`.
+- `flush()` is a documented no-op: records are flushed by the async workers
+  during `stop_logging()`, which cannot be awaited from the synchronous hook.
+- `close()` does not call `stop_logging()`, and `stop_logging()` does not call
+  `close()`. They are separate terminal operations: `close()` is the stdlib's
+  synchronous terminal; `stop_logging()` is the async graceful-drain terminal.
+
 ## Background tasks / workers
 
 - **Worker tasks** (`log_workers_tasks`) are the long-lived background
@@ -147,8 +169,10 @@ instances. The host application is responsible for calling `start_logging` /
 - The broker client connection is opened lazily by the worker's `connect()`
   and closed by `disconnect()` at worker exit — connection lifetime is tied to
   worker lifetime, not to `start_logging`/`stop_logging` directly.
-- `stop_logging` has a default 5s timeout per backend drain; a slow backend
-  could cause the console drain or worker gather to wait up to that timeout.
+- `stop_logging` has a default 5s timeout shared across all backend drains
+  (which run concurrently), plus the same timeout for the worker gather; a slow
+  backend delays shutdown up to that single shared budget rather than
+  multiplying it per backend.
 - Backend queues are **bounded** by `queue_maxsize` (default 10000) and are
   reused across restart cycles (they are created in `__init__`, not per start).
   A queue that is still full when logging restarts drops new records by policy:
