@@ -59,9 +59,15 @@ class AsyncLoggingHandler(logging.Handler):
     (zero-argument callables returning a fresh coroutine) so each start cycle
     schedules fresh tasks from a clean queue.
 
+    Each backend queue is bounded by `queue_maxsize` (default 10000). Under
+    sustained overload, `emit` drops records for any full backend queue and
+    reports the drop through the error channel rather than buffering unboundedly
+    or blocking the calling thread.
+
     Attributes:
         log_queues (dict[str, asyncio.Queue]): A dictionary of asyncio.Queue objects
             for each logging backend.
+        queue_maxsize (int): Maximum number of records each backend queue can hold.
         logging_accept_event (asyncio.Event): Event to signal when the handler can
             accept new logs.
         logging_running_event (asyncio.Event): Event to signal when logging is active.
@@ -96,6 +102,7 @@ class AsyncLoggingHandler(logging.Handler):
         worker_id: int | None = None,
         *,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
+        queue_maxsize: int = 10000,
         **kwargs,
     ) -> None:
         """
@@ -109,11 +116,15 @@ class AsyncLoggingHandler(logging.Handler):
                 ``(record, exc)`` when a log record cannot be delivered. Defaults to
                 None, in which case errors are reported via the ``scietex.logging``
                 module logger.
+            queue_maxsize (int): Maximum number of records each backend queue can
+                hold. When a queue is full, `emit` drops the record and reports it
+                through the error channel instead of blocking. Defaults to 10000.
             **kwargs: Additional keyword arguments accepted for subclass
                 compatibility; they are ignored by the base machinery.
         """
         super().__init__()
         self.error_handler = error_handler
+        self.queue_maxsize = queue_maxsize
         if worker_id is None:
             worker_id = 1
         if service_name is None:
@@ -218,6 +229,11 @@ class AsyncLoggingHandler(logging.Handler):
         for queue in self.log_queues.values():
             try:
                 queue.put_nowait(record)
+            except asyncio.QueueFull as exc:
+                # Overflow policy: when a backend queue is full the record is dropped
+                # and reported via the error channel. emit never blocks or buffers
+                # unboundedly, so the producer stays non-blocking under overload.
+                self._report_error(record, exc)
             except Exception as exc:
                 self._report_error(record, exc)
 

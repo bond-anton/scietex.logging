@@ -84,19 +84,28 @@ error-handling policy routes failures to the configured `error_handler` or the
 
 ---
 
-## 5. Unbounded queues / no backpressure
+## 5. Bounded queues with drop + report overflow
 
-**Location.** `asyncio.Queue()` construction in `console_backend.py:74` and
-`message_broker_handler.py:61` (no `maxsize`).
+**Location.** `asyncio.Queue(maxsize=...)` construction in `console_backend.py:77`
+and `message_broker_handler.py:62`; the explicit `except asyncio.QueueFull`
+branch in `emit` (`async_logging_handler.py:232`).
 
-**What it appears to do.** All backend queues are unbounded.
+**What it appears to do.** Every backend queue is bounded by `queue_maxsize`
+(default 10000), set on `AsyncLoggingHandler`/`AsyncBaseHandler` and stored as
+`self.queue_maxsize`. `ConsoleBackend` builds `asyncio.Queue(maxsize=maxsize)`;
+`AsyncBrokerHandler` builds `asyncio.Queue(maxsize=self.queue_maxsize)`.
 
-**Why significant.** Under sustained high-volume logging where consumers lag,
-queues grow without bound (memory pressure). There is no backpressure or
-drop policy. The `QueueFull` handling in `emit` suggests a bounded-queue intent
-that is not realized.
+**Why significant.** The overflow policy is **drop + report**: when a backend
+queue is full at emit time, `emit` drops the record and routes an
+`asyncio.QueueFull` to the error channel (`_report_error` → `error_handler`
+callback or module logger). `emit` never blocks, so the producer stays
+non-blocking under sustained overload. This resolves the earlier unbounded
+buffering concern: under overload, records now drop + report instead of growing
+memory without bound. `ConsoleBackend.drain` uses `put_nowait` for its synthetic
+shutdown-status records, dropping them if the console queue is full so shutdown
+never deadlocks on a bounded queue.
 
-**Related.** `emit` (hotspot 4); docs claim "high-throughput" support.
+**Related.** `emit` (hotspot 4); `data-flow.md` cross-cutting notes.
 
 ---
 

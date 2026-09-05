@@ -102,6 +102,24 @@ def on_error(record, exc):
 handler = AsyncBaseHandler(error_handler=on_error)
 ```
 
+### Queue Bounds and Overflow
+
+Each backend queue is **bounded** by `queue_maxsize`, a keyword-only constructor
+parameter on `AsyncLoggingHandler` and `AsyncBaseHandler` (default `10000`). It
+is stored as `self.queue_maxsize` and applied to every backend queue the handler
+registers — the console queue and, for broker handlers, the broker queue.
+
+```python
+handler = AsyncBaseHandler(queue_maxsize=5000)
+```
+
+The overflow policy is **drop + report**. When a backend queue is full at emit
+time, `emit` drops the record and routes an `asyncio.QueueFull` to the error
+channel (`error_handler` callback, or the `scietex.logging` module logger when
+none is configured). `emit` never blocks and never buffers unboundedly, so the
+producer stays non-blocking under sustained overload. Under such overload,
+records are dropped and reported rather than buffered without limit.
+
 ### Threading Contract
 
 `emit()` must be called from the asyncio event-loop thread. The handler raises

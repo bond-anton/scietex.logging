@@ -61,8 +61,10 @@ per-backend queues/workers, the error channel, and the generic
 **Class.** `AsyncLoggingHandler(logging.Handler)` — `async_logging_handler.py:48`
 
 **Public interface.**
-- `AsyncLoggingHandler(service_name=None, worker_id=None, *, error_handler=None, **kwargs)`
+- `AsyncLoggingHandler(service_name=None, worker_id=None, *, error_handler=None, queue_maxsize=10000, **kwargs)`
   - Constructs a `ScietexFormatter(service_name, worker_id)`.
+  - Stores `queue_maxsize` as `self.queue_maxsize`; each backend queue is bounded
+    by it (default 10000).
 - `register_backend(name, queue, worker, drain=None)` —
   `async_logging_handler.py:132`. Registers a backend's queue, worker
   **factory** (zero-argument callable returning a fresh coroutine), and
@@ -101,9 +103,9 @@ its worker coroutine, and its shutdown-status reporting.
 **Class.** `ConsoleBackend` — `console_backend.py:47`
 
 **Public interface.**
-- `ConsoleBackend(formatter, running_event)` — `console_backend.py:62`. Creates
-  its own `asyncio.Queue`; holds a reference to the handler's formatter and the
-  shared `logging_running_event`.
+- `ConsoleBackend(formatter, running_event, maxsize=10000)` — `console_backend.py:62`.
+  Creates its own bounded `asyncio.Queue(maxsize=maxsize)`; holds a reference to
+  the handler's formatter and the shared `logging_running_event`.
 - `async _worker()` — `console_backend.py:78`. Loops while the running event is
   set or the queue is non-empty, formatting records and writing them to stdout.
 - `async drain(timeout, results)` — `console_backend.py:99`. Enqueues a
@@ -126,9 +128,10 @@ console backend as a peer. Public signature unchanged.
 **Class.** `AsyncBaseHandler(AsyncLoggingHandler)` — `basic_handler.py:15`
 
 **Public interface.**
-- `AsyncBaseHandler(service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, **kwargs)`
-  - When `stdout_enable` is True, constructs a `ConsoleBackend` and registers it
-    under the name `"console"` via `register_backend`.
+- `AsyncBaseHandler(service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000, **kwargs)`
+  - When `stdout_enable` is True, constructs a `ConsoleBackend` (with
+    `maxsize=queue_maxsize`) and registers it under the name `"console"` via
+    `register_backend`.
 - Inherits `start_logging`, `emit`, `stop_logging` from `AsyncLoggingHandler`.
 
 **Key instance state.** `stdout_enable`, `_console_backend` (ConsoleBackend |
@@ -152,8 +155,9 @@ connect/disconnect/send_message contract concrete backends implement.
 
 **Public interface.**
 - `AsyncBrokerHandler(queue_name, service_name=None, worker_id=None, **kwargs)`
-  - Registers `log_queues[queue_name]` and `self._worker` (a bound method used
-    as a worker factory) via `register_backend`.
+  - Registers `log_queues[queue_name]` (a bounded `asyncio.Queue(maxsize=self.queue_maxsize)`)
+    and `self._worker` (a bound method used as a worker factory) via
+    `register_backend`. `queue_maxsize` flows through `**kwargs` unchanged.
   - `client` attribute (Any | None) — connection slot.
 - `async connect()` — `message_broker_handler.py:63`. Abstract; subclass hook.
 - `async disconnect()` — `message_broker_handler.py:76`. Abstract; subclass hook.

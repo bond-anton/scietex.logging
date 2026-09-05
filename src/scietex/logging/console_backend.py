@@ -63,6 +63,7 @@ class ConsoleBackend:
         self,
         formatter: logging.Formatter | None,
         running_event: asyncio.Event,
+        maxsize: int = 10000,
     ) -> None:
         """
         Initialize the console backend.
@@ -70,8 +71,10 @@ class ConsoleBackend:
         Args:
             formatter (logging.Formatter | None): Formatter used to render records.
             running_event (asyncio.Event): Shared event signalling that logging is active.
+            maxsize (int): Maximum number of records the queue can hold. Records
+                enqueued past this bound are dropped by `emit`. Defaults to 10000.
         """
-        self.queue: asyncio.Queue[logging.LogRecord] = asyncio.Queue()
+        self.queue: asyncio.Queue[logging.LogRecord] = asyncio.Queue(maxsize=maxsize)
         self.formatter = formatter
         self.running_event = running_event
 
@@ -113,7 +116,13 @@ class ConsoleBackend:
             None
         """
         for result in results:
-            await self.queue.put(_status_record(result))
+            try:
+                self.queue.put_nowait(_status_record(result))
+            except asyncio.QueueFull:
+                # Status records are best-effort shutdown diagnostics. When the
+                # console queue is full, drop them rather than block shutdown on a
+                # bounded queue that the worker may already be draining.
+                pass
         try:
             await asyncio.wait_for(self.queue.join(), timeout=timeout)
         except Exception:

@@ -128,3 +128,9 @@ instances. The host application is responsible for calling `start_logging` /
   worker lifetime, not to `start_logging`/`stop_logging` directly.
 - `stop_logging` has a default 5s timeout per backend drain; a slow backend
   could cause the console drain or worker gather to wait up to that timeout.
+- Backend queues are **bounded** by `queue_maxsize` (default 10000) and are
+  reused across restart cycles (they are created in `__init__`, not per start).
+  A queue that is still full when logging restarts drops new records by policy:
+  `emit` reports each `asyncio.QueueFull` through the error channel rather than
+  blocking. Restart does not change this contract — a full queue always drops +
+  reports, never blocks.

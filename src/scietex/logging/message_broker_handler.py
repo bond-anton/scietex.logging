@@ -58,7 +58,9 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         super().__init__(service_name=service_name, worker_id=worker_id, **kwargs)
         self.queue_name: str = queue_name
         self.client: Any | None = None
-        self.register_backend(self.queue_name, asyncio.Queue(), self._worker, self.drain)
+        self.register_backend(
+            self.queue_name, asyncio.Queue(maxsize=self.queue_maxsize), self._worker, self.drain
+        )
 
     @abc.abstractmethod
     async def connect(self) -> None:

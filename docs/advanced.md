@@ -105,7 +105,9 @@ module logger.
 
 For high-throughput logging:
 
-1. Increase queue size
+1. Increase the backend queue bound via `queue_maxsize` (default 10000). When a
+   queue is full, records are dropped and reported through the error channel, so
+   a larger bound buffers more before drops begin.
 2. Use multiple workers (if implementing custom handler)
 
 ### Resource Management

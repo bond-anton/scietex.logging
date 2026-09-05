@@ -35,6 +35,7 @@ class AsyncBaseHandler(AsyncLoggingHandler):
         *,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         stdout_enable: bool = True,
+        queue_maxsize: int = 10000,
         **kwargs,
     ) -> None:
         """
@@ -49,6 +50,8 @@ class AsyncBaseHandler(AsyncLoggingHandler):
                 None, in which case errors are reported via the ``scietex.logging``
                 module logger.
             stdout_enable (bool): Flag to enable console logging (defaults to True).
+            queue_maxsize (int): Maximum number of records each backend queue can
+                hold. Defaults to 10000.
             **kwargs: Additional keyword arguments passed through to the base machinery.
 
         Attributes:
@@ -59,12 +62,17 @@ class AsyncBaseHandler(AsyncLoggingHandler):
             service_name=service_name,
             worker_id=worker_id,
             error_handler=error_handler,
+            queue_maxsize=queue_maxsize,
             **kwargs,
         )
         self.stdout_enable = stdout_enable
         self._console_backend: ConsoleBackend | None = None
         if self.stdout_enable:
-            self._console_backend = ConsoleBackend(self.formatter, self.logging_running_event)
+            self._console_backend = ConsoleBackend(
+                self.formatter,
+                self.logging_running_event,
+                maxsize=queue_maxsize,
+            )
             self.register_backend(
                 "console",
                 self._console_backend.queue,

@@ -89,9 +89,14 @@ restartable.
   registered queue in `log_queues` (`async_logging_handler.py:203`). Queue count
   = 1 (console) for `AsyncBaseHandler`, or 2 (console + broker) for broker
   handlers with stdout enabled.
-- **No backpressure / bounded queues.** Queues are unbounded `asyncio.Queue()`
-  (no `maxsize`). `QueueFull` is caught in `emit` but can never be raised by an
-  unbounded queue.
+- **Bounded queues with drop + report overflow.** Each backend queue is bounded
+  by `queue_maxsize` (default 10000): `ConsoleBackend` builds
+  `asyncio.Queue(maxsize=maxsize)` and `AsyncBrokerHandler` builds
+  `asyncio.Queue(maxsize=self.queue_maxsize)`. When a queue is full at emit
+  time, `emit` drops the record and routes an `asyncio.QueueFull` to the error
+  channel (`_report_error` → `error_handler` callback or module logger). `emit`
+  never blocks, so under sustained overload records drop + report rather than
+  buffering unboundedly.
 - **Ordering.** Within a single queue, records are FIFO. Across queues (console
   vs broker) there is no ordering guarantee.
 - **Synthetic records during shutdown.** `ConsoleBackend.drain` injects status
