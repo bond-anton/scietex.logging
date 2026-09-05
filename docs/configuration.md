@@ -66,7 +66,8 @@ handler = AsyncBaseHandler(stdout_enable=False)
 For a handler with **no console sink at all**, subclass the pure-machinery base
 `AsyncLoggingHandler` directly instead of `AsyncBaseHandler`. It owns the shared
 queue/worker/event machinery but registers no backend of its own, so you add
-only the backends you want:
+only the backends you want. See `examples/pure_machinery_handler.py` for a
+runnable version:
 
 ```python
 import asyncio
@@ -114,6 +115,9 @@ def on_error(record, exc):
 handler = AsyncBaseHandler(error_handler=on_error)
 ```
 
+See `examples/error_handler_and_queue_bounds.py` for a runnable example that
+combines an `error_handler` with a bounded queue.
+
 ### Queue Bounds and Overflow
 
 Each backend queue is **bounded** by `queue_maxsize`, a keyword-only constructor
@@ -133,6 +137,8 @@ channel (`error_handler` callback, or the `scietex.logging` module logger when
 none is configured). `emit` never blocks and never buffers unboundedly, so the
 producer stays non-blocking under sustained overload. Under such overload,
 records are dropped and reported rather than buffered without limit.
+`examples/error_handler_and_queue_bounds.py` demonstrates this drop-and-report
+behavior with a small `queue_maxsize`.
 
 ### Typed Configuration
 
@@ -173,6 +179,9 @@ formatter = logging.Formatter(
 handler = AsyncBaseHandler()
 handler.setFormatter(formatter)
 ```
+
+For a runnable example of customizing `ScietexFormatter` and applying it with
+`setFormatter`, see `examples/custom_formatter.py`.
 
 ## Complete Example
 

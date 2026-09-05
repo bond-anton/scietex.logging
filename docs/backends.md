@@ -124,6 +124,9 @@ logger.addHandler(redis_handler)
 logger.addHandler(valkey_handler)
 ```
 
+For a runnable version that combines console, Redis, and Valkey on one logger
+with explicit configs, see `examples/all_backends.py`.
+
 ## Backend Architecture
 
 All backends follow the same pattern:

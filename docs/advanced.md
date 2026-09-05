@@ -6,7 +6,8 @@ This guide covers advanced usage patterns and customization options.
 
 To create a custom logging backend, subclass `AsyncBrokerHandler` and implement the required
 abstract methods. `AsyncBrokerHandler` is an abstract base class and cannot be instantiated
-directly.
+directly. For a runnable in-memory backend with no external service, see
+`examples/custom_backend.py`.
 
 ### Implementation Example
 
@@ -74,6 +75,10 @@ Configure the timeout when stopping logging:
 ```python
 await handler.stop_logging(timeout=10.0)  # 10 second timeout
 ```
+
+`examples/restartable_lifecycle.py` demonstrates the full lifecycle, including
+`stop_logging(timeout)`, idempotent stop, and the `RuntimeError` raised by a
+double start.
 
 ## Error Handling
 

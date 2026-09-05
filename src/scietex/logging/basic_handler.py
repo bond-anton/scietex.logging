@@ -87,3 +87,19 @@ class AsyncBaseHandler(AsyncLoggingHandler):
                 self._console_backend._worker,
                 self._console_backend.drain,
             )
+
+    def setFormatter(self, fmt: logging.Formatter | None) -> None:
+        """
+        Set the formatter used to render log records.
+
+        The console backend captures the formatter reference when the handler is
+        constructed, so it must be updated here too for console output to reflect
+        the change. Broker backends read the handler's formatter dynamically and
+        need no extra handling.
+
+        Args:
+            fmt (logging.Formatter | None): The formatter to use.
+        """
+        super().setFormatter(fmt)
+        if self._console_backend is not None:
+            self._console_backend.formatter = fmt

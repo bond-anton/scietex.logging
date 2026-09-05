@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from scietex.logging import AsyncBaseHandler
+from scietex.logging import AsyncBaseHandler, ScietexFormatter
 from scietex.logging.message_broker_handler import AsyncBrokerHandler
 
 
@@ -102,6 +102,36 @@ async def test_console_worker_outputs_log(capsys):
     # Capture stdout output
     captured = capsys.readouterr()
     assert "Test log message" in captured.out
+
+    await handler.stop_logging()
+
+
+@pytest.mark.asyncio
+async def test_set_formatter_propagates_to_console_backend(capsys):
+    """setFormatter must update the console backend so console output reflects it."""
+    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    formatter = ScietexFormatter(
+        service_name="TestService",
+        worker_id=1,
+        fmt="%(levelname)s | %(message)s",
+    )
+    handler.setFormatter(formatter)
+
+    # The console backend must now use the custom formatter, not the stale default.
+    assert handler._console_backend is not None
+    assert handler._console_backend.formatter is formatter
+
+    await handler.start_logging()
+    logger = logging.getLogger("TestLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("Custom format message")
+    await asyncio.sleep(0.1)
+
+    captured = capsys.readouterr()
+    # Custom format uses "|" separators and no timestamp prefix.
+    assert "INF | Custom format message" in captured.out
+    assert " - " not in captured.out.split("Custom format message")[0]
 
     await handler.stop_logging()
 

@@ -1,108 +1,66 @@
 # Examples for `scietex.logging`
 
-This directory contains example scripts demonstrating how to use the `scietex.logging` package
-for asynchronous logging in Python applications. These examples illustrate the use of console,
-Redis, and Valkey logging backends provided by `AsyncBaseHandler`, `AsyncRedisHandler`, and `AsyncValkeyHandler`.
+This directory contains runnable example scripts demonstrating how to use the
+`scietex.logging` package for asynchronous logging in Python applications. The
+examples progress from the happy path (basic console logging) to advanced
+capabilities (custom formatters, bounded queues with overflow reporting, custom
+backends, restartable lifecycles, and multiple backends on one logger). Every
+example follows the same lifecycle: create a logger, add a handler, start the
+logging worker, log messages, then stop the worker.
 
-## Table of Contents
+## Prerequisites
 
-- [Getting Started](#getting-started)
-- [Example Scripts](#example-scripts)
-  - [1. Basic Console Logging](#1-basic-console-logging)
-  - [2. Redis Logging](#2-redis-logging)
-  - [3. Valkey Logging](#3-valkey-logging)
-  - [4. Logging to Both Console and Redis](#4-logging-to-both-console-and-redis)
+Install the base package plus the extras required by the examples you want to
+run. The table maps each example to the installation it needs.
 
----
+| Installation | Examples |
+| --- | --- |
+| Base package only | `basic_console_logging.py`, `custom_formatter.py`, `error_handler_and_queue_bounds.py`, `custom_backend.py`, `pure_machinery_handler.py`, `restartable_lifecycle.py` |
+| `scietex.logging[redis]` | `redis_logging.py`, `console_and_redis_logging.py`, `all_backends.py` |
+| `scietex.logging[valkey]` | `valkey_logging.py`, `all_backends.py` |
+| `scietex.logging[all]` (or `uv sync --all-extras`) | everything |
 
-## Getting Started
+## Example Index
 
-Ensure that the `scietex.logging` package and any additional dependencies are installed. To install with optional Redis support:
+| Example | What it teaches | Needs a server |
+| --- | --- | --- |
+| [basic_console_logging.py](./basic_console_logging.py) | Minimal console logging with `AsyncBaseHandler` | No |
+| [redis_logging.py](./redis_logging.py) | Log to a Redis stream with `AsyncRedisHandler` | Redis |
+| [valkey_logging.py](./valkey_logging.py) | Log to a Valkey stream with `AsyncValkeyHandler` | Valkey |
+| [console_and_redis_logging.py](./console_and_redis_logging.py) | Console and Redis handlers on one logger | Redis |
+| [custom_formatter.py](./custom_formatter.py) | Customize `ScietexFormatter` and apply it with `setFormatter` | No |
+| [error_handler_and_queue_bounds.py](./error_handler_and_queue_bounds.py) | `error_handler` callback and `queue_maxsize` drop-and-report overflow | No |
+| [custom_backend.py](./custom_backend.py) | Subclass `AsyncBrokerHandler` into an in-memory backend (`stdout_enable=False`) | No |
+| [pure_machinery_handler.py](./pure_machinery_handler.py) | Subclass `AsyncLoggingHandler` directly and register a backend | No |
+| [restartable_lifecycle.py](./restartable_lifecycle.py) | Start/stop cycles, idempotent stop, double-start `RuntimeError`, `stop_logging(timeout)` | No |
+| [all_backends.py](./all_backends.py) | Console, Redis, and Valkey simultaneously with explicit configs | Redis + Valkey |
+
+## Running the Examples
+
+Run any example with `uv`:
 
 ```commandline
-pip install scietex.logging[redis]
+uv run python examples/<name>.py
 ```
 
-Or install all backends:
+Replace `<name>` with the example file you want to run. The examples that need
+a server (`redis_logging.py`, `valkey_logging.py`, `console_and_redis_logging.py`,
+`all_backends.py`) assume Redis and/or Valkey are running locally on the default
+host and port. To point at a remote host, edit the `redis_config` dict (Redis)
+or the `valkey_config` `GlideClientConfiguration` (Valkey) inside the script
+before running.
 
-```commandline
-pip install scietex.logging[all]
-```
+## Lifecycle
 
-To run each example, use the following command:
-```commandline
-python examples/example_script_name.py
-```
-Replace `example_script_name.py` with the name of the example you wish to run.
+All examples share the same pattern:
 
-## Example Scripts
+1. Create a logger and set its level.
+2. Initialize one or more handlers.
+3. Add the handler(s) to the logger.
+4. `await handler.start_logging()` to start the background worker(s).
+5. Log messages.
+6. `await handler.stop_logging()` to drain and stop the worker(s).
 
-### 1. Basic Console Logging
-File: [basic_console_logging.py](./basic_console_logging.py)
-
-This example demonstrates how to set up asynchronous console logging using `AsyncBaseHandler`.
-The logs will be printed to the standard output, making this setup suitable for simple applications or debugging.
-
-Usage:
-```commandline
-python examples/basic_console_logging.py
-```
-
----
-
-### 2. Redis Logging
-File: [redis_logging.py](./redis_logging.py)
-
-This example demonstrates how to log messages to a Redis stream using `AsyncRedisHandler`.
-The Redis backend allows log messages to be stored in a Redis stream,
-providing persistence and support for high-throughput applications.
-
-Dependencies: Make sure Redis is running locally or specify the connection details in `redis_config` within the script.
-
-Usage:
-```commandline
-python examples/redis_logging.py
-```
-
----
-
-### 3. Valkey Logging
-File: [valkey_logging.py](./valkey_logging.py)
-
-This example demonstrates how to log messages to a Valkey stream using `AsyncValkeyHandler`.
-The Valkey backend allows log messages to be stored in a Valkey stream,
-providing persistence and support for high-throughput applications.
-
-Dependencies: Make sure Valkey is running locally or specify the connection details in `valkey_config` within the script.
-
-Usage:
-```commandline
-python examples/valkey_logging.py
-```
-
----
-
-### 4. Logging to Both Console and Redis
-File: [console_and_redis_logging.py](./console_and_redis_logging.py)
-
-This example demonstrates how to configure a logger with multiple handlers by using
-both `AsyncBaseHandler` and `AsyncRedisHandler`. Although `AsyncRedisHandler` already
-includes console logging inherited from `AsyncBaseHandler`, this example shows how to add
-separate logging handlers to the same logger, a common scenario in complex applications
-that require logging to multiple destinations simultaneously.
-
-Usage:
-```commandline
-python examples/console_and_redis_logging.py
-```
-
----
-
-## Notes
-
-  - Ensure that scietex.logging and any required dependencies (like Redis or Valkey) are properly installed.
-  - For Valkey support, install with: `pip install scietex.logging[valkey]`
-  - These examples can serve as starting points for integrating scietex.logging into your own projects.
-
-Feel free to modify the examples to explore additional features of scietex.logging and tailor
-the logging configuration to your application's needs.
+`restartable_lifecycle.py` explores this lifecycle in depth: `stop_logging` is
+idempotent, starting while already running raises `RuntimeError`, and each
+`start_logging` schedules fresh worker tasks from a clean queue.
