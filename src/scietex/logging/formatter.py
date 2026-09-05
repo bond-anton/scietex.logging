@@ -2,6 +2,7 @@
 Module with custom logging formatters.
 """
 
+import copy
 import logging
 from datetime import datetime, timezone
 
@@ -99,6 +100,9 @@ class ScietexFormatter(logging.Formatter):
         Returns:
             str: The formatted log message string.
         """
+        # Copy the record so the caller's record is never mutated.
+        record = copy.copy(record)
+
         # Add the worker_name to the log record
         record.worker_name = self.worker_name
 

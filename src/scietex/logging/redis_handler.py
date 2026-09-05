@@ -73,13 +73,16 @@ class AsyncRedisHandler(AsyncBrokerHandler):
         Connect to Redis asynchronously.
 
         Initializes the Redis client connection using the provided Redis configuration.
-        Sets `decode_responses=True` for handling Redis data in string format.
+        Sets `decode_responses=True` for handling Redis data in string format. A ping
+        probes connectivity before the client is considered connected.
 
         Returns:
             None
         """
         if self.client is None:
-            self.client = await redis.Redis(**self.client_config, decode_responses=True)
+            client = await redis.Redis(**self.client_config, decode_responses=True)
+            await client.ping()
+            self.client = client
 
     async def disconnect(self) -> None:
         """

@@ -24,7 +24,7 @@ valkey = ["valkey-glide~=2.5.0"]
 # Specify multiple logging options combined
 all = ["redis>=5.0.0", "valkey-glide~=2.5.0"]
 dev = ["tox>=4.30.3", "redis>=5.0.0", "valkey-glide~=2.5.0"]
-lint = ["ruff"]
+lint = ["ruff", "ty"]
 test = ["pytest", "pytest-asyncio"]
 
 [build-system]

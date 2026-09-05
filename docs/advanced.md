@@ -4,7 +4,9 @@ This guide covers advanced usage patterns and customization options.
 
 ## Custom Backends
 
-To create a custom logging backend, subclass `AsyncBrokerHandler` and implement the required methods.
+To create a custom logging backend, subclass `AsyncBrokerHandler` and implement the required
+abstract methods. `AsyncBrokerHandler` is an abstract base class and cannot be instantiated
+directly.
 
 ### Implementation Example
 
@@ -42,9 +44,14 @@ class AsyncPostgresHandler(AsyncBrokerHandler):
 
 ### Required Methods
 
+`AsyncBrokerHandler` declares three abstract methods that every backend must implement:
+
 1. **`connect()`**: Establish connection to your backend
 2. **`disconnect()`**: Close connection to your backend
 3. **`send_message(record)`**: Send a formatted log record to your backend
+
+A failure in `connect()` or `send_message()` must raise; the worker reports it through the
+error channel and retries, so records are never silently dropped.
 
 The record is a dictionary with the following keys:
 - `level`: Log level abbreviation (DBG, INF, WRN, ERR, CRT)
@@ -54,13 +61,11 @@ The record is a dictionary with the following keys:
 
 ## Worker Configuration
 
-### Queue Put Cleanup Threshold
+### Threading Contract
 
-Adjust how frequently pending queue tasks are cleaned up:
-
-```python
-handler = AsyncBaseHandler(queue_put_cleanup_threshold=500)
-```
+`emit()` must be called from the asyncio event-loop thread. The handler captures the event
+loop in `start_logging()` and raises `RuntimeError` if `emit()` is called from a different
+thread. Off-loop logging is not supported.
 
 ### Timeout on Shutdown
 
@@ -72,29 +77,27 @@ await handler.stop_logging(timeout=10.0)  # 10 second timeout
 
 ## Error Handling
 
-The handlers include robust error handling:
+Delivery failures (queue full, connection errors, broker send errors) are reported through
+the configured error channel instead of being silently dropped.
 
-- QueueFull exceptions are caught and logged
-- Connection errors are handled gracefully
-- Invalid event loop states don't crash the application
+### Custom Error Handler
 
-### Custom Error Handling
-
-You can extend error handling by subclassing:
+Pass an `error_handler` callback when constructing a handler:
 
 ```python
 from scietex.logging import AsyncBaseHandler
 
 
-class CustomErrorHandler(AsyncBaseHandler):
-    def emit(self, record):
-        try:
-            super().emit(record)
-        except Exception as e:
-            # Custom error handling
-            print(f"Custom error: {e}")
-            raise
+def on_error(record, exc):
+    # `record` may be None for connection-level failures.
+    print(f"Logging error: {exc}")
+
+
+handler = AsyncBaseHandler(error_handler=on_error)
 ```
+
+When no `error_handler` is provided, errors are logged through the `scietex.logging`
+module logger.
 
 ## Performance Considerations
 
@@ -103,12 +106,7 @@ class CustomErrorHandler(AsyncBaseHandler):
 For high-throughput logging:
 
 1. Increase queue size
-2. Adjust cleanup threshold
-3. Use multiple workers (if implementing custom handler)
-
-```python
-handler = AsyncBaseHandler(queue_put_cleanup_threshold=1000)
-```
+2. Use multiple workers (if implementing custom handler)
 
 ### Resource Management
 

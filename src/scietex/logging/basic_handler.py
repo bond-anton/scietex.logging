@@ -6,10 +6,12 @@ Provides AsyncBaseHandler class.
 import asyncio
 import logging
 import sys
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 from .formatter import ScietexFormatter
+
+_error_logger = logging.getLogger("scietex.logging")
 
 
 class AsyncBaseHandler(logging.Handler):
@@ -34,10 +36,10 @@ class AsyncBaseHandler(logging.Handler):
             log messages.
         log_workers_tasks (list[asyncio.Task]): List of asyncio tasks for each worker,
             created in `start_logging`.
-        log_queue_put_tasks (list[asyncio.Task]): List of asyncio tasks for queue put
-            operations. Periodically cleaned up when threshold is reached.
-        _queue_put_cleanup_threshold (int): Threshold for triggering periodic cleanup
-            of put tasks.
+        error_handler (callable | None): Optional callback invoked with
+            ``(record, exc)`` when a log record cannot be delivered.
+        _loop (asyncio.AbstractEventLoop | None): Event loop captured at
+            `start_logging`; `emit()` is only valid on that loop's thread.
 
     Methods:
         start_logging():
@@ -57,6 +59,8 @@ class AsyncBaseHandler(logging.Handler):
         self,
         service_name: str | None = None,
         worker_id: int | None = None,
+        *,
+        error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         **kwargs,
     ) -> None:
         """
@@ -66,17 +70,20 @@ class AsyncBaseHandler(logging.Handler):
             service_name (str, optional): Name of the service for log identification.
                 Defaults to "Service".
             worker_id (int, optional): Identifier for the worker instance. Defaults to 1.
+            error_handler (callable, optional): Callback invoked with
+                ``(record, exc)`` when a log record cannot be delivered. Defaults to
+                None, in which case errors are reported via the ``scietex.logging``
+                module logger.
             **kwargs: Additional arguments, including `stdout_enable`
-                to enable/disable console logging and `queue_put_cleanup_threshold`
-                to configure the threshold for periodic cleanup of pending tasks.
+                to enable/disable console logging.
 
         Attributes:
             stdout_enable (bool): Flag to enable console logging (defaults to True).
-            _queue_put_cleanup_threshold (int): Threshold for triggering periodic cleanup
-                of put tasks.
+            error_handler (callable | None): Callback for reporting delivery errors.
         """
         super().__init__()
         self.stdout_enable: bool = kwargs.get("stdout_enable", True)
+        self.error_handler = error_handler
         if worker_id is None:
             worker_id = 1
         if service_name is None:
@@ -92,10 +99,7 @@ class AsyncBaseHandler(logging.Handler):
             self.log_workers.append(self._console_logging_worker())
 
         self.log_workers_tasks: list[asyncio.Task[None]] = []
-        self.log_queue_put_tasks: list[asyncio.Task[None]] = []
-        self._queue_put_cleanup_threshold: int = max(
-            kwargs.get("queue_put_cleanup_threshold", 100), 1
-        )
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def start_logging(self) -> None:
         """
@@ -108,6 +112,7 @@ class AsyncBaseHandler(logging.Handler):
         Returns:
             None
         """
+        self._loop = asyncio.get_running_loop()
         self.logging_accept_event.set()  # Set the event to indicate logs are accepted
         self.logging_running_event.set()  # Set the event to indicate logging is active
         self.log_workers_tasks = [asyncio.create_task(worker) for worker in self.log_workers]
@@ -120,6 +125,9 @@ class AsyncBaseHandler(logging.Handler):
         is set, queues the record in the queues. Each backend can have
         a unique queue, allowing separate handling in different workers.
 
+        Must be called from the asyncio event-loop thread; off-loop logging raises
+        `RuntimeError`.
+
         Args:
             record (logging.LogRecord): The log record to be processed.
 
@@ -129,25 +137,22 @@ class AsyncBaseHandler(logging.Handler):
         if not self.logging_accept_event.is_set():
             return
 
-        # Schedule an asynchronous task to put the message in each queue
-        for _, queue in self.log_queues.items():
-            try:
-                # Use asyncio.create_task to handle each put asynchronously
-                queue_put_task = asyncio.create_task(queue.put(record))
-                self.log_queue_put_tasks.append(queue_put_task)  # Track the put task
-                # Periodic cleanup to prevent unbounded growth
-                if len(self.log_queue_put_tasks) >= self._queue_put_cleanup_threshold:
-                    self._cleanup_queue_put_tasks()
-            except asyncio.QueueFull:
-                # Queue is full; could log an error or drop the message based on policy
-                pass
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if current_loop is not self._loop:
+            raise RuntimeError(
+                "AsyncBaseHandler.emit() must be called from the asyncio event-loop "
+                "thread; off-loop logging is not supported"
+            )
 
-            except asyncio.InvalidStateError:
-                # Happens if the event loop is in an invalid state for this operation
-                pass
-            except Exception:
-                # Log unexpected errors for visibility without halting other tasks
-                pass
+        # Put the record in each queue synchronously; failures are reported, not swallowed.
+        for queue in self.log_queues.values():
+            try:
+                queue.put_nowait(record)
+            except Exception as exc:
+                self._report_error(record, exc)
 
     async def stop_logging(self, timeout: float = 5.0) -> None:
         """
@@ -166,11 +171,6 @@ class AsyncBaseHandler(logging.Handler):
 
         # Stop accepting new log records
         self.logging_accept_event.clear()
-
-        # Wait for all pending put tasks to complete
-        if self.log_queue_put_tasks:
-            await asyncio.gather(*self.log_queue_put_tasks)
-            self.log_queue_put_tasks = []  # Reset the list
 
         # Signal workers to stop processing
         self.logging_running_event.clear()
@@ -234,11 +234,31 @@ class AsyncBaseHandler(logging.Handler):
             await asyncio.gather(*self.log_workers_tasks)
         self.close()
 
-    def _cleanup_queue_put_tasks(self) -> None:
+    def _report_error(self, record: logging.LogRecord | None, exc: Exception) -> None:
         """
-        Remove completed tasks from log_queue_put_tasks to prevent memory leaks.
+        Report a delivery error through the configured error channel.
+
+        If an `error_handler` callback is configured it is invoked; otherwise the
+        error is logged through the `scietex.logging` module logger.
+
+        Args:
+            record (logging.LogRecord | None): The record whose delivery failed, or
+                None when the failure is not tied to a specific record.
+            exc (Exception): The exception that caused the failure.
         """
-        self.log_queue_put_tasks = [task for task in self.log_queue_put_tasks if not task.done()]
+        if self.error_handler is not None:
+            try:
+                self.error_handler(record, exc)
+            except Exception:
+                # The error reporter must never crash the logging path.
+                pass
+        else:
+            _error_logger.error(
+                "%s failed to deliver a log record: %s",
+                type(self).__name__,
+                exc,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
 
     async def _console_logging_worker(self) -> None:
         """

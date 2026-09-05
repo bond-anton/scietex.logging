@@ -1,7 +1,7 @@
 """Asynchronous Valkey logging handler for non-blocking logging."""
 
 try:
-    from glide import ClosingError, GlideClient, GlideClientConfiguration, NodeAddress
+    from glide import GlideClient, GlideClientConfiguration, NodeAddress
 except ImportError as e:
     raise ImportError(
         "The 'valkey-glide' module is required to use this feature. "
@@ -73,15 +73,13 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
         Connect to Valkey asynchronously.
 
         Initializes the Valkey client connection using the provided Valkey configuration.
+        A failed connection raises so the worker can report it and retry.
 
         Returns:
             None
         """
         if self.client is None:
-            try:
-                self.client = await GlideClient.create(self.client_config)
-            except ClosingError:
-                pass
+            self.client = await GlideClient.create(self.client_config)
 
     async def disconnect(self) -> None:
         """

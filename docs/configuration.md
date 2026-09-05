@@ -62,13 +62,23 @@ Console logging can be disabled by setting `stdout_enable=False`:
 handler = AsyncBaseHandler(stdout_enable=False)
 ```
 
-### Queue Cleanup Threshold
+### Error Handler
 
-Adjust the frequency of cleanup for pending queue tasks:
+Provide an `error_handler` callback to receive delivery failures (queue full, connection
+errors, broker send errors):
 
 ```python
-handler = AsyncBaseHandler(queue_put_cleanup_threshold=200)
+def on_error(record, exc):
+    print(f"Logging error: {exc}")
+
+
+handler = AsyncBaseHandler(error_handler=on_error)
 ```
+
+### Threading Contract
+
+`emit()` must be called from the asyncio event-loop thread. The handler raises
+`RuntimeError` if `emit()` is called off-loop.
 
 ## Custom Formatters
 

@@ -1,19 +1,23 @@
 """Asynchronous logging handler for non-blocking logging to message broker."""
 
+import abc
 import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
 from .basic_handler import AsyncBaseHandler
+from .formatter import level_abbreviation
 
 
-class AsyncBrokerHandler(AsyncBaseHandler):
+class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
     """
-    Asynchronous logging handler for non-blocking logging to message broker.
+    Abstract asynchronous logging handler for non-blocking logging to a message broker.
 
     This handler sends log records to a message broker, enabling asynchronous
     logging without blocking the main application. The handler maintains a
     separate worker to process log records queued in an asyncio queue.
+
+    Subclasses must implement `connect()`, `disconnect()`, and `send_message()`.
 
     Attributes:
         queue_name (str): The name of the queue for the handler.
@@ -56,32 +60,38 @@ class AsyncBrokerHandler(AsyncBaseHandler):
         self.log_queues[self.queue_name] = asyncio.Queue()  # Add queue for logs
         self.log_workers.append(self._worker())  # Add worker to the list
 
+    @abc.abstractmethod
     async def connect(self) -> None:
         """
-        Connect to Message broker asynchronously.
+        Connect to the message broker asynchronously.
 
-        Initializes the client connection using the provided configuration.
-        Needs to be redefined in subclasses.
+        Subclasses must establish the broker client and set `self.client`. A failure
+        must raise so the worker can report it and retry.
 
         Returns:
             None
         """
+        ...
 
+    @abc.abstractmethod
     async def disconnect(self) -> None:
         """
-        Disconnect from Message broker asynchronously.
-        Needs to be redefined in subclasses.
+        Disconnect from the message broker asynchronously.
+
+        Subclasses must close the broker client and reset `self.client` to None.
 
         Returns:
             None
         """
-        if self.client is not None:
-            self.client = None
+        ...
 
+    @abc.abstractmethod
     async def send_message(self, record: dict[str, str]) -> None:
         """
-        Send log record to message broker asynchronously.
-        Needs to be redefined in subclasses.
+        Send a log record to the message broker asynchronously.
+
+        Subclasses must deliver the record to the broker. A failure must raise so the
+        worker can report it without acknowledging the queue task.
 
         Args:
             record (dict[str, str]): The log record to send as a dictionary.
@@ -89,6 +99,7 @@ class AsyncBrokerHandler(AsyncBaseHandler):
         Returns:
             None
         """
+        ...
 
     async def _worker(self) -> None:
         """
@@ -101,30 +112,37 @@ class AsyncBrokerHandler(AsyncBaseHandler):
         Returns:
             None
         """
-        await self.connect()  # Establish connection
         while self.logging_running_event.is_set() or not self.log_queues[self.queue_name].empty():
+            if self.client is None:
+                try:
+                    await self.connect()
+                except Exception as exc:
+                    self._report_error(None, exc)
+                    await asyncio.sleep(1.0)
+                    continue
             try:
                 record = await asyncio.wait_for(self.log_queues[self.queue_name].get(), 1)
-                logger_name: str
-                if hasattr(record, "worker_name"):
-                    logger_name = (
-                        record.worker_name
-                        if isinstance(record.worker_name, str)
-                        else str(record.worker_name)
-                    )
-                else:
-                    logger_name = record.name
-                log_entry: dict[str, str] = {
-                    "level": record.levelname,
-                    "message": record.getMessage(),
-                    "name": logger_name,
-                    "time": self.formatter.formatTime(record)
-                    if self.formatter
-                    else datetime.now(timezone.utc).isoformat(),
-                }
-                if self.client is not None:
-                    await self.send_message(log_entry)
-                self.log_queues[self.queue_name].task_done()
             except asyncio.TimeoutError:
-                pass
-        await self.disconnect()
+                continue
+            # Compute the broker fields directly instead of reading formatter-mutated
+            # record attributes, keeping output deterministic regardless of stdout_enable.
+            level = level_abbreviation(record.levelno)
+            name = getattr(self.formatter, "worker_name", record.name)
+            log_entry: dict[str, str] = {
+                "level": level,
+                "message": record.getMessage(),
+                "name": name,
+                "time": self.formatter.formatTime(record)
+                if self.formatter
+                else datetime.now(timezone.utc).isoformat(),
+            }
+            try:
+                await self.send_message(log_entry)
+            except Exception as exc:
+                self._report_error(record, exc)
+                continue
+            self.log_queues[self.queue_name].task_done()
+        try:
+            await self.disconnect()
+        except Exception as exc:
+            self._report_error(None, exc)

@@ -81,12 +81,11 @@ async def test_console_worker_outputs_log(capsys):
 
 
 @pytest.mark.asyncio
-async def test_stop_logging_waits_for_pending_tasks():
-    """Test that stop_logging waits for pending tasks to complete."""
+async def test_stop_logging_drains_queues():
+    """Test that stop_logging waits for all queued records to be processed."""
     handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
     await handler.start_logging()
 
-    # Emit several log records
     logger = logging.getLogger("TestLogger")
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
@@ -94,79 +93,58 @@ async def test_stop_logging_waits_for_pending_tasks():
     for i in range(5):
         logger.info("Test log message %d", i)
 
-    # Stop logging and ensure it waits for all tasks to complete
     await handler.stop_logging()
 
-    # Check that no tasks are left in the queue
-    assert handler.log_queue_put_tasks == []
-
-
-def test_cleanup_threshold_default():
-    """Test that cleanup threshold defaults to 100."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
-    assert handler._queue_put_cleanup_threshold == 100
-
-
-def test_cleanup_threshold_zero():
-    """Test that cleanup threshold defaults to 1 when 0 is provided."""
-    handler = AsyncBaseHandler(
-        service_name="TestService", worker_id=1, queue_put_cleanup_threshold=0
-    )
-    assert handler._queue_put_cleanup_threshold == 1
-
-
-def test_cleanup_threshold_negative():
-    """Test that cleanup threshold defaults to 1 for negative values."""
-    handler = AsyncBaseHandler(
-        service_name="TestService", worker_id=1, queue_put_cleanup_threshold=-5
-    )
-    assert handler._queue_put_cleanup_threshold == 1
-
-
-def test_cleanup_threshold_custom():
-    """Test that custom cleanup threshold is respected."""
-    handler = AsyncBaseHandler(
-        service_name="TestService", worker_id=1, queue_put_cleanup_threshold=50
-    )
-    assert handler._queue_put_cleanup_threshold == 50
+    # Records were queued synchronously and drained by the console worker. The
+    # queue.join() inside stop_logging already guarantees every item was acknowledged.
+    assert handler.log_queues["console"].empty()
 
 
 @pytest.mark.asyncio
-async def test_emit_high_volume_cleanup():
-    """Test that periodic cleanup is triggered when threshold is reached."""
+async def test_emit_puts_records_synchronously():
+    """Test that emit puts records directly via put_nowait without scheduling tasks."""
+    handler = AsyncBaseHandler(service_name="TestService", worker_id=1, stdout_enable=False)
+    handler.log_queues["custom"] = asyncio.Queue()
+    handler._loop = asyncio.get_running_loop()
+    handler.logging_accept_event.set()
+
+    record = logging.LogRecord("test", logging.INFO, "", 0, "sync message", None, None)
+    handler.emit(record)
+
+    assert handler.log_queues["custom"].qsize() == 1
+
+
+def test_emit_raises_when_called_off_loop():
+    """Test that emit raises RuntimeError when called outside the event-loop thread."""
+    handler = AsyncBaseHandler(service_name="TestService", worker_id=1, stdout_enable=False)
+    handler._loop = object()  # Sentinel loop that never matches a running loop
+    handler.logging_accept_event.set()
+
+    record = logging.LogRecord("test", logging.INFO, "", 0, "msg", None, None)
+    with pytest.raises(RuntimeError):
+        handler.emit(record)
+
+
+@pytest.mark.asyncio
+async def test_error_channel_invoked_on_emit_failure(monkeypatch):
+    """Test that emit reports queue-put failures through the error handler."""
+    errors = []
     handler = AsyncBaseHandler(
-        service_name="TestService", worker_id=1, queue_put_cleanup_threshold=5
+        service_name="TestService",
+        worker_id=1,
+        error_handler=lambda record, exc: errors.append(exc),
     )
     await handler.start_logging()
 
-    logger = logging.getLogger("TestLogger")
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(handler)
+    def failing_put(item):
+        raise RuntimeError("put failed")
 
-    # Track cleanup calls
-    cleanup_count = 0
-    original_cleanup = handler._cleanup_queue_put_tasks
+    monkeypatch.setattr(handler.log_queues["console"], "put_nowait", failing_put)
 
-    def tracked_cleanup():
-        nonlocal cleanup_count
-        cleanup_count += 1
-        original_cleanup()
+    record = logging.LogRecord("test", logging.INFO, "", 0, "msg", None, None)
+    handler.emit(record)
 
-    handler._cleanup_queue_put_tasks = tracked_cleanup
-
-    # Emit more logs than threshold
-    for i in range(10):
-        logger.info("Test log message %d", i)
-
-    # Verify that cleanup was triggered (at least once, likely multiple times)
-    assert cleanup_count >= 1, "Cleanup should have been triggered when threshold was reached"
-
-    # After cleanup is triggered, the list should be cleaned up (remove completed tasks)
-    # Wait for worker to process tasks
-    await asyncio.sleep(0.2)
-    handler._cleanup_queue_put_tasks()
-
-    # Cleanup should have removed some completed tasks
-    assert len(handler.log_queue_put_tasks) < 10
+    assert len(errors) == 1
+    assert isinstance(errors[0], RuntimeError)
 
     await handler.stop_logging()
