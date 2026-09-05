@@ -34,6 +34,13 @@ class _NoopBrokerHandler(AsyncBrokerHandler):
         pass
 
 
+class _ExplodingFormatter(logging.Formatter):
+    """Formatter that raises on format, simulating a broken stdout at the handler level."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        raise RuntimeError("format exploded")
+
+
 @pytest.mark.asyncio
 async def test_basic_handler_initialization():
     """Test the initialization of AsyncBaseHandler with default values."""
@@ -118,7 +125,7 @@ async def test_set_formatter_propagates_to_console_backend(capsys):
 
     # The console backend must now use the custom formatter, not the stale default.
     assert handler._console_backend is not None
-    assert handler._console_backend.formatter is formatter
+    assert handler._console_backend.formatter_provider() is formatter
 
     await handler.start_logging()
     logger = logging.getLogger("TestLogger")
@@ -133,6 +140,51 @@ async def test_set_formatter_propagates_to_console_backend(capsys):
     assert " - " not in captured.out.split("Custom format message")[0]
 
     await handler.stop_logging()
+
+
+@pytest.mark.asyncio
+async def test_set_formatter_console_reads_dynamically(capsys):
+    """setFormatter affects console output mid-stream without a manual backend re-sync."""
+    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    await handler.start_logging()
+
+    logger = logging.getLogger("TestLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("before")
+    handler.setFormatter(
+        ScietexFormatter(service_name="TestService", worker_id=1, fmt="%(levelname)s | %(message)s")
+    )
+    logger.info("after")
+    await handler.stop_logging()
+
+    captured = capsys.readouterr().out
+    # The record logged after setFormatter is rendered with the new formatter.
+    assert "INF | after" in captured
+
+
+@pytest.mark.asyncio
+async def test_console_write_failure_reported_and_shutdown_clean():
+    """A console format/write failure is reported and stop_logging still completes."""
+    errors = []
+    handler = AsyncBaseHandler(
+        service_name="TestService",
+        worker_id=1,
+        error_handler=lambda record, exc: errors.append(exc),
+    )
+    handler.setFormatter(_ExplodingFormatter())
+    await handler.start_logging()
+
+    logger = logging.getLogger("TestLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("boom")
+
+    await handler.stop_logging(timeout=5)
+
+    assert len(errors) >= 1
+    assert all(isinstance(err, RuntimeError) for err in errors)
+    assert handler.log_queues["console"].empty()
 
 
 @pytest.mark.asyncio

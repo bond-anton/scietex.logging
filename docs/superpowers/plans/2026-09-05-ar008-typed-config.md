@@ -643,33 +643,30 @@ In `valkey_handler.py`:
 3. Replace the `super().__init__` call (lines 58-63) and the `client_config` assignment (lines 64-69):
 
 ```python
-        super().__init__(
-            queue_name="valkey",
-            service_name=service_name,
-            worker_id=worker_id,
-            error_handler=error_handler,
-            stdout_enable=stdout_enable,
-            queue_maxsize=queue_maxsize,
-        )
-        self.stream_name = stream_name
-        self.client_config: GlideClientConfiguration
-        if valkey_config is not None:
-            self.client_config = valkey_config
-        else:
-            self.client_config = GlideClientConfiguration([NodeAddress()])
-        self.config = LoggingConfig(
-            service_name=self.config.service_name,
-            worker_id=self.config.worker_id,
-            error_handler=self.config.error_handler,
-            queue_maxsize=self.config.queue_maxsize,
-            stdout_enable=self.config.stdout_enable,
-            backend_config=ValkeyConfig(
-                addresses=[
-                    (node.host, node.port)
-                    for node in self.client_config.addresses
-                ]
-            ),
-        )
+super().__init__(
+    queue_name="valkey",
+    service_name=service_name,
+    worker_id=worker_id,
+    error_handler=error_handler,
+    stdout_enable=stdout_enable,
+    queue_maxsize=queue_maxsize,
+)
+self.stream_name = stream_name
+self.client_config: GlideClientConfiguration
+if valkey_config is not None:
+    self.client_config = valkey_config
+else:
+    self.client_config = GlideClientConfiguration([NodeAddress()])
+self.config = LoggingConfig(
+    service_name=self.config.service_name,
+    worker_id=self.config.worker_id,
+    error_handler=self.config.error_handler,
+    queue_maxsize=self.config.queue_maxsize,
+    stdout_enable=self.config.stdout_enable,
+    backend_config=ValkeyConfig(
+        addresses=[(node.host, node.port) for node in self.client_config.addresses]
+    ),
+)
 ```
 
 Note: `GlideClientConfiguration` exposes `.addresses` as a list of `NodeAddress` objects with `.host` and `.port` attributes. If the exact attribute names differ in the installed `valkey-glide` version, adjust the comprehension to match (verify against the installed package before finalizing this step). `self.config.backend_config` is informational/typed; `connect()` continues to use `self.client_config` unchanged.

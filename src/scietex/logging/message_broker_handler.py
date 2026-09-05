@@ -3,14 +3,23 @@
 import abc
 import asyncio
 import logging
+import random
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
 from .async_logging_handler import BackendDrainResult, DrainStatus
 from .basic_handler import AsyncBaseHandler
-from .config import RedisConfig, ValkeyConfig
-from .formatter import level_abbreviation
+from .config import RedisConfig, ValkeyConfig, level_abbreviation
+
+# Connect-retry backoff (AR-022). A fixed 1s retry would spam the error channel
+# ~3600x/hour during a prolonged outage. Consecutive connect() failures sleep a
+# delay that doubles from a 0.5s base up to a 30s cap; ±20% jitter on each sleep
+# decorrelates retries across workers, and a successful connect resets the
+# counter to base so a flap does not resume at the capped delay.
+_CONNECT_RETRY_BASE = 0.5
+_CONNECT_RETRY_CAP = 30.0
+_CONNECT_RETRY_JITTER = 0.2
 
 
 class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
@@ -48,6 +57,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         stdout_enable: bool = True,
         queue_maxsize: int = 10000,
         backend_config: RedisConfig | ValkeyConfig | None = None,
+        formatter: logging.Formatter | None = None,
     ) -> None:
         """
         Initialize the asynchronous Message broker logging handler.
@@ -64,6 +74,9 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
                 Defaults to 10000.
             backend_config (RedisConfig | ValkeyConfig | None): Backend-specific config
                 attached by concrete broker subclasses. Defaults to None.
+            formatter (logging.Formatter | None): Formatter used to render records.
+                Defaults to None, in which case a default ``ScietexFormatter`` is
+                constructed from ``service_name`` and ``worker_id``.
 
         Attributes:
             queue_name (str): The name of the queue for the handler.
@@ -79,6 +92,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
             stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
             backend_config=backend_config,
+            formatter=formatter,
         )
         self.queue_name: str = queue_name
         self.client: Any | None = None
@@ -147,6 +161,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         Returns:
             None
         """
+        connect_delay = _CONNECT_RETRY_BASE
         try:
             while (
                 self.logging_running_event.is_set() or not self.log_queues[self.queue_name].empty()
@@ -156,8 +171,13 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
                         await self.connect()
                     except Exception as exc:
                         self._report_error(None, exc)
-                        await asyncio.sleep(1.0)
+                        await asyncio.sleep(
+                            connect_delay
+                            * random.uniform(1 - _CONNECT_RETRY_JITTER, 1 + _CONNECT_RETRY_JITTER)
+                        )
+                        connect_delay = min(connect_delay * 2, _CONNECT_RETRY_CAP)
                         continue
+                    connect_delay = _CONNECT_RETRY_BASE
                 try:
                     record = await asyncio.wait_for(self.log_queues[self.queue_name].get(), 1)
                 except asyncio.TimeoutError:

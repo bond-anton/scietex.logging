@@ -285,21 +285,19 @@ Current (`:286-290`):
 
 New:
 ```python
-        # Wait for all worker tasks to complete, then forget them so a later stop
-        # does not re-gather already-finished tasks. The gather is bounded by the
-        # same timeout as the drains: a worker stuck mid-connect/send (e.g. a down
-        # broker with no socket timeout) must not hang shutdown forever. On
-        # timeout, cancel the stragglers so the handler is restartable.
-        if self.log_workers_tasks:
-            try:
-                await asyncio.wait_for(
-                    asyncio.gather(*self.log_workers_tasks), timeout=timeout
-                )
-            except asyncio.TimeoutError:
-                for task in self.log_workers_tasks:
-                    task.cancel()
-                await asyncio.gather(*self.log_workers_tasks, return_exceptions=True)
-        self.log_workers_tasks = []
+# Wait for all worker tasks to complete, then forget them so a later stop
+# does not re-gather already-finished tasks. The gather is bounded by the
+# same timeout as the drains: a worker stuck mid-connect/send (e.g. a down
+# broker with no socket timeout) must not hang shutdown forever. On
+# timeout, cancel the stragglers so the handler is restartable.
+if self.log_workers_tasks:
+    try:
+        await asyncio.wait_for(asyncio.gather(*self.log_workers_tasks), timeout=timeout)
+    except asyncio.TimeoutError:
+        for task in self.log_workers_tasks:
+            task.cancel()
+        await asyncio.gather(*self.log_workers_tasks, return_exceptions=True)
+self.log_workers_tasks = []
 ```
 
 Note: `asyncio.CancelledError` propagates out of the cancelled tasks; `return_exceptions=True` on the second gather swallows it so `stop_logging` does not raise. The worker's `disconnect()` cleanup on cancellation is AR-032 (out of scope) — this change does not make it worse; it just ensures the task is cancelled rather than leaked.

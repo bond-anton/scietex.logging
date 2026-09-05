@@ -5,7 +5,7 @@ from .config import RedisConfig, optional_dependency_error
 try:
     import redis.asyncio as redis
 except ImportError as e:
-    raise ImportError(optional_dependency_error("redis", "redis")) from e
+    raise ImportError(optional_dependency_error("redis", "redis"), name="redis") from e
 
 import logging
 from collections.abc import Callable
@@ -44,6 +44,7 @@ class AsyncRedisHandler(AsyncBrokerHandler):
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         stdout_enable: bool = True,
         queue_maxsize: int = 10000,
+        formatter: logging.Formatter | None = None,
     ) -> None:
         """
         Initialize the asynchronous Redis logging handler.
@@ -62,6 +63,9 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can hold.
                 Defaults to 10000.
+            formatter (logging.Formatter | None): Formatter used to render records.
+                Defaults to None, in which case a default ``ScietexFormatter`` is
+                constructed from ``service_name`` and ``worker_id``.
 
         Attributes:
             stream_name (str): The Redis stream name where log entries are sent.
@@ -79,6 +83,7 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
             backend_config=RedisConfig(**raw),
+            formatter=formatter,
         )
         self.stream_name = stream_name
         self.client_config: dict = raw
@@ -96,7 +101,11 @@ class AsyncRedisHandler(AsyncBrokerHandler):
         """
         if self.client is None:
             client = await redis.Redis(**self.client_config, decode_responses=True)
-            await client.ping()
+            try:
+                await client.ping()
+            except Exception:
+                await client.aclose()
+                raise
             self.client = client
 
     async def disconnect(self) -> None:
@@ -117,5 +126,6 @@ class AsyncRedisHandler(AsyncBrokerHandler):
         Returns:
             None
         """
-        if self.client is not None:
-            await self.client.xadd(self.stream_name, record)
+        if self.client is None:
+            raise RuntimeError("Redis client is not connected; call connect() first.")
+        await self.client.xadd(self.stream_name, record)

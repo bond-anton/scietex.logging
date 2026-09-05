@@ -98,7 +98,7 @@ class MyHandler(AsyncLoggingHandler):
         # drains self.log_queues["my_backend"]; called fresh on each start_logging
         ...
 
-    async def drain(self, timeout, results): ...
+    async def drain(self, timeout): ...
 ```
 
 ### Error Handler
@@ -154,7 +154,7 @@ aliases over `self.config`, so there is no parallel state to drift.
   for the pure-machinery/console-only handlers). `backend_config` is typed
   `RedisConfig | ValkeyConfig | None` — a real union, not `Any`.
 - `RedisConfig` — Redis connection settings. It mirrors the full plain-option
-  surface of `redis.Redis` (39 fields: `host`/`port`/`db` plus `username`,
+  surface of `redis.Redis` (40 fields: `host`/`port`/`db` plus `username`,
   `password`, socket/ssl/encoding/retry/health-check/client-name/protocol
   options), so a `redis_config` dict carrying legitimate client options is
   accepted rather than rejected. Stored as `self.config.backend_config` on
@@ -166,9 +166,11 @@ The handler constructors **no longer accept `**kwargs`**. Unknown or typo'd
 keyword arguments now raise `TypeError` at construction time instead of being
 silently swallowed. `AsyncRedisHandler` converts its `redis_config` dict into a
 typed `RedisConfig`; keys outside the modeled option surface still raise
-`TypeError`. The raw client input is kept separately as `self.client_config`
-(a dict for Redis, a `GlideClientConfiguration` for Valkey) and is what
-`connect()` passes to the underlying client.
+`TypeError`. The raw client input is kept separately as `self.client_config` —
+a plain dict for both Redis and Valkey — and is what `connect()` passes to the
+underlying client. For Redis the dict is passed directly to `redis.Redis(**config)`;
+for Valkey the dict is translated into a `GlideClientConfiguration` inside
+`connect()`.
 
 ### Threading Contract
 

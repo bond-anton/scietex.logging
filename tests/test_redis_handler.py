@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import socket
 
 import pytest
 from redis.asyncio import Redis
@@ -11,6 +12,19 @@ from scietex.logging.redis_handler import (
 )  # Replace with actual module path
 
 
+def _redis_server_reachable() -> bool:
+    """Return True when a TCP connection to the local Redis node can be established."""
+    try:
+        with socket.create_connection(("localhost", 6379), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+@pytest.mark.skipif(
+    not _redis_server_reachable(),
+    reason="No Redis server reachable at localhost:6379; skipping end-to-end test.",
+)
 @pytest.mark.asyncio
 async def test_redis_handler_logs_to_stream():
     """Testing logging to stream."""
@@ -111,3 +125,38 @@ def test_redis_config_accepts_valid_extra_options():
         "password": "secret",
         "ssl": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_redis_connect_closes_client_when_ping_fails(monkeypatch):
+    """connect() closes the locally-created client when ping() raises (AR-033)."""
+    closed = []
+
+    class FakeClient:
+        async def ping(self):
+            raise ConnectionError("ping failed")
+
+        async def aclose(self):
+            closed.append(True)
+
+    fake_client = FakeClient()
+
+    async def fake_redis(**kwargs):
+        return fake_client
+
+    monkeypatch.setattr("redis.asyncio.Redis", fake_redis)
+
+    handler = AsyncRedisHandler(stream_name="s")
+    with pytest.raises(ConnectionError):
+        await handler.connect()
+    assert handler.client is None
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_redis_send_message_raises_when_not_connected():
+    """send_message() raises instead of silently acking when no client is connected (AR-034)."""
+    handler = AsyncRedisHandler(stream_name="s")
+    record = {"level": "INF", "message": "m", "name": "n", "time": "t"}
+    with pytest.raises(RuntimeError):
+        await handler.send_message(record)

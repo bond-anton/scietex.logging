@@ -4,7 +4,7 @@ This file provides guidance for OpenCode agents working on the `scietex.logging`
 
 ## Project Overview
 
-`scietex.logging` is an asynchronous Python logging package that provides non-blocking logging capabilities. It supports multiple backends including console logging and Redis logging (with Valkey support coming soon).
+`scietex.logging` is an asynchronous Python logging package that provides non-blocking logging capabilities. It supports multiple backends including console logging, Redis logging, and Valkey logging.
 
 ## Key Details
 
@@ -19,28 +19,44 @@ This file provides guidance for OpenCode agents working on the `scietex.logging`
 scietex.logging/
 ├── src/scietex/logging/
 │   ├── __init__.py              # Public API exports
+│   ├── async_logging_handler.py # AsyncLoggingHandler machinery base
 │   ├── basic_handler.py         # AsyncBaseHandler (base class with console backend)
-│   ├── formatter.py             # ScietexFormatter and level_abbreviation helper
+│   ├── config.py                # LoggingConfig, RedisConfig, ValkeyConfig
+│   ├── console_backend.py       # ConsoleBackend peer backend
+│   ├── formatter.py             # ScietexFormatter
 │   ├── message_broker_handler.py # AsyncBrokerHandler (base class for broker backends)
 │   ├── redis_handler.py         # AsyncRedisHandler (Redis backend)
 │   └── valkey_handler.py        # AsyncValkeyHandler (Valkey backend)
 ├── tests/
+│   ├── test_async_logging_handler.py
 │   ├── test_basic_handler.py
-│   ├── test_redis_handler.py
-│   ├── test_valkey_handler.py
+│   ├── test_config.py
+│   ├── test_console_backend.py
 │   ├── test_formatter.py
+│   ├── test_message_broker_handler.py
+│   ├── test_queue_bounds.py
+│   ├── test_redis_handler.py
+│   ├── test_restartable_lifecycle.py
+│   ├── test_valkey_handler.py
 │   └── test_version.py
 ├── docs/
+│   ├── architecture/
 │   ├── index.md
 │   ├── examples.md
 │   ├── advanced.md
 │   ├── backends.md
 │   └── configuration.md
 ├── examples/
+│   ├── all_backends.py
 │   ├── basic_console_logging.py
-│   ├── redis_logging.py
-│   ├── valkey_logging.py
 │   ├── console_and_redis_logging.py
+│   ├── custom_backend.py
+│   ├── custom_formatter.py
+│   ├── error_handler_and_queue_bounds.py
+│   ├── pure_machinery_handler.py
+│   ├── redis_logging.py
+│   ├── restartable_lifecycle.py
+│   ├── valkey_logging.py
 │   └── README.md
 ├── pyproject.toml               # Project configuration
 ├── uv.lock                      # Locked dependencies
@@ -53,9 +69,17 @@ scietex.logging/
 
 - `AsyncBaseHandler` - Base handler with console logging backend (always available)
 - `AsyncBrokerHandler` - Base handler for message broker backends
+- `AsyncLoggingHandler` - Shared queue/worker machinery base for all handlers (always available)
+- `ConsoleBackend` - Console sink registered by `AsyncBaseHandler` (always available)
 - `ScietexFormatter` - Custom formatter with worker name and 3-letter log level abbreviations
 - `AsyncRedisHandler` - Redis logging backend (optional, requires `[redis]` extra)
 - `AsyncValkeyHandler` - Valkey logging backend (optional, requires `[valkey]` extra)
+
+### Exported Configuration Types (from `__init__.py`)
+
+- `LoggingConfig` - Shared machinery options for every handler
+- `RedisConfig` - Connection settings for the Redis backend
+- `ValkeyConfig` - Connection settings for the Valkey backend
 
 ### Installation Extras
 
@@ -63,7 +87,7 @@ scietex.logging/
 - `scietex.logging[valkey]` - Install Valkey support  
 - `scietex.logging[all]` - Install all backends
 - `scietex.logging[dev]` - Development dependencies (tox, redis, valkey)
-- `scietex.logging[lint]` - Linting (ruff)
+- `scietex.logging[lint]` - Linting (ruff, ty)
 - `scietex.logging[test]` - Testing (pytest, pytest-asyncio)
 
 ## Architecture
@@ -72,10 +96,11 @@ scietex.logging/
 
 ```
 logging.Handler (standard library)
-    └── AsyncBaseHandler (src/scietex/logging/basic_handler.py)
-        └── AsyncBrokerHandler (src/scietex/logging/message_broker_handler.py)
-            ├── AsyncRedisHandler (src/scietex/logging/redis_handler.py)
-            └── AsyncValkeyHandler (src/scietex/logging/valkey_handler.py)
+    └── AsyncLoggingHandler (src/scietex/logging/async_logging_handler.py)
+        └── AsyncBaseHandler (src/scietex/logging/basic_handler.py)
+            └── AsyncBrokerHandler (src/scietex/logging/message_broker_handler.py)
+                ├── AsyncRedisHandler (src/scietex/logging/redis_handler.py)
+                └── AsyncValkeyHandler (src/scietex/logging/valkey_handler.py)
 ```
 
 ### Key Concepts
@@ -163,7 +188,7 @@ uv run ruff format .
 
 ## Related Files
 
-- `/home/anton/Projects/scietex.logging/README.md` - User-facing documentation
-- `/home/anton/Projects/scietex.logging/docs/index.md` - Detailed documentation
-- `/home/anton/Projects/scietex.logging/pyproject.toml` - Build configuration
-- `/home/anton/Projects/scietex.logging/examples/README.md` - Example documentation
+- `/Users/anton/Projects/scietex.logging/README.md` - User-facing documentation
+- `/Users/anton/Projects/scietex.logging/docs/index.md` - Detailed documentation
+- `/Users/anton/Projects/scietex.logging/pyproject.toml` - Build configuration
+- `/Users/anton/Projects/scietex.logging/examples/README.md` - Example documentation

@@ -3,8 +3,6 @@
 import asyncio
 import logging
 
-from glide import GlideClientConfiguration, NodeAddress
-
 from scietex.logging import AsyncBaseHandler, AsyncRedisHandler, AsyncValkeyHandler
 
 
@@ -25,7 +23,7 @@ async def main():
         stream_name="all_backends_stream",
         service_name="AllService",
         worker_id=3,
-        valkey_config=GlideClientConfiguration([NodeAddress("localhost", 6379)]),
+        valkey_config={"addresses": [("localhost", 6379)]},
         stdout_enable=False,
     )
     logger.addHandler(console_handler)

@@ -2,7 +2,7 @@
 Console backend for the asynchronous logging framework.
 
 Encapsulates the console sink as a peer backend: it owns its queue, its worker
-coroutine, and a reference to the handler's formatter. `AsyncBaseHandler`
+coroutine, and a provider for the handler's formatter. `AsyncBaseHandler`
 registers this backend's queue and worker into the shared machinery the same
 way `AsyncBrokerHandler` registers its broker queue and worker.
 """
@@ -10,8 +10,11 @@ way `AsyncBrokerHandler` registers its broker queue and worker.
 import asyncio
 import logging
 import sys
+from collections.abc import Callable
 
 from .async_logging_handler import BackendDrainResult, DrainStatus
+
+_error_logger = logging.getLogger("scietex.logging")
 
 
 def _status_record(result: BackendDrainResult) -> logging.LogRecord:
@@ -60,28 +63,41 @@ class ConsoleBackend:
     Attributes:
         queue (asyncio.Queue[logging.LogRecord]): Queue holding records destined
             for standard output.
-        formatter (logging.Formatter | None): Formatter used to render records.
+        formatter_provider (Callable[[], logging.Formatter | None]): Zero-arg
+            callable returning the handler's current formatter, read at work time
+            so the console never holds a stale copy.
         running_event (asyncio.Event): Shared event signalling that logging is active.
+        error_handler (Callable | None): Optional callback invoked with
+            ``(record, exc)`` when a record cannot be written to standard output.
     """
 
     def __init__(
         self,
-        formatter: logging.Formatter | None,
+        formatter_provider: Callable[[], logging.Formatter | None],
         running_event: asyncio.Event,
         maxsize: int = 10000,
+        error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
     ) -> None:
         """
         Initialize the console backend.
 
         Args:
-            formatter (logging.Formatter | None): Formatter used to render records.
+            formatter_provider (Callable[[], logging.Formatter | None]): Zero-arg
+                callable returning the formatter used to render records. Read at
+                work time so `setFormatter` on the handler is reflected without a
+                manual re-sync.
             running_event (asyncio.Event): Shared event signalling that logging is active.
             maxsize (int): Maximum number of records the queue can hold. Records
                 enqueued past this bound are dropped by `emit`. Defaults to 10000.
+            error_handler (callable, optional): Callback invoked with
+                ``(record, exc)`` when a record cannot be written. Defaults to
+                None, in which case errors are reported via the ``scietex.logging``
+                module logger.
         """
         self.queue: asyncio.Queue[logging.LogRecord] = asyncio.Queue(maxsize=maxsize)
-        self.formatter = formatter
+        self.formatter_provider = formatter_provider
         self.running_event = running_event
+        self.error_handler = error_handler
 
     async def _worker(self) -> None:
         """
@@ -97,12 +113,49 @@ class ConsoleBackend:
         while self.running_event.is_set() or not self.queue.empty():
             try:
                 record = await asyncio.wait_for(self.queue.get(), 1)
-                if self.formatter:
-                    sys.stdout.write(self.formatter.format(record) + "\n")
-                    sys.stdout.flush()
-                self.queue.task_done()
             except asyncio.TimeoutError:
+                continue
+            try:
+                formatter = self.formatter_provider()
+                if formatter:
+                    sys.stdout.write(formatter.format(record) + "\n")
+                    sys.stdout.flush()
+            except Exception as exc:
+                # A broken stdout or a buggy formatter must not silently kill the
+                # always-on console worker. Report the failure and keep draining
+                # so the queue is still acknowledged and shutdown completes.
+                self._report_error(record, exc)
+            finally:
+                self.queue.task_done()
+
+    def _report_error(self, record: logging.LogRecord | None, exc: Exception) -> None:
+        """
+        Report a console delivery error through the configured error channel.
+
+        If an `error_handler` callback is configured it is invoked; otherwise the
+        error is logged through the `scietex.logging` module logger. A raising
+        `error_handler` never silences the telemetry: the error is still logged
+        through the module logger rather than swallowed.
+
+        Args:
+            record (logging.LogRecord | None): The record whose delivery failed,
+                or None when the failure is not tied to a specific record.
+            exc (Exception): The exception that caused the failure.
+        """
+        if self.error_handler is not None:
+            try:
+                self.error_handler(record, exc)
+                return
+            except Exception:
+                # The error reporter must never crash the logging path, but a
+                # raising callback must not swallow the telemetry either. Fall
+                # through to the module logger below.
                 pass
+        _error_logger.error(
+            "ConsoleBackend failed to deliver a log record: %s",
+            exc,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
 
     async def drain(self, timeout: float) -> BackendDrainResult:
         """

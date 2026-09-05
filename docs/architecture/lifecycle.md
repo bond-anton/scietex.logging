@@ -83,15 +83,22 @@ semantics below).
    shutdown on an unreachable broker. Broker workers run `disconnect()` in a
    `finally`, so the client is released on both normal exit and cancellation.
 5. Reset `log_workers_tasks = []` so a later stop does not re-gather finished
-   tasks. `stop_logging` does **not** call `self.close()`.
+   tasks.
+6. Clear any records still queued after the drain window and worker teardown:
+   each backend queue is drained via `get_nowait()` + `task_done()`
+   (`async_logging_handler.py:387-395`). Undelivered records are **dropped, not
+   replayed**, so the next `start_logging` begins from an actually-empty queue
+   (AR-020). `stop_logging` does **not** call `self.close()`.
 
 ## Restartable lifecycle
 
 A handler is **restartable**: `start_logging()` and `stop_logging()` may be
 called repeatedly on the same event loop, giving multiple start/stop cycles.
 Because workers are stored as *factories* (zero-argument callables returning a
-fresh coroutine), each `start_logging` schedules fresh tasks from a clean queue
-rather than re-scheduling consumed coroutines.
+fresh coroutine), each `start_logging` schedules fresh tasks. Any record still
+queued when `stop_logging` finishes is dropped (see Shutdown step 6), so each
+start begins from an actually-empty queue rather than re-scheduling consumed
+coroutines or replaying undelivered records.
 
 **Guard semantics.**
 
@@ -132,6 +139,9 @@ instances. The host application is responsible for calling `start_logging` /
 
 - Worker factories are registered once in `__init__` and invoked by
   `start_logging` to schedule fresh tasks on every start cycle.
+- `register_backend` raises `ValueError` if a backend name is already registered
+  (`async_logging_handler.py:231-232`), so a duplicate name cannot silently
+  overwrite a queue while doubling the worker and drain hooks (AR-028).
 - The broker client connection is opened lazily by the worker's `connect()`
   and closed by `disconnect()` at worker exit — connection lifetime is tied to
   worker lifetime, not to `start_logging`/`stop_logging` directly.

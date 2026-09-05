@@ -6,26 +6,9 @@ import copy
 import logging
 from datetime import datetime, timezone
 
-
-def level_abbreviation(log_level: int) -> str:
-    """
-    Map logging levels to 3-letter abbreviations.
-
-    Args:
-        log_level (int): The integer log level (e.g., logging.DEBUG, logging.INFO).
-
-    Returns:
-        str: A 3-letter abbreviation corresponding to the log level, or a 3-digit code
-             if the level is unrecognized.
-    """
-    level_map: dict[int, str] = {
-        logging.DEBUG: "DBG",
-        logging.INFO: "INF",
-        logging.WARNING: "WRN",
-        logging.ERROR: "ERR",
-        logging.CRITICAL: "CRT",
-    }
-    return level_map.get(log_level, f"{log_level:03d}")
+# Imported from the shared stdlib-only leaf (AR-026); also re-exported here for
+# backward compatibility with callers that import it from the formatter module.
+from .config import level_abbreviation
 
 
 class ScietexFormatter(logging.Formatter):

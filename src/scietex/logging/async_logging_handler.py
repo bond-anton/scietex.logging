@@ -60,7 +60,9 @@ class AsyncLoggingHandler(logging.Handler):
     The handler is restartable: `start_logging()` and `stop_logging()` may be
     called repeatedly on the same event loop. Workers are stored as *factories*
     (zero-argument callables returning a fresh coroutine) so each start cycle
-    schedules fresh tasks from a clean queue.
+    schedules fresh tasks. Any record still queued when `stop_logging` finishes
+    is dropped rather than replayed on the next cycle, so each start begins from
+    an actually-empty queue.
 
     Each backend queue is bounded by `queue_maxsize` (default 10000). Under
     sustained overload, `emit` drops records for any full backend queue and
@@ -84,6 +86,8 @@ class AsyncLoggingHandler(logging.Handler):
         error_handler (callable | None): Read-only alias for `config.error_handler`;
             optional callback invoked with ``(record, exc)`` when a log record cannot
             be delivered.
+        formatter (logging.Formatter): Formatter used to render records; the
+            default ``ScietexFormatter`` unless a custom one was injected.
         _loop (asyncio.AbstractEventLoop | None): Event loop captured at
             `start_logging`; `emit()` is only valid on that loop's thread.
         _drain_hooks (list[DrainHook]): Backend drain hooks in registration order,
@@ -117,6 +121,7 @@ class AsyncLoggingHandler(logging.Handler):
         queue_maxsize: int = 10000,
         stdout_enable: bool = True,
         backend_config: RedisConfig | ValkeyConfig | None = None,
+        formatter: logging.Formatter | None = None,
     ) -> None:
         """
         Initialize the asynchronous logging handler machinery.
@@ -142,6 +147,9 @@ class AsyncLoggingHandler(logging.Handler):
                 `AsyncBaseHandler`. Defaults to True.
             backend_config (RedisConfig | ValkeyConfig | None): Backend-specific
                 config attached by broker subclasses. Defaults to None.
+            formatter (logging.Formatter | None): Formatter used to render records.
+                Defaults to None, in which case a default ``ScietexFormatter`` is
+                constructed from ``service_name`` and ``worker_id``.
 
         Raises:
             TypeError: If an unknown keyword argument is passed.
@@ -159,8 +167,12 @@ class AsyncLoggingHandler(logging.Handler):
             stdout_enable=stdout_enable,
             backend_config=backend_config,
         )
-        self.formatter = ScietexFormatter(
-            service_name=self.config.service_name, worker_id=self.config.worker_id
+        self.formatter = (
+            formatter
+            if formatter is not None
+            else ScietexFormatter(
+                service_name=self.config.service_name, worker_id=self.config.worker_id
+            )
         )
         self.logging_accept_event = asyncio.Event()  # Indicates if logging accepting events
         self.logging_running_event = asyncio.Event()  # Indicates if logging is running
@@ -210,7 +222,14 @@ class AsyncLoggingHandler(logging.Handler):
             drain (DrainHook, optional): Async callable ``(timeout) ->
                 BackendDrainResult`` invoked during `stop_logging` to drain this
                 backend.
+
+        Raises:
+            ValueError: If ``name`` is already registered. A duplicate name would
+                silently overwrite the queue while doubling the worker and drain
+                hook, desynchronizing ``log_queues`` from the parallel lists.
         """
+        if name in self.log_queues:
+            raise ValueError(f"backend name {name!r} is already registered")
         self.log_queues[name] = queue
         self.log_worker_factories.append(worker)
         if drain is not None:
@@ -309,6 +328,11 @@ class AsyncLoggingHandler(logging.Handler):
         collected results are handed to the registered status reporters (e.g. the
         console) as an explicit post-drain step.
 
+        Any record still queued after the drain window and worker teardown is
+        dropped, not replayed on the next `start_logging` cycle. A worker stuck
+        on an unreachable broker (or a queue whose drain timed out) can leave
+        records behind; clearing them keeps the restart contract honest.
+
         This method is idempotent: calling it when logging is not running (never
         started, or already stopped) is a no-op. After it returns, the handler may
         be started again via `start_logging`.
@@ -360,12 +384,24 @@ class AsyncLoggingHandler(logging.Handler):
                 await asyncio.gather(*self.log_workers_tasks, return_exceptions=True)
         self.log_workers_tasks = []
 
+        # Drop any records still undelivered after the drain window and worker
+        # teardown (AR-020). A stalled worker or unreachable broker can leave
+        # records queued; without this they would replay on the next start, so the
+        # restart would not begin from an actually-empty queue. task_done() pairs
+        # with get_nowait() to keep the unfinished-task count balanced.
+        for queue in self.log_queues.values():
+            while not queue.empty():
+                queue.get_nowait()
+                queue.task_done()
+
     def _report_error(self, record: logging.LogRecord | None, exc: Exception) -> None:
         """
         Report a delivery error through the configured error channel.
 
         If an `error_handler` callback is configured it is invoked; otherwise the
-        error is logged through the `scietex.logging` module logger.
+        error is logged through the `scietex.logging` module logger. A user
+        `error_handler` that raises never silences the telemetry: the error is
+        still logged through the module logger rather than swallowed.
 
         Args:
             record (logging.LogRecord | None): The record whose delivery failed, or
@@ -375,13 +411,15 @@ class AsyncLoggingHandler(logging.Handler):
         if self.config.error_handler is not None:
             try:
                 self.config.error_handler(record, exc)
+                return
             except Exception:
-                # The error reporter must never crash the logging path.
+                # The error reporter must never crash the logging path, but a
+                # raising user callback must not swallow the telemetry either.
+                # Fall through to the module logger below.
                 pass
-        else:
-            _error_logger.error(
-                "%s failed to deliver a log record: %s",
-                type(self).__name__,
-                exc,
-                exc_info=(type(exc), exc, exc.__traceback__),
-            )
+        _error_logger.error(
+            "%s failed to deliver a log record: %s",
+            type(self).__name__,
+            exc,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )

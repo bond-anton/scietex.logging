@@ -39,6 +39,7 @@ class AsyncBaseHandler(AsyncLoggingHandler):
         stdout_enable: bool = True,
         queue_maxsize: int = 10000,
         backend_config: RedisConfig | ValkeyConfig | None = None,
+        formatter: logging.Formatter | None = None,
     ) -> None:
         """
         Initialize the asynchronous base logging handler.
@@ -56,6 +57,9 @@ class AsyncBaseHandler(AsyncLoggingHandler):
                 hold. Defaults to 10000.
             backend_config (RedisConfig | ValkeyConfig | None): Backend-specific
                 config forwarded by broker subclasses. Defaults to None.
+            formatter (logging.Formatter | None): Formatter used to render records.
+                Defaults to None, in which case a default ``ScietexFormatter`` is
+                constructed from ``service_name`` and ``worker_id``.
 
         Attributes:
             stdout_enable (bool): Flag to enable console logging (defaults to True).
@@ -71,13 +75,15 @@ class AsyncBaseHandler(AsyncLoggingHandler):
             queue_maxsize=queue_maxsize,
             stdout_enable=stdout_enable,
             backend_config=backend_config,
+            formatter=formatter,
         )
         self._console_backend: ConsoleBackend | None = None
         if self.config.stdout_enable:
             self._console_backend = ConsoleBackend(
-                self.formatter,
+                lambda: self.formatter,
                 self.logging_running_event,
                 maxsize=self.config.queue_maxsize,
+                error_handler=self._report_error,
             )
             self.register_backend(
                 "console",
@@ -91,19 +97,3 @@ class AsyncBaseHandler(AsyncLoggingHandler):
     def stdout_enable(self) -> bool:
         """Read-only alias for ``config.stdout_enable``."""
         return self.config.stdout_enable
-
-    def setFormatter(self, fmt: logging.Formatter | None) -> None:
-        """
-        Set the formatter used to render log records.
-
-        The console backend captures the formatter reference when the handler is
-        constructed, so it must be updated here too for console output to reflect
-        the change. Broker backends read the handler's formatter dynamically and
-        need no extra handling.
-
-        Args:
-            fmt (logging.Formatter | None): The formatter to use.
-        """
-        super().setFormatter(fmt)
-        if self._console_backend is not None:
-            self._console_backend.formatter = fmt

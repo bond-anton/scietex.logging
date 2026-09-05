@@ -1,4 +1,11 @@
-"""Typed configuration objects for scietex.logging handlers."""
+"""Typed configuration objects and shared stdlib-only helpers for scietex.logging.
+
+This module is the neutral leaf of the package: it hosts the configuration
+dataclasses (``LoggingConfig``, ``RedisConfig``, ``ValkeyConfig``) alongside the
+cross-module helpers ``validate_queue_maxsize``, ``level_abbreviation``, and
+``optional_dependency_error``. It imports only the standard library, so formatter
+and broker handlers can depend on it without creating an import cycle.
+"""
 
 from __future__ import annotations
 
@@ -109,6 +116,27 @@ def validate_queue_maxsize(value: int) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise ValueError(f"queue_maxsize must be a positive int, got {value!r}")
     return value
+
+
+def level_abbreviation(log_level: int) -> str:
+    """
+    Map logging levels to 3-letter abbreviations.
+
+    Args:
+        log_level (int): The integer log level (e.g., logging.DEBUG, logging.INFO).
+
+    Returns:
+        str: A 3-letter abbreviation corresponding to the log level, or a 3-digit code
+             if the level is unrecognized.
+    """
+    level_map: dict[int, str] = {
+        logging.DEBUG: "DBG",
+        logging.INFO: "INF",
+        logging.WARNING: "WRN",
+        logging.ERROR: "ERR",
+        logging.CRITICAL: "CRT",
+    }
+    return level_map.get(log_level, f"{log_level:03d}")
 
 
 def optional_dependency_error(module_name: str, extra: str) -> str:

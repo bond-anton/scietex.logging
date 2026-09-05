@@ -83,11 +83,11 @@ handler = AsyncValkeyHandler(stream_name="my_log_stream")
 ### Configuration
 
 - `stream_name`: The Valkey stream name (required)
-- `valkey_config`: `GlideClientConfiguration` object for Valkey connection
-  (accepted for backward compatibility). The handler stores a typed
-  `ValkeyConfig` (a list of `(host, port)` addresses) as
-  `self.config.backend_config`; `self.client_config` remains the
-  `GlideClientConfiguration` used for the client call.
+- `valkey_config`: Dictionary with Valkey connection parameters (accepted for
+  backward compatibility). It is converted into a typed `ValkeyConfig` (a list
+  of `(host, port)` addresses) stored as `self.config.backend_config`; the raw
+  dict is kept as `self.client_config` and translated into a
+  `GlideClientConfiguration` inside `connect()`.
 
 ## Backend Comparison
 

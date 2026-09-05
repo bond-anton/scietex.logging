@@ -13,9 +13,11 @@ the version. Guards optional backend imports so the base package loads without
 extras.
 
 **Public interface.** `__all__ = ["AsyncBaseHandler", "AsyncBrokerHandler",
-"AsyncLoggingHandler", "ConsoleBackend", "ScietexFormatter"]`, extended with
-`"AsyncRedisHandler"` and `"AsyncValkeyHandler"` when their modules import
-successfully. `__version__`.
+"AsyncLoggingHandler", "ConsoleBackend", "LoggingConfig", "RedisConfig",
+"ScietexFormatter", "ValkeyConfig"]`, extended with `"AsyncRedisHandler"` and
+`"AsyncValkeyHandler"` when their modules import successfully. `__version__`.
+The config types (`LoggingConfig`, `RedisConfig`, `ValkeyConfig`) are exported
+alongside the handler classes and `ConsoleBackend` (AR-035).
 
 **Depends on.** `async_logging_handler`, `basic_handler`, `console_backend`,
 `formatter`, `message_broker_handler`, `redis_handler` (guarded),
@@ -32,8 +34,9 @@ tests import both from the package root and from submodules.
 identity and abbreviated levels, and formats timestamps as ISO-8601 UTC.
 
 **Classes / functions.**
-- `ScietexFormatter(logging.Formatter)` — `formatter.py:31`
-- `level_abbreviation(log_level: int) -> str` — `formatter.py:10`
+- `ScietexFormatter(logging.Formatter)` — `formatter.py:14`
+- `level_abbreviation(log_level: int) -> str` — defined in `config.py:121-139`,
+  re-exported from `formatter.py:11` for backward compatibility (AR-026).
 
 **Public interface.**
 - `ScietexFormatter(service_name, worker_id=None, fmt=None, datefmt=None)`
@@ -46,10 +49,11 @@ identity and abbreviated levels, and formats timestamps as ISO-8601 UTC.
 - `level_abbreviation` maps DEBUG/INFO/WARNING/ERROR/CRITICAL → DBG/INF/WRN/ERR/CRT;
   unknown levels → zero-padded 3-digit code.
 
-**Depends on.** stdlib `logging`, `datetime`.
+**Depends on.** stdlib `logging`, `datetime`; `config` (imports
+`level_abbreviation`).
 
 **Depended on by.** `AsyncLoggingHandler` (constructs one in `__init__`);
-`AsyncBrokerHandler._worker` (calls `self.formatter.formatTime`); tests.
+`AsyncBrokerHandler._worker` (via `level_abbreviation` from `config`); tests.
 
 ---
 
@@ -60,11 +64,12 @@ of `logging.Handler`. Owns formatter construction, the accept/running events,
 per-backend queues/workers, the error channel, and the generic
 `register_backend` / `start_logging` / `emit` / `stop_logging` lifecycle.
 
-**Class.** `AsyncLoggingHandler(logging.Handler)` — `async_logging_handler.py:49`
+**Class.** `AsyncLoggingHandler(logging.Handler)` — `async_logging_handler.py:51`
 
 **Public interface.**
-- `AsyncLoggingHandler(service_name=None, worker_id=None, *, error_handler=None, queue_maxsize=10000, stdout_enable=True, backend_config=None)`
-  - Constructs a `ScietexFormatter(service_name, worker_id)`.
+- `AsyncLoggingHandler(service_name=None, worker_id=None, *, error_handler=None, queue_maxsize=10000, stdout_enable=True, backend_config=None, formatter=None)`
+  - Constructs a `ScietexFormatter(service_name, worker_id)` unless a custom
+    `formatter=` is injected (AR-024).
   - Builds a typed `self.config = LoggingConfig(...)` from its explicit keyword
     args; `queue_maxsize` is validated to a positive int via
     `validate_queue_maxsize`. No `**kwargs` — unknown keyword args raise
@@ -72,26 +77,30 @@ per-backend queues/workers, the error channel, and the generic
     flat `queue_maxsize`/`error_handler` attributes are read-only `@property`
     aliases over `self.config`.
 - `register_backend(name, queue, worker, drain=None)` —
-  `async_logging_handler.py:188`. Registers a backend's queue, worker
+  `async_logging_handler.py:200`. Registers a backend's queue, worker
   **factory** (zero-argument callable returning a fresh coroutine), and
-  optional `drain(timeout) -> BackendDrainResult` hook.
-- `register_status_reporter(reporter)` — `async_logging_handler.py:219`.
+  optional `drain(timeout) -> BackendDrainResult` hook. Raises `ValueError` if
+  `name` is already registered (AR-028).
+- `register_status_reporter(reporter)` — `async_logging_handler.py:238`.
   Registers a post-drain observer invoked with the collected
   `BackendDrainResult`s after every backend has drained.
-- `async start_logging()` — `async_logging_handler.py:234`. Sets both events,
+- `async start_logging()` — `async_logging_handler.py:253`. Sets both events,
   invokes each worker factory and spawns worker tasks. Raises `RuntimeError` if
   already running.
-- `emit(record)` — `async_logging_handler.py:259`. Synchronous; called by the
+- `emit(record)` — `async_logging_handler.py:278`. Synchronous; called by the
   logging framework. No-op if `logging_accept_event` not set. For each
   registered queue, calls `queue.put_nowait(record)`; a failed put is reported
   through the error channel.
-- `async stop_logging(timeout=5.0)` — `async_logging_handler.py:301`. Clears
+- `async stop_logging(timeout=5.0)` — `async_logging_handler.py:320`. Clears
   the accept event, drains every registered backend through its `drain` hook in
   registration order (collecting each returned `BackendDrainResult`), invokes
   each registered status reporter with the collected results, clears the
-  running event, gathers worker tasks, and resets `log_workers_tasks`.
-  Idempotent (no-op when not running); does **not** call `close()`. The handler
-  may be restarted via `start_logging` on the same loop.
+  running event, gathers worker tasks, resets `log_workers_tasks`, and clears
+  any records still queued after the drain window and worker teardown
+  (`get_nowait()` + `task_done()`, `async_logging_handler.py:387-395`) so
+  undelivered records are dropped, not replayed (AR-020). Idempotent (no-op
+  when not running); does **not** call `close()`. The handler may be restarted
+  via `start_logging` on the same loop.
 
 **Key instance state.** `formatter` (ScietexFormatter),
 `logging_accept_event`, `logging_running_event` (asyncio.Events),
@@ -126,18 +135,23 @@ hook is registered here); `AsyncBrokerHandler` (via `AsyncBaseHandler`).
 **Purpose.** The console (stdout) sink as a **peer backend**. Owns its queue,
 its worker coroutine, and its shutdown-status reporting.
 
-**Class.** `ConsoleBackend` — `console_backend.py:47`
+**Class.** `ConsoleBackend` — `console_backend.py:50`
 
 **Public interface.**
-- `ConsoleBackend(formatter, running_event, maxsize=10000)` — `console_backend.py:67`.
-  Creates its own bounded `asyncio.Queue(maxsize=maxsize)`; holds a reference to
-  the handler's formatter and the shared `logging_running_event`.
-- `async _worker()` — `console_backend.py:86`. Loops while the running event is
+- `ConsoleBackend(formatter_provider, running_event, maxsize=10000, error_handler=None)` — `console_backend.py:74`.
+  Creates its own bounded `asyncio.Queue(maxsize=maxsize)`; holds the shared
+  `logging_running_event`. `formatter_provider` is a zero-arg callable returning
+  the handler's current formatter, read at work time so the console never holds
+  a stale copy (AR-030); `error_handler` is an optional callback invoked with
+  `(record, exc)` when a record cannot be written (AR-021).
+- `async _worker()` — `console_backend.py:102`. Loops while the running event is
   set or the queue is non-empty, formatting records and writing them to stdout.
-- `async drain(timeout) -> BackendDrainResult` — `console_backend.py:107`. Waits
+  Format/write failures are routed through `_report_error` (the configured
+  `error_handler` or the module logger), with `task_done()` in a `finally`.
+- `async drain(timeout) -> BackendDrainResult` — `console_backend.py:160`. Waits
   for its own queue to drain and returns a `BackendDrainResult` describing how
   the drain concluded.
-- `async report_status(results)` — `console_backend.py:130`. Enqueues a
+- `async report_status(results)` — `console_backend.py:183`. Enqueues a
   synthetic status `LogRecord` for each backend's drain outcome. Registered by
   `AsyncBaseHandler` as a status reporter, so it is invoked by `stop_logging`
   after every backend has drained.
@@ -158,13 +172,15 @@ console backend as a peer. Public signature unchanged.
 **Class.** `AsyncBaseHandler(AsyncLoggingHandler)` — `basic_handler.py:16`
 
 **Public interface.**
-- `AsyncBaseHandler(service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000, backend_config=None)`
+- `AsyncBaseHandler(service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000, backend_config=None, formatter=None)`
   - Builds a typed `self.config = LoggingConfig(...)` (adding `stdout_enable`);
-    no `**kwargs` — unknown keyword args raise `TypeError`.
+    no `**kwargs` — unknown keyword args raise `TypeError`. Accepts an optional
+    `formatter=` kwarg forwarded to super (AR-024).
   - When `stdout_enable` is True, constructs a `ConsoleBackend` (with
-    `maxsize=queue_maxsize`) and registers it under the name `"console"` via
-    `register_backend`, and registers the console's `report_status` as a status
-    reporter via `register_status_reporter`.
+    `formatter_provider=lambda: self.formatter`, `maxsize=queue_maxsize`, and
+    `error_handler=self._report_error`) and registers it under the name
+    `"console"` via `register_backend`, and registers the console's
+    `report_status` as a status reporter via `register_status_reporter`.
 - Inherits `start_logging`, `emit`, `stop_logging` from `AsyncLoggingHandler`.
 
 **Key instance state.** `stdout_enable` (read-only `@property` alias for
@@ -184,38 +200,43 @@ logging; tests.
 queue + worker on top of `AsyncBaseHandler`, and defines the
 connect/disconnect/send_message contract concrete backends implement.
 
-**Class.** `AsyncBrokerHandler(AsyncBaseHandler, abc.ABC)` — `message_broker_handler.py:15`
+**Class.** `AsyncBrokerHandler(AsyncBaseHandler, abc.ABC)` — `message_broker_handler.py:25`
 
 **Public interface.**
-- `AsyncBrokerHandler(queue_name, service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000, backend_config=None)`
+- `AsyncBrokerHandler(queue_name, service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000, backend_config=None, formatter=None)`
   - Registers `log_queues[queue_name]` (a bounded `asyncio.Queue(maxsize=self.queue_maxsize)`)
     and `self._worker` (a bound method used as a worker factory) via
     `register_backend`. No `**kwargs` — unknown keyword args raise `TypeError`.
+    Accepts an optional `formatter=` kwarg forwarded to super (AR-024).
   - `client` attribute (Any | None) — connection slot.
-- `async connect()` — `message_broker_handler.py:92`. Abstract; subclass hook.
-- `async disconnect()` — `message_broker_handler.py:105`. Abstract; subclass hook.
-- `async send_message(record: dict[str, str])` — `message_broker_handler.py:117`.
+- `async connect()` — `message_broker_handler.py:107`. Abstract; subclass hook.
+- `async disconnect()` — `message_broker_handler.py:120`. Abstract; subclass hook.
+- `async send_message(record: dict[str, str])` — `message_broker_handler.py:132`.
   Abstract; subclass hook. `record` is a serializable log entry keyed by
   `level`, `message`, `name`, and `time`. Each concrete adapter translates it to
   the argument shape its client expects (Redis `xadd` takes the dict directly;
   Valkey-glide `xadd` takes `record.items()`). This adapter difference is
-  intentional and documented.
-- `async _worker()` — `message_broker_handler.py:139`. Calls `connect()`, loops
+  intentional and documented. A failure must raise so the worker can report it
+  and ack the task; the record is dropped, not retried.
+- `async _worker()` — `message_broker_handler.py:153`. Calls `connect()`, loops
   draining the broker queue, builds a `dict` log entry, calls `send_message`,
-  then `disconnect()` on exit.
-- `async drain(timeout) -> BackendDrainResult` — `message_broker_handler.py:210`.
+  then `disconnect()` on exit. Connect retries use capped exponential backoff
+  (AR-022).
+- `async drain(timeout) -> BackendDrainResult` — `message_broker_handler.py:230`.
   Waits for the broker queue to join and returns a `BackendDrainResult`
   describing how the drain concluded.
 
-**Log-entry dict shape** (built in `_worker`, `message_broker_handler.py:172-178`):
+**Log-entry dict shape** (built in `_worker`, `message_broker_handler.py:192-199`):
 `{"level": level_abbreviation(record.levelno), "message": record.getMessage(),
 "name": f"{self.config.service_name}:{self.config.worker_id}",
 "time": datetime.fromtimestamp(record.created, timezone.utc).isoformat()}`.
-`level` is computed via `level_abbreviation(record.levelno)`; `name` and `time`
-are derived from `self.config` and the record directly, **not** from the
-formatter, so the dict is deterministic and invariant under `setFormatter`.
+`level` is computed via `level_abbreviation(record.levelno)` (imported from
+`config.py`, AR-026); `name` and `time` are derived from `self.config` and the
+record directly, **not** from the formatter, so the dict is deterministic and
+invariant under `setFormatter`.
 
-**Depends on.** `basic_handler.AsyncBaseHandler`; stdlib `asyncio`, `datetime`.
+**Depends on.** `basic_handler.AsyncBaseHandler`; `config` (`level_abbreviation`);
+stdlib `asyncio`, `datetime`.
 
 **Depended on by.** `AsyncRedisHandler`, `AsyncValkeyHandler` (extend); host
 apps implementing custom backends (per docs).
@@ -230,18 +251,22 @@ apps implementing custom backends (per docs).
 
 **Public interface.**
 - `AsyncRedisHandler(stream_name, service_name=None, worker_id=None, *,
-  redis_config=None, error_handler=None, stdout_enable=True, queue_maxsize=10000)`
+  redis_config=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)`
   — passes `queue_name="redis"` to super. Converts `redis_config` into a typed
   `RedisConfig` stored as `self.config.backend_config`; `RedisConfig` mirrors
   the full plain-option surface of `redis.Redis`, so legitimate client options
   are accepted (unknown keys raise `TypeError`). `self.client_config` remains
   the raw dict for the redis client call, defaulting to
-  `{"host": "localhost", "port": 6379, "db": 0}`.
-- `async connect()` — `redis_handler.py:86`. Creates `redis.Redis(**config,
+  `{"host": "localhost", "port": 6379, "db": 0}`. Accepts an optional
+  `formatter=` kwarg (AR-024).
+- `async connect()` — `redis_handler.py:91`. Creates `redis.Redis(**config,
   decode_responses=True)` if `client is None`, then pings to probe connectivity
-  before setting `self.client`.
-- `async disconnect()` — `redis_handler.py:102`. `await client.aclose()`.
-- `async send_message(record)` — `redis_handler.py:110`. `await client.xadd(stream_name, record)`.
+  before setting `self.client`. If `ping()` fails, the locally created client is
+  closed via `aclose()` before re-raising, so no pool leaks on a failed connect
+  (AR-033).
+- `async disconnect()` — `redis_handler.py:111`. `await client.aclose()`.
+- `async send_message(record)` — `redis_handler.py:119`. Raises `RuntimeError`
+  when `self.client is None` (AR-034); otherwise `await client.xadd(stream_name, record)`.
   Redis `xadd` accepts the `dict[str, str]` log entry directly (see the adapter
   note under `AsyncBrokerHandler.send_message`).
 
@@ -261,15 +286,21 @@ the `valkey-glide` client.
 
 **Public interface.**
 - `AsyncValkeyHandler(stream_name, service_name=None, worker_id=None, *,
-  valkey_config=None, error_handler=None, stdout_enable=True, queue_maxsize=10000)`
-  — passes `queue_name="valkey"` to super. Stores a typed `ValkeyConfig` (list of
-  `(host, port)` addresses) as `self.config.backend_config`; `self.client_config`
-  remains a `GlideClientConfiguration`, defaulting to
-  `GlideClientConfiguration([NodeAddress()])`.
-- `async connect()` — `valkey_handler.py:90`. `await GlideClient.create(config)`
-  if `client is None`.
-- `async disconnect()` — `valkey_handler.py:103`. `await client.close()`.
-- `async send_message(record)` — `valkey_handler.py:111`. `await client.xadd(stream_name, record.items())`.
+  valkey_config=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)`
+  — passes `queue_name="valkey"` to super. `valkey_config` is a **dict**
+  (mirroring Redis's seam, AR-025) whose keys mirror
+  `GlideClientConfiguration`'s plain options; `addresses` is a list of
+  `(host, port)` tuples defaulting to `[("localhost", 6379)]`. A typed
+  `ValkeyConfig` (the addresses) is stored as `self.config.backend_config`;
+  `self.client_config` remains the raw dict, translated into a
+  `GlideClientConfiguration` inside `connect()`. Accepts an optional
+  `formatter=` kwarg (AR-024).
+- `async connect()` — `valkey_handler.py:94`. Translates the raw `client_config`
+  dict into a `GlideClientConfiguration` (`addresses` tuples → `NodeAddress`
+  objects) and calls `await GlideClient.create(config)` if `client is None`.
+- `async disconnect()` — `valkey_handler.py:117`. `await client.close()`.
+- `async send_message(record)` — `valkey_handler.py:125`. Raises `RuntimeError`
+  when `self.client is None` (AR-034); otherwise `await client.xadd(stream_name, record.items())`.
   Valkey-glide `xadd` expects `record.items()` rather than the dict itself — an
   intentional, documented adapter difference (see the adapter note under
   `AsyncBrokerHandler.send_message`).

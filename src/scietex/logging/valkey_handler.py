@@ -5,7 +5,7 @@ from .config import ValkeyConfig, optional_dependency_error
 try:
     from glide import GlideClient, GlideClientConfiguration, NodeAddress
 except ImportError as e:
-    raise ImportError(optional_dependency_error("valkey-glide", "valkey")) from e
+    raise ImportError(optional_dependency_error("valkey-glide", "valkey"), name="glide") from e
 
 import logging
 from collections.abc import Callable
@@ -40,10 +40,11 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
         service_name: str | None = None,
         worker_id: int | None = None,
         *,
-        valkey_config: GlideClientConfiguration | None = None,
+        valkey_config: dict | None = None,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         stdout_enable: bool = True,
         queue_maxsize: int = 10000,
+        formatter: logging.Formatter | None = None,
     ) -> None:
         """
         Initialize the asynchronous Valkey logging handler.
@@ -52,14 +53,20 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
             stream_name (str): The Valkey stream name to which log records are sent.
             service_name (str, optional): Service name for log identification. Defaults to None.
             worker_id (int, optional): Identifier for the logging worker instance. Defaults to None.
-            valkey_config (GlideClientConfiguration, optional): Configuration for Valkey connection.
-                Defaults to a basic configuration with default host and port.
+            valkey_config (dict, optional): Configuration dictionary for the Valkey connection.
+                Keys mirror ``GlideClientConfiguration``'s plain options; ``addresses`` is a
+                list of ``(host, port)`` tuples and defaults to ``[("localhost", 6379)]``.
+                The dict is translated into a ``GlideClientConfiguration`` inside
+                ``connect()``. Defaults to ``{}``.
             error_handler (callable, optional): Callback invoked with ``(record, exc)``
                 when a log record cannot be delivered. Defaults to None, in which case
                 errors are reported via the ``scietex.logging`` module logger.
             stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can hold.
                 Defaults to 10000.
+            formatter (logging.Formatter | None): Formatter used to render records.
+                Defaults to None, in which case a default ``ScietexFormatter`` is
+                constructed from ``service_name`` and ``worker_id``.
 
         Attributes:
             stream_name (str): The Valkey stream name where log entries are sent.
@@ -68,11 +75,7 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
         Raises:
             TypeError: If an unknown keyword argument is passed.
         """
-        client_config = (
-            valkey_config
-            if valkey_config is not None
-            else GlideClientConfiguration([NodeAddress()])
-        )
+        client_config = valkey_config if valkey_config is not None else {}
         super().__init__(
             queue_name="valkey",
             service_name=service_name,
@@ -81,24 +84,35 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
             stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
             backend_config=ValkeyConfig(
-                addresses=[(node.host, node.port) for node in client_config.addresses]
+                addresses=client_config.get("addresses") or [("localhost", 6379)]
             ),
+            formatter=formatter,
         )
         self.stream_name = stream_name
-        self.client_config: GlideClientConfiguration = client_config
+        self.client_config: dict = client_config
 
     async def connect(self) -> None:
         """
         Connect to Valkey asynchronously.
 
         Initializes the Valkey client connection using the provided Valkey configuration.
-        A failed connection raises so the worker can report it and retry.
+        The raw ``client_config`` dict is translated into a ``GlideClientConfiguration``:
+        ``addresses`` entries are ``(host, port)`` tuples converted to ``NodeAddress``
+        objects, and any remaining keys are passed through unchanged. A failed
+        connection raises so the worker can report it and retry.
 
         Returns:
             None
         """
         if self.client is None:
-            self.client = await GlideClient.create(self.client_config)
+            config = dict(self.client_config)
+            addresses = config.pop("addresses", None)
+            if addresses is None:
+                node_addresses = [NodeAddress()]
+            else:
+                node_addresses = [NodeAddress(host, port) for host, port in addresses]
+            client_config = GlideClientConfiguration(node_addresses, **config)
+            self.client = await GlideClient.create(client_config)
 
     async def disconnect(self) -> None:
         """
@@ -119,5 +133,6 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
             None
         """
 
-        if self.client is not None:
-            await self.client.xadd(self.stream_name, record.items())
+        if self.client is None:
+            raise RuntimeError("Valkey client is not connected; call connect() first.")
+        await self.client.xadd(self.stream_name, record.items())

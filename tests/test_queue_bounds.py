@@ -167,9 +167,10 @@ async def test_console_drain_does_not_hang_when_queue_full():
     # dropped and queue.join is bounded by the timeout) instead of deadlocking.
     await asyncio.wait_for(handler.stop_logging(timeout=0.05), timeout=5)
 
-    # The broker still delivered both records; the stalled console kept its queue.
+    # The broker still delivered both records; the stalled console's undelivered
+    # records were dropped on stop (AR-020), not left queued for a later replay.
     assert [entry["message"] for entry in handler.sent] == ["one", "two"]
-    assert handler.log_queues["console"].qsize() == 2
+    assert handler.log_queues["console"].empty()
 
 
 def test_queue_maxsize_reaches_console_queue():

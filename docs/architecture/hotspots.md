@@ -14,7 +14,10 @@ do, why it is significant, and related files.
 **What it appears to do.** One class owns the stdlib `logging.Handler`
 integration (`emit`), the async queue/event machinery, worker task lifecycle,
 the generic `register_backend` mechanism, and the generic `stop_logging` that
-drains every backend through per-backend `drain(timeout, results)` hooks.
+drains every backend through per-backend `drain(timeout)` hooks. It accepts an
+optional `formatter=` kwarg (defaulting to `ScietexFormatter`) so the machinery
+base is formatter-agnostic (AR-024), and `register_backend` raises `ValueError`
+on a duplicate backend name (AR-028).
 
 **Why significant.** It is the backend-agnostic machinery base with **no sink
 of its own**; every concrete backend (console, broker) is registered on top of
@@ -28,14 +31,17 @@ central structural decision of the package.
 
 ## 2. `stop_logging` — coordinator-owned drain via per-backend hooks
 
-**Location.** `AsyncLoggingHandler.stop_logging`, `async_logging_handler.py:301-361`.
+**Location.** `AsyncLoggingHandler.stop_logging`, `async_logging_handler.py:320-395`.
 
 **What it appears to do.** Clears the accept event, then iterates the registered
 `drain` hooks in **registration order**, awaiting each with the shared timeout
 and collecting the `BackendDrainResult` each hook returns. After every drain
 concludes, it invokes each registered status reporter with the collected
-results. Finally it clears the running event, gathers worker tasks, and resets
-`log_workers_tasks`.
+results. Finally it clears the running event, gathers worker tasks, resets
+`log_workers_tasks`, and clears any records still queued after the drain window
+and worker teardown via `get_nowait()` + `task_done()`
+(`async_logging_handler.py:387-395`) — undelivered records are dropped, not
+replayed on the next start (AR-020).
 
 **Why significant.** Shutdown is now generic — no queue-name special-casing.
 Each backend controls its own drain and returns its own result; the coordinator
@@ -124,11 +130,17 @@ run console + broker workers independently. `stop_logging` drains each backend
 (collecting its returned result) and then invokes the console's `report_status`
 as a status reporter with the full results list, so the console reports the
 other backends' outcomes as a post-drain observer rather than by drain order.
+The console worker reads the handler's formatter dynamically through a
+`formatter_provider` callable (`lambda: self.formatter` from `basic_handler.py:83`)
+and routes format/write failures through its own `error_handler` channel
+(`console_backend.py:118-129`), so a broken stdout or buggy formatter cannot
+silently kill the always-on console worker (AR-021/AR-030).
 
 **Why significant.** The console backend is both a standalone backend
 (`AsyncBaseHandler`) and an auxiliary output attached to broker handlers. This
 dual role is now explicit: console is a peer backend registered the same way a
 broker backend is, rather than a privileged sink baked into the base machinery.
+It is also symmetric with broker backends in its error handling.
 
 **Related.** `overview.md`, `data-flow.md` Flow 3.
 
@@ -149,7 +161,10 @@ implement them. The two concrete implementations differ in signature details
 is an **intentional, documented adapter difference**: the abstract
 `send_message` contract states `record` is a serializable `dict[str, str]` of
 `{level, message, name, time}`, and each concrete adapter translates it to the
-argument shape its client expects. No uniform client wrapper was added.
+argument shape its client expects. No uniform client wrapper was added. Both
+concrete `send_message` implementations raise `RuntimeError` when `self.client
+is None` (`redis_handler.py:129-130`, `valkey_handler.py:136-137`) rather than
+silently no-oping, so an unconnected send surfaces as a failure (AR-034).
 
 **Related.** `components.md`; `docs/advanced.md` (custom backend examples).
 
@@ -213,10 +228,10 @@ provisioning.
 
 ## 11. Formatter copies the record; broker dict built independently
 
-**Location.** `ScietexFormatter.format`, `formatter.py:90-113`.
+**Location.** `ScietexFormatter.format`, `formatter.py:73-96`.
 
 **What it appears to do.** `format` first copies the record
-(`record = copy.copy(record)` at `formatter.py:104`), then sets
+(`record = copy.copy(record)` at `formatter.py:87`), then sets
 `record.worker_name` and overwrites `record.levelname` on the **copy** before
 delegating to the parent formatter. The caller's shared `LogRecord` is never
 mutated.
@@ -228,23 +243,29 @@ backends. The broker worker additionally computes its dict fields
 **independently** — `level = level_abbreviation(record.levelno)`,
 `name = f"{self.config.service_name}:{self.config.worker_id}"`, and
 `time = datetime.fromtimestamp(record.created, timezone.utc).isoformat()`
-(`message_broker_handler.py:172-178`) — from config and the record rather than
+(`message_broker_handler.py:192-199`) — from config and the record rather than
 from formatter-mutated attributes, so the broker wire format is invariant under
 `setFormatter` and there is **no implicit ordering dependency** between
-formatting and dict-building.
+formatting and dict-building. `level_abbreviation` itself now lives in
+`config.py` (`config.py:121-139`) and is imported by the broker from `.config`
+(`message_broker_handler.py:13`), not from the formatter module (AR-026).
 
-**Related.** `data-flow.md` Flow 2; `message_broker_handler.py:172-178`.
+**Related.** `data-flow.md` Flow 2; `message_broker_handler.py:192-199`.
 
 ---
 
 ## 12. `AsyncBrokerHandler._worker` — connection + drain coupling
 
-**Location.** `message_broker_handler.py:131-197`.
+**Location.** `message_broker_handler.py:153-228`.
 
 **What it appears to do.** The worker calls `connect()` once at start, then
 loops draining the queue and calling `send_message`, then `disconnect()` at
-exit. On a `connect()` failure it reports via the error channel, sleeps ~1s,
-and retries **without dequeuing** the record. On a `send_message()` failure it
+exit. On a `connect()` failure it reports via the error channel, sleeps a
+capped-exponential-backoff delay, and retries **without dequeuing** the record.
+The delay doubles from a 0.5s base up to a 30s cap with ±20% jitter (module
+constants `_CONNECT_RETRY_BASE`/`_CONNECT_RETRY_CAP`/`_CONNECT_RETRY_JITTER` at
+`message_broker_handler.py:20-22`), and a successful connect resets it to base
+(`message_broker_handler.py:164-180`) — AR-022. On a `send_message()` failure it
 reports via the error channel, tears the client down (`disconnect()`, with a
 `self.client = None` fallback if that raises) so the next iteration reconnects,
 and acknowledges the record via `task_done()` in a `finally`.
@@ -252,11 +273,12 @@ and acknowledges the record via `task_done()` in a `finally`.
 **Why significant.** Connection lifecycle, message dispatch, and queue draining
 are interleaved in one loop. Failure modes are surfaced through the error
 channel rather than silently dropping records: a failed `connect()` is retried
-(no record is dequeued), and a failed `send_message()` is reported, the dead
-client is released so the worker re-enters `connect()`, and the dequeued record
-is acked exactly once (`task_done()` in a `finally`) so `queue.join()` in the
-drain can complete. The whole connect-retry + drain loop is wrapped in a
-`finally` that runs `disconnect()` and resets `self.client = None` on both
-normal exit and cancellation, so a cancelled worker never leaks the client.
+with bounded backoff (no record is dequeued), and a failed `send_message()` is
+reported, the dead client is released so the worker re-enters `connect()`, and
+the dequeued record is acked exactly once (`task_done()` in a `finally`) so
+`queue.join()` in the drain can complete. The whole connect-retry + drain loop
+is wrapped in a `finally` that runs `disconnect()` and resets `self.client =
+None` on both normal exit and cancellation, so a cancelled worker never leaks
+the client.
 
 **Related.** `lifecycle.md`; `redis_handler.py`, `valkey_handler.py`.

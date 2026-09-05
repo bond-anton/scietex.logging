@@ -19,9 +19,11 @@ sub-packages. Architecturally it decomposes into four cooperating layers:
    without optional dependencies.
 
 2. **Formatter layer** — `src/scietex/logging/formatter.py`
-   `ScietexFormatter` (a `logging.Formatter`) and the `level_abbreviation`
-   helper. Enriches records with a `worker_name` (`service_name:worker_id`)
-   and 3-letter level abbreviations; emits ISO-8601 UTC timestamps.
+   `ScietexFormatter` (a `logging.Formatter`). Enriches records with a
+   `worker_name` (`service_name:worker_id`) and 3-letter level abbreviations;
+   emits ISO-8601 UTC timestamps. The `level_abbreviation` helper it uses now
+   lives in `config.py` (the neutral leaf) and is re-exported here for backward
+   compatibility (AR-026).
 
 3. **Machinery base layer** — `src/scietex/logging/async_logging_handler.py`
    `AsyncLoggingHandler` (a `logging.Handler`). Pure shared machinery with **no

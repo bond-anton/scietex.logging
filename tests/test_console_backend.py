@@ -21,11 +21,27 @@ def _make_record(message: str = "test message") -> logging.LogRecord:
     )
 
 
+async def _wait_for(predicate, timeout: float = 5.0) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not predicate():
+        if loop.time() >= deadline:
+            raise TimeoutError("condition was not met before timeout")
+        await asyncio.sleep(0.01)
+
+
 class FakeFormatter(logging.Formatter):
     """Formatter producing deterministic, timestamp-free output for tests."""
 
     def format(self, record: logging.LogRecord) -> str:
         return f"FMT:{record.getMessage()}"
+
+
+class ExplodingFormatter(logging.Formatter):
+    """Formatter that raises on format, proving the worker survives format errors."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        raise RuntimeError("format exploded")
 
 
 class CountingQueue(asyncio.Queue):
@@ -45,7 +61,7 @@ async def test_worker_writes_formatted_record_to_stdout(capsys):
     """The worker drains its queue and writes formatted records to stdout."""
     running_event = asyncio.Event()
     running_event.set()
-    backend = ConsoleBackend(FakeFormatter(), running_event)
+    backend = ConsoleBackend(lambda: FakeFormatter(), running_event)
 
     worker = asyncio.create_task(backend._worker())
     await backend.queue.put(_make_record("hello console"))
@@ -62,7 +78,7 @@ async def test_worker_calls_task_done_for_each_record():
     """Every record drained by the worker is acknowledged via task_done()."""
     running_event = asyncio.Event()
     running_event.set()
-    backend = ConsoleBackend(FakeFormatter(), running_event)
+    backend = ConsoleBackend(lambda: FakeFormatter(), running_event)
     counting_queue = CountingQueue()
     backend.queue = counting_queue
 
@@ -82,7 +98,7 @@ async def test_worker_exits_when_running_clears_and_queue_empty():
     """The worker terminates (does not hang) once logging stops and the queue drains."""
     running_event = asyncio.Event()
     running_event.set()
-    backend = ConsoleBackend(FakeFormatter(), running_event)
+    backend = ConsoleBackend(lambda: FakeFormatter(), running_event)
 
     worker = asyncio.create_task(backend._worker())
     await backend.queue.put(_make_record("a"))
@@ -100,7 +116,7 @@ async def test_report_status_queues_synthetic_records(capsys):
     """report_status() surfaces every backend's outcome as a synthetic status record."""
     running_event = asyncio.Event()
     running_event.set()
-    backend = ConsoleBackend(FakeFormatter(), running_event)
+    backend = ConsoleBackend(lambda: FakeFormatter(), running_event)
     worker = asyncio.create_task(backend._worker())
 
     results = [
@@ -129,7 +145,7 @@ async def test_drain_returns_console_completed_result():
     """drain() drains the console queue and returns the console's own COMPLETED outcome."""
     running_event = asyncio.Event()
     running_event.set()
-    backend = ConsoleBackend(FakeFormatter(), running_event)
+    backend = ConsoleBackend(lambda: FakeFormatter(), running_event)
     worker = asyncio.create_task(backend._worker())
 
     await backend.queue.put(_make_record("drain me"))
@@ -147,10 +163,54 @@ async def test_drain_reports_timeout_when_queue_not_drained():
     """drain() reports TIMEOUT when the console queue does not drain in time."""
     running_event = asyncio.Event()
     running_event.set()
-    backend = ConsoleBackend(FakeFormatter(), running_event)
+    backend = ConsoleBackend(lambda: FakeFormatter(), running_event)
     backend.queue.put_nowait(_make_record("stuck"))  # no worker: never acknowledged
 
     result = await backend.drain(timeout=0.01)
 
     assert result.name == "console"
     assert result.status is DrainStatus.TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_worker_survives_format_error_and_reports():
+    """A formatter failure is reported via the error channel, not a silent worker death."""
+    errors = []
+    running_event = asyncio.Event()
+    running_event.set()
+    backend = ConsoleBackend(
+        lambda: ExplodingFormatter(),
+        running_event,
+        error_handler=lambda record, exc: errors.append(exc),
+    )
+
+    worker = asyncio.create_task(backend._worker())
+    await backend.queue.put(_make_record("boom"))
+    await _wait_for(lambda: bool(errors))
+    running_event.clear()
+    await asyncio.wait_for(worker, timeout=5)
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], RuntimeError)
+    # The failed record is still acknowledged so the queue drains cleanly.
+    assert backend.queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_worker_reports_via_module_logger_when_no_error_handler(caplog):
+    """Without an injected handler, a format failure is logged to the module logger."""
+    running_event = asyncio.Event()
+    running_event.set()
+    backend = ConsoleBackend(lambda: ExplodingFormatter(), running_event)
+
+    worker = asyncio.create_task(backend._worker())
+    await backend.queue.put(_make_record("boom"))
+
+    with caplog.at_level(logging.ERROR, logger="scietex.logging"):
+        await _wait_for(lambda: "failed to deliver a log record" in caplog.text)
+
+    running_event.clear()
+    await asyncio.wait_for(worker, timeout=5)
+
+    assert any("format exploded" in record.message for record in caplog.records)
+    assert backend.queue.empty()

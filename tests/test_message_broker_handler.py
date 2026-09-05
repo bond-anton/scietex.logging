@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import random
 from datetime import datetime, timezone
 
 import pytest
@@ -95,6 +96,30 @@ class StuckConnectBrokerHandler(AsyncBrokerHandler):
         pass
 
 
+class ScriptedConnectBrokerHandler(AsyncBrokerHandler):
+    """Broker whose connect() outcome follows a script, failing once exhausted."""
+
+    def __init__(self, *args, outcomes, send_error=None, **kwargs):
+        self.outcomes = list(outcomes)
+        self.connect_attempts = 0
+        self.send_error = send_error
+        super().__init__(*args, **kwargs)
+
+    async def connect(self) -> None:
+        self.connect_attempts += 1
+        if self.outcomes and self.outcomes.pop(0) == "ok":
+            self.client = object()
+            return
+        raise ConnectionError("connect failed")
+
+    async def disconnect(self) -> None:
+        self.client = None
+
+    async def send_message(self, record: dict[str, str]) -> None:
+        if self.send_error is not None:
+            raise self.send_error
+
+
 @pytest.mark.asyncio
 async def test_stop_logging_cancels_stuck_connect_worker():
     """stop_logging returns instead of deadlocking when connect() outlives the timeout."""
@@ -141,6 +166,82 @@ async def test_connect_failure_surfaced_and_retried():
     assert handler.connect_attempts == 2  # failed once, then retried and succeeded
 
     await handler.stop_logging(timeout=0.5)
+
+
+@pytest.mark.asyncio
+async def test_connect_retry_backs_off_exponentially(monkeypatch):
+    """Consecutive connect() failures sleep a doubling, jitter-free, capped delay."""
+    handler = FakeBrokerHandler(
+        queue_name="broker",
+        service_name="TestService",
+        worker_id=1,
+        stdout_enable=False,
+        error_handler=lambda record, exc: None,
+    )
+    handler.connect_failures = 10**9  # keep failing for the duration of the test
+
+    delays: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def recording_sleep(delay, *_args, **_kwargs):
+        delays.append(delay)
+        await real_sleep(0.001)  # yield and rate-limit; the delay value is recorded
+
+    monkeypatch.setattr(asyncio, "sleep", recording_sleep)
+    # Neutralize jitter so the recorded sequence is exactly base/doubling/cap.
+    monkeypatch.setattr(random, "uniform", lambda a, b: (a + b) / 2)
+
+    await handler.start_logging()
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5.0
+    while len(delays) < 8 and loop.time() < deadline:
+        await real_sleep(0.01)
+
+    await handler.stop_logging(timeout=0.5)
+
+    assert len(delays) >= 8
+    assert delays[:8] == pytest.approx([0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0])
+
+
+@pytest.mark.asyncio
+async def test_connect_backoff_resets_after_success(monkeypatch):
+    """A successful connect() resets the backoff so a later outage starts from base."""
+    handler = ScriptedConnectBrokerHandler(
+        queue_name="broker",
+        service_name="TestService",
+        worker_id=1,
+        stdout_enable=False,
+        error_handler=lambda record, exc: None,
+        outcomes=["fail", "fail", "ok"],  # then fail once the script is exhausted
+        send_error=RuntimeError("send failed"),
+    )
+
+    delays: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def recording_sleep(delay, *_args, **_kwargs):
+        delays.append(delay)
+        await real_sleep(0.001)
+
+    monkeypatch.setattr(asyncio, "sleep", recording_sleep)
+    monkeypatch.setattr(random, "uniform", lambda a, b: (a + b) / 2)
+
+    await handler.start_logging()
+    handler.emit(_make_record("hello"))
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5.0
+    while len(delays) < 3 and loop.time() < deadline:
+        await real_sleep(0.01)
+
+    await handler.stop_logging(timeout=0.5)
+
+    assert len(delays) >= 3
+    # fail (0.5) -> fail (1.0) -> success -> send fails -> reconnect fail is base again.
+    assert delays[0] == pytest.approx(0.5)
+    assert delays[1] == pytest.approx(1.0)
+    assert delays[2] == pytest.approx(0.5)
 
 
 @pytest.mark.asyncio

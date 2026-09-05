@@ -1,5 +1,6 @@
 """Tests for the typed configuration objects (AR-008)."""
 
+import logging
 import typing
 
 import pytest
@@ -8,6 +9,7 @@ from scietex.logging.config import (
     LoggingConfig,
     RedisConfig,
     ValkeyConfig,
+    level_abbreviation,
     optional_dependency_error,
     validate_queue_maxsize,
 )
@@ -83,6 +85,16 @@ def test_validate_queue_maxsize_accepts_positive_int():
 def test_validate_queue_maxsize_rejects_non_positive_int(bad):
     with pytest.raises(ValueError):
         validate_queue_maxsize(bad)
+
+
+def test_level_abbreviation_lives_in_config():
+    """level_abbreviation is importable from the neutral config leaf (AR-026)."""
+    assert level_abbreviation(logging.DEBUG) == "DBG"
+    assert level_abbreviation(logging.INFO) == "INF"
+    assert level_abbreviation(logging.WARNING) == "WRN"
+    assert level_abbreviation(logging.ERROR) == "ERR"
+    assert level_abbreviation(logging.CRITICAL) == "CRT"
+    assert level_abbreviation(999) == "999"
 
 
 @pytest.mark.parametrize(

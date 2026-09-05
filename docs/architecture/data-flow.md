@@ -32,18 +32,21 @@ console worker (async consumer). `emit` never blocks on I/O.
 1. `logging` framework → `AsyncLoggingHandler.emit(record)` (inherited).
 2. `emit` calls `queue.put_nowait(record)` on the broker queue (`"redis"` /
    `"valkey"`), registered by `AsyncBrokerHandler.__init__`.
-3. `AsyncBrokerHandler._worker` (`message_broker_handler.py:139`) gets the
+3. `AsyncBrokerHandler._worker` (`message_broker_handler.py:153`) gets the
    record, calls `connect()` on first entry, and builds a **dict** log entry:
    `{"level": level_abbreviation(record.levelno), "message": record.getMessage(),
    "name": f"{self.config.service_name}:{self.config.worker_id}",
    "time": datetime.fromtimestamp(record.created, timezone.utc).isoformat()}`.
-   `level` is computed via `level_abbreviation(record.levelno)`; `name` and
-   `time` are derived from `self.config` and the record directly, not from the
-   formatter.
+   `level` is computed via `level_abbreviation(record.levelno)` (imported from
+   `config.py`); `name` and `time` are derived from `self.config` and the record
+   directly, not from the formatter.
 4. `send_message(log_entry)` dispatches to the concrete backend:
-   - Redis: `client.xadd(stream_name, record)` (`redis_handler.py:110`).
-   - Valkey: `client.xadd(stream_name, record.items())` (`valkey_handler.py:111`).
-5. On worker exit, `disconnect()` closes the client.
+   - Redis: `client.xadd(stream_name, record)` (`redis_handler.py:119`).
+   - Valkey: `client.xadd(stream_name, record.items())` (`valkey_handler.py:125`).
+   Each raises `RuntimeError` when the client is not connected (AR-034).
+5. On worker exit, `disconnect()` closes the client. A failed `connect()` is
+   retried with capped exponential backoff (0.5s base doubling to a 30s cap with
+   ±20% jitter, `message_broker_handler.py:20-22,164-180`) — AR-022.
 
 **Destination.** Redis stream / Valkey stream (external server).
 
@@ -70,7 +73,7 @@ by the console worker (formatted to stdout) and once by the broker worker
 ## Flow 4: Shutdown / drain (control flow)
 
 **Source.** Host application calls `await handler.stop_logging(timeout=5.0)`
-(`async_logging_handler.py:301`).
+(`async_logging_handler.py:320`).
 
 **Processing.**
 1. `logging_accept_event.clear()` — stops `emit` from enqueuing new records.
@@ -80,22 +83,28 @@ by the console worker (formatted to stdout) and once by the broker worker
    coordinator collects the results.
 3. After every drain concludes, invoke each registered status reporter with the
    collected results. The console backend is registered as a status reporter
-   (`basic_handler.py:88`), so `ConsoleBackend.report_status(results)`
-   (`console_backend.py:130`) enqueues synthetic INFO/ERROR status records for
+   (`basic_handler.py:94`), so `ConsoleBackend.report_status(results)`
+   (`console_backend.py:183`) enqueues synthetic INFO/ERROR status records for
    every backend's drain outcome.
 4. `logging_running_event.clear()` — signals workers to stop after draining.
-5. `await asyncio.gather(*log_workers_tasks)` — workers exit.
+5. `await asyncio.gather(*log_workers_tasks)` — workers exit (bounded by the
+   drain `timeout`; stragglers are cancelled on `asyncio.TimeoutError`).
 6. `log_workers_tasks = []` — forget finished tasks so a later stop does not
-   re-gather them. `stop_logging` does **not** call `close()`; the handler may
-   be restarted via `start_logging` on the same loop.
+   re-gather them.
+7. Clear any records still queued after the drain window and worker teardown:
+   each backend queue is drained via `get_nowait()` + `task_done()`
+   (`async_logging_handler.py:387-395`). Undelivered records are **dropped, not
+   replayed**, so the next `start_logging` begins from an actually-empty queue
+   (AR-020). `stop_logging` does **not** call `close()`; the handler may be
+   restarted via `start_logging` on the same loop.
 
-**Destination.** All queues drained; workers terminated; handler idle and
-restartable.
+**Destination.** All queues drained (leftovers cleared); workers terminated;
+handler idle and restartable.
 
 ## Cross-cutting notes
 
 - **Single record, multiple queues.** `emit` fans one `LogRecord` out to every
-  registered queue in `log_queues` (`async_logging_handler.py:259`). Queue count
+  registered queue in `log_queues` (`async_logging_handler.py:278`). Queue count
   = 1 (console) for `AsyncBaseHandler`, or 2 (console + broker) for broker
   handlers with stdout enabled.
 - **Bounded queues with drop + report overflow.** Each backend queue is bounded
@@ -109,7 +118,7 @@ restartable.
 - **Ordering.** Within a single queue, records are FIFO. Across queues (console
   vs broker) there is no ordering guarantee.
 - **Synthetic records during shutdown.** `ConsoleBackend.report_status`
-  (`console_backend.py:130`) injects status `LogRecord`s into the console queue
+  (`console_backend.py:183`) injects status `LogRecord`s into the console queue
   to report every backend's drain results — a control-flow message traveling on
   the same data path as user logs. It runs as a post-drain status reporter, so
   it observes all backends' outcomes without depending on drain order.

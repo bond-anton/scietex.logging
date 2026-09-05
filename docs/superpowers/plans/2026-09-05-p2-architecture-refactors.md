@@ -244,7 +244,9 @@ def test_config_is_single_source_of_truth():
     assert handler.queue_maxsize == handler.config.queue_maxsize == 123
     assert handler.error_handler is handler.config.error_handler
     # The formatter identity comes from config.
-    assert handler.formatter.worker_name == f"{handler.config.service_name}:{handler.config.worker_id}"
+    assert (
+        handler.formatter.worker_name == f"{handler.config.service_name}:{handler.config.worker_id}"
+    )
 ```
 
 Append to `tests/test_redis_handler.py` (no live server needed):
@@ -254,14 +256,24 @@ def test_redis_config_accepts_valid_extra_options():
     """A redis_config dict with legitimate client options no longer raises TypeError."""
     handler = AsyncRedisHandler(
         stream_name="s",
-        redis_config={"host": "example.com", "port": 7000, "db": 2, "password": "secret", "ssl": True},
+        redis_config={
+            "host": "example.com",
+            "port": 7000,
+            "db": 2,
+            "password": "secret",
+            "ssl": True,
+        },
     )
     assert handler.config.backend_config.host == "example.com"
     assert handler.config.backend_config.password == "secret"
     assert handler.config.backend_config.ssl is True
     # client_config remains the raw dict passed to redis.Redis.
     assert handler.client_config == {
-        "host": "example.com", "port": 7000, "db": 2, "password": "secret", "ssl": True,
+        "host": "example.com",
+        "port": 7000,
+        "db": 2,
+        "password": "secret",
+        "ssl": True,
     }
 ```
 
@@ -579,12 +591,8 @@ async def test_stop_logging_collects_results_and_reports():
     class ReportingHandler(AsyncLoggingHandler):
         def __init__(self):
             super().__init__()
-            self.register_backend(
-                "a", asyncio.Queue(), self._noop_worker, self._drain_a
-            )
-            self.register_backend(
-                "b", asyncio.Queue(), self._noop_worker, self._drain_b
-            )
+            self.register_backend("a", asyncio.Queue(), self._noop_worker, self._drain_a)
+            self.register_backend("b", asyncio.Queue(), self._noop_worker, self._drain_b)
             self.register_status_reporter(lambda results: reported.append(list(results)))
 
         async def _noop_worker(self):
@@ -691,42 +699,43 @@ In `src/scietex/logging/console_backend.py`:
 
 1. Rewrite `drain` (`:102-131`) to take only `timeout` and return the console's own result (drain its own queue). Move the status-record enqueueing into a new `report_status` method:
 ```python
-    async def drain(self, timeout: float) -> BackendDrainResult:
-        """
-        Drain the console queue and return the outcome.
+async def drain(self, timeout: float) -> BackendDrainResult:
+    """
+    Drain the console queue and return the outcome.
 
-        Args:
-            timeout (float): Timeout for draining the console queue.
+    Args:
+        timeout (float): Timeout for draining the console queue.
 
-        Returns:
-            BackendDrainResult: How the console queue drained.
-        """
+    Returns:
+        BackendDrainResult: How the console queue drained.
+    """
+    try:
+        await asyncio.wait_for(self.queue.join(), timeout=timeout)
+    except asyncio.TimeoutError:
+        return BackendDrainResult("console", DrainStatus.TIMEOUT)
+    except Exception as exc:
+        return BackendDrainResult("console", DrainStatus.ERROR, exc)
+    else:
+        return BackendDrainResult("console", DrainStatus.COMPLETED)
+
+
+async def report_status(self, results: list[BackendDrainResult]) -> None:
+    """
+    Enqueue a synthetic status record for each other backend's drain outcome.
+
+    Called by the coordinator after all backends have drained, so the console
+    surfaces how every backend fared during shutdown. Status records are
+    best-effort: when the console queue is full they are dropped rather than
+    blocking shutdown on a bounded queue the worker may already be draining.
+
+    Args:
+        results (list[BackendDrainResult]): Drain outcomes from every backend.
+    """
+    for result in results:
         try:
-            await asyncio.wait_for(self.queue.join(), timeout=timeout)
-        except asyncio.TimeoutError:
-            return BackendDrainResult("console", DrainStatus.TIMEOUT)
-        except Exception as exc:
-            return BackendDrainResult("console", DrainStatus.ERROR, exc)
-        else:
-            return BackendDrainResult("console", DrainStatus.COMPLETED)
-
-    async def report_status(self, results: list[BackendDrainResult]) -> None:
-        """
-        Enqueue a synthetic status record for each other backend's drain outcome.
-
-        Called by the coordinator after all backends have drained, so the console
-        surfaces how every backend fared during shutdown. Status records are
-        best-effort: when the console queue is full they are dropped rather than
-        blocking shutdown on a bounded queue the worker may already be draining.
-
-        Args:
-            results (list[BackendDrainResult]): Drain outcomes from every backend.
-        """
-        for result in results:
-            try:
-                self.queue.put_nowait(_status_record(result))
-            except asyncio.QueueFull:
-                pass
+            self.queue.put_nowait(_status_record(result))
+        except asyncio.QueueFull:
+            pass
 ```
 
 2. Update the class docstring (`:47-60`) to describe `report_status` as the post-drain observer.

@@ -45,7 +45,7 @@ async def test_valkey_handler_logs_to_stream():
         service_name=service_name,
         worker_id=worker_id,
         stream_name=stream_name,
-        valkey_config=client_config,
+        valkey_config={"addresses": [("localhost", 6379)]},
     )
     await handler.start_logging()  # Start the handler logging workers
 
@@ -93,12 +93,53 @@ async def test_valkey_handler_logs_to_stream():
 
 
 def test_valkey_config_is_typed():
-    """valkey_config is reflected in a typed ValkeyConfig on the handler."""
+    """valkey_config dict is reflected in a typed ValkeyConfig on the handler."""
+    handler = AsyncValkeyHandler(
+        stream_name="s",
+        valkey_config={"addresses": [("example.com", 7000)]},
+    )
+    assert handler.config.backend_config.addresses == [("example.com", 7000)]
+    # client_config remains the raw dict for connect() to translate.
+    assert handler.client_config == {"addresses": [("example.com", 7000)]}
+
+
+def test_valkey_config_defaults():
+    """No valkey_config defaults to a localhost:6379 ValkeyConfig and an empty dict."""
     handler = AsyncValkeyHandler(stream_name="s")
     assert handler.config.backend_config.addresses == [("localhost", 6379)]
-    assert handler.client_config is not None  # GlideClientConfiguration kept for connect()
+    assert handler.client_config == {}
+
+
+@pytest.mark.asyncio
+async def test_valkey_connect_translates_config_to_glide(monkeypatch):
+    """connect() translates the raw dict into a GlideClientConfiguration."""
+    captured = {}
+
+    async def fake_create(config):
+        captured["config"] = config
+        return None
+
+    monkeypatch.setattr(GlideClient, "create", fake_create)
+    handler = AsyncValkeyHandler(
+        stream_name="s",
+        valkey_config={"addresses": [("localhost", 6379)], "request_timeout": 100},
+    )
+    await handler.connect()
+    config = captured["config"]
+    assert isinstance(config, GlideClientConfiguration)
+    assert [(node.host, node.port) for node in config.addresses] == [("localhost", 6379)]
+    assert config.request_timeout == 100
 
 
 def test_valkey_unknown_kwarg_raises_type_error():
     with pytest.raises(TypeError):
         AsyncValkeyHandler(stream_name="s", stdout_enabel=True)
+
+
+@pytest.mark.asyncio
+async def test_valkey_send_message_raises_when_not_connected():
+    """send_message() raises instead of silently acking when no client is connected (AR-034)."""
+    handler = AsyncValkeyHandler(stream_name="s")
+    record = {"level": "INF", "message": "m", "name": "n", "time": "t"}
+    with pytest.raises(RuntimeError):
+        await handler.send_message(record)

@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 from scietex.logging import AsyncLoggingHandler
+from scietex.logging.async_logging_handler import BackendDrainResult, DrainStatus
 
 
 class FileLikeHandler(AsyncLoggingHandler):
@@ -25,11 +26,12 @@ class FileLikeHandler(AsyncLoggingHandler):
             self.written.append(self.formatter.format(record))
             self.log_queues["filelike"].task_done()
 
-    async def drain(self, timeout, results):
+    async def drain(self, timeout: float) -> BackendDrainResult:
         try:
             await asyncio.wait_for(self.log_queues["filelike"].join(), timeout=timeout)
         except asyncio.TimeoutError:
-            pass
+            return BackendDrainResult("filelike", DrainStatus.TIMEOUT)
+        return BackendDrainResult("filelike", DrainStatus.COMPLETED)
 
 
 async def main():

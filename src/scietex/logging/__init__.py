@@ -101,6 +101,7 @@ __version__ = "0.2.0"
 
 from .async_logging_handler import AsyncLoggingHandler
 from .basic_handler import AsyncBaseHandler
+from .config import LoggingConfig, RedisConfig, ValkeyConfig
 from .console_backend import ConsoleBackend
 from .formatter import ScietexFormatter
 from .message_broker_handler import AsyncBrokerHandler
@@ -110,18 +111,25 @@ __all__ = [
     "AsyncBrokerHandler",
     "AsyncLoggingHandler",
     "ConsoleBackend",
+    "LoggingConfig",
+    "RedisConfig",
     "ScietexFormatter",
+    "ValkeyConfig",
 ]
 
 try:
     from .redis_handler import AsyncRedisHandler
 
     __all__ += ["AsyncRedisHandler"]
-except ImportError:
-    pass
+except ImportError as exc:
+    # Only swallow the missing-optional-client failure; surface any other
+    # ImportError (e.g. a bug in the backend module or a missing transitive dep).
+    if exc.name != "redis":
+        raise
 try:
     from .valkey_handler import AsyncValkeyHandler
 
     __all__ += ["AsyncValkeyHandler"]
-except ImportError:
-    pass
+except ImportError as exc:
+    if exc.name != "glide":
+        raise
