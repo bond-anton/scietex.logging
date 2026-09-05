@@ -69,6 +69,53 @@ class FakeBrokerHandler(AsyncBrokerHandler):
         self.sent.append(record)
 
 
+class StuckConnectBrokerHandler(AsyncBrokerHandler):
+    """Broker whose connect() blocks far longer than the stop timeout."""
+
+    def __init__(self, *args, **kwargs):
+        self.connect_started = False
+        self.connect_cancelled = False
+        super().__init__(*args, **kwargs)
+
+    async def connect(self) -> None:
+        self.connect_started = True
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            self.connect_cancelled = True
+            raise
+        self.client = object()
+
+    async def disconnect(self) -> None:
+        self.client = None
+
+    async def send_message(self, record: dict[str, str]) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_stop_logging_cancels_stuck_connect_worker():
+    """stop_logging returns instead of deadlocking when connect() outlives the timeout."""
+    handler = StuckConnectBrokerHandler(
+        queue_name="broker",
+        service_name="TestService",
+        worker_id=1,
+        stdout_enable=False,
+    )
+
+    await handler.start_logging()
+    await _wait_for(lambda: handler.connect_started)
+
+    # The worker is blocked inside connect() for ~10s, well past the 0.1s stop
+    # timeout. stop_logging must cancel the straggler and return promptly rather
+    # than hanging on an unreachable broker.
+    await asyncio.wait_for(handler.stop_logging(timeout=0.1), timeout=5)
+
+    assert handler.connect_cancelled
+    assert handler.log_workers_tasks == []
+    assert not handler.logging_running_event.is_set()
+
+
 @pytest.mark.asyncio
 async def test_connect_failure_surfaced_and_retried():
     """Connect failures are reported and the record is delivered after a retry."""
@@ -95,8 +142,8 @@ async def test_connect_failure_surfaced_and_retried():
 
 
 @pytest.mark.asyncio
-async def test_send_failure_surfaces_and_does_not_task_done():
-    """Send failures are reported and the queue task is not acknowledged."""
+async def test_send_failure_surfaces_and_acks_record():
+    """Send failures are reported and the queue task is acknowledged (dropped)."""
     errors = []
     handler = FakeBrokerHandler(
         queue_name="broker",
@@ -114,8 +161,10 @@ async def test_send_failure_surfaces_and_does_not_task_done():
     assert len(errors) == 1
     assert isinstance(errors[0], RuntimeError)
     assert handler.send_attempts  # send_message was attempted
-    # The failed record is not acknowledged, so the drop is surfaced, not masked.
-    assert counting_queue.task_done_calls == 0
+    # The failed record is acknowledged so the queue can drain; the drop is
+    # surfaced via the error channel, not by poisoning the drain counter.
+    assert counting_queue.task_done_calls == 1
+    assert counting_queue.empty()
 
     await handler.stop_logging(timeout=0.5)
 

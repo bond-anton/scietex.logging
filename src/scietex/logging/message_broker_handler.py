@@ -116,7 +116,8 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         concrete adapter translates the entry to the argument shape its client expects
         (e.g. Redis ``xadd`` accepts the dict directly, while Valkey-glide ``xadd``
         expects ``record.items()``). A failure must raise so the worker can report it
-        without acknowledging the queue task.
+        via the error channel and acknowledge the queue task; the record is dropped,
+        not retried.
 
         Args:
             record (dict[str, str]): The log record to send, keyed by ``level``,
@@ -138,40 +139,62 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         Returns:
             None
         """
-        while self.logging_running_event.is_set() or not self.log_queues[self.queue_name].empty():
-            if self.client is None:
-                try:
-                    await self.connect()
-                except Exception as exc:
-                    self._report_error(None, exc)
-                    await asyncio.sleep(1.0)
-                    continue
-            try:
-                record = await asyncio.wait_for(self.log_queues[self.queue_name].get(), 1)
-            except asyncio.TimeoutError:
-                continue
-            # Compute the broker fields directly instead of reading formatter-mutated
-            # record attributes, keeping output deterministic regardless of stdout_enable.
-            level = level_abbreviation(record.levelno)
-            name = getattr(self.formatter, "worker_name", record.name)
-            log_entry: dict[str, str] = {
-                "level": level,
-                "message": record.getMessage(),
-                "name": name,
-                "time": self.formatter.formatTime(record)
-                if self.formatter
-                else datetime.now(timezone.utc).isoformat(),
-            }
-            try:
-                await self.send_message(log_entry)
-            except Exception as exc:
-                self._report_error(record, exc)
-                continue
-            self.log_queues[self.queue_name].task_done()
         try:
-            await self.disconnect()
-        except Exception as exc:
-            self._report_error(None, exc)
+            while (
+                self.logging_running_event.is_set() or not self.log_queues[self.queue_name].empty()
+            ):
+                if self.client is None:
+                    try:
+                        await self.connect()
+                    except Exception as exc:
+                        self._report_error(None, exc)
+                        await asyncio.sleep(1.0)
+                        continue
+                try:
+                    record = await asyncio.wait_for(self.log_queues[self.queue_name].get(), 1)
+                except asyncio.TimeoutError:
+                    continue
+                # Compute the broker fields directly instead of reading formatter-mutated
+                # record attributes, keeping output deterministic regardless of stdout_enable.
+                level = level_abbreviation(record.levelno)
+                name = getattr(self.formatter, "worker_name", record.name)
+                log_entry: dict[str, str] = {
+                    "level": level,
+                    "message": record.getMessage(),
+                    "name": name,
+                    "time": self.formatter.formatTime(record)
+                    if self.formatter
+                    else datetime.now(timezone.utc).isoformat(),
+                }
+                try:
+                    await self.send_message(log_entry)
+                except Exception as exc:
+                    # A send failure usually means the connection dropped
+                    # mid-stream: the client is now unusable, so tear it down and
+                    # force a reconnect next iteration instead of reusing the dead
+                    # client (which would drop every subsequent record). The record
+                    # was already dequeued by get(); ack the processing attempt so
+                    # queue.join() can complete. Visibility of the drop comes from
+                    # _report_error, not from withholding task_done().
+                    self._report_error(record, exc)
+                    try:
+                        await self.disconnect()
+                    except Exception:
+                        # disconnect() itself failed (e.g. the transport is already
+                        # gone); drop the stale reference so connect() re-runs.
+                        self.client = None
+                finally:
+                    self.log_queues[self.queue_name].task_done()
+        finally:
+            # Release the client whether the worker exits normally or is cancelled
+            # (e.g. by stop_logging's gather-bound cancel while the worker is idle in
+            # queue.get()). Clearing the reference unconditionally keeps the teardown
+            # idempotent even when disconnect() raises on a half-closed transport.
+            try:
+                await self.disconnect()
+            except Exception as exc:
+                self._report_error(None, exc)
+            self.client = None
 
     async def drain(self, timeout: float, results: list[BackendDrainResult]) -> None:
         """

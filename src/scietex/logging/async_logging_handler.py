@@ -284,9 +284,23 @@ class AsyncLoggingHandler(logging.Handler):
         self.logging_running_event.clear()
 
         # Wait for all worker tasks to complete, then forget them so a later stop
-        # does not re-gather already-finished tasks.
+        # does not re-gather already-finished tasks. A worker blocked inside
+        # connect()/send_message() cannot observe the running-event clear until the
+        # call returns, so bound the wait with the same timeout used for the drains
+        # and cancel any stragglers rather than hanging graceful shutdown on an
+        # unreachable broker.
         if self.log_workers_tasks:
-            await asyncio.gather(*self.log_workers_tasks)
+            try:
+                await asyncio.wait_for(asyncio.gather(*self.log_workers_tasks), timeout)
+            except asyncio.TimeoutError:
+                # Reap any worker still stuck in an await that cannot observe the
+                # running-event clear. cancel() is a no-op on an already-cancelled
+                # task, and gather(return_exceptions=True) lets each worker run its
+                # finally cleanup (e.g. acking an in-flight record) to completion.
+                for task in self.log_workers_tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*self.log_workers_tasks, return_exceptions=True)
         self.log_workers_tasks = []
 
     def _report_error(self, record: logging.LogRecord | None, exc: Exception) -> None:

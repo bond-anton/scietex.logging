@@ -232,20 +232,24 @@ and dict-building.
 
 ## 12. `AsyncBrokerHandler._worker` — connection + drain coupling
 
-**Location.** `message_broker_handler.py:130-174`.
+**Location.** `message_broker_handler.py:131-197`.
 
 **What it appears to do.** The worker calls `connect()` once at start, then
 loops draining the queue and calling `send_message`, then `disconnect()` at
 exit. On a `connect()` failure it reports via the error channel, sleeps ~1s,
 and retries **without dequeuing** the record. On a `send_message()` failure it
-reports via the error channel and continues to the next record **without
-calling `task_done()`**.
+reports via the error channel, tears the client down (`disconnect()`, with a
+`self.client = None` fallback if that raises) so the next iteration reconnects,
+and acknowledges the record via `task_done()` in a `finally`.
 
 **Why significant.** Connection lifecycle, message dispatch, and queue draining
 are interleaved in one loop. Failure modes are surfaced through the error
 channel rather than silently dropping records: a failed `connect()` is retried
-(no record is dequeued), and a failed `send_message()` is reported and skipped
-(no `task_done()`, so the queue does not acknowledge an undelivered record).
-Records are never silently dropped.
+(no record is dequeued), and a failed `send_message()` is reported, the dead
+client is released so the worker re-enters `connect()`, and the dequeued record
+is acked exactly once (`task_done()` in a `finally`) so `queue.join()` in the
+drain can complete. The whole connect-retry + drain loop is wrapped in a
+`finally` that runs `disconnect()` and resets `self.client = None` on both
+normal exit and cancellation, so a cancelled worker never leaks the client.
 
 **Related.** `lifecycle.md`; `redis_handler.py`, `valkey_handler.py`.

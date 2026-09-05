@@ -69,8 +69,6 @@ class FlakyBrokerHandler(AsyncBrokerHandler):
     async def send_message(self, record: dict[str, str]) -> None:
         self.send_attempts += 1
         if self.send_attempts <= self.failures_before_success:
-            # Pace the retries so the drain timeout fires before recovery.
-            await asyncio.sleep(0.05)
             raise RuntimeError("broker down")
         self.sent.append(record)
 
@@ -202,36 +200,41 @@ async def test_emit_during_gap_is_dropped():
 
 
 @pytest.mark.asyncio
-async def test_restart_after_drain_timeout():
-    """A broker-down drain timeout does not corrupt state; a restart recovers."""
+async def test_send_failure_acks_and_restart_recovers(capsys):
+    """A send failure is acked (no false drain timeout); a restart recovers."""
     errors = []
     handler = FlakyBrokerHandler(
         queue_name="broker",
         service_name="TestService",
         worker_id=1,
-        stdout_enable=False,
         error_handler=lambda record, exc: errors.append(exc),
     )
-    handler.failures_before_success = 8  # fails for ~0.4s, then succeeds
+    handler.failures_before_success = 2  # first two sends fail, then succeed
 
     await handler.start_logging()
-    handler.emit(_make_record("flaky"))
-    await _wait_for(lambda: handler.send_attempts >= 1)
+    handler.emit(_make_record("one"))
+    handler.emit(_make_record("two"))
+    handler.emit(_make_record("three"))
+    await _wait_for(lambda: len(handler.sent) == 1)
+    assert handler.sent[0]["message"] == "three"
+    assert len(errors) == 2
 
-    # The broker is still down through the drain, so it times out. The worker
-    # keeps retrying until the failures are exhausted, then drains and exits,
-    # so the gather below completes rather than hanging on a downed broker.
-    await asyncio.wait_for(handler.stop_logging(timeout=0.05), timeout=10)
+    # The failed sends were acked, so the drain reports COMPLETED, not a false
+    # TIMEOUT, and stop_logging returns promptly.
+    await handler.stop_logging(timeout=0.5)
     assert handler.client is None
-    assert errors
+    captured = capsys.readouterr().out
+    assert "Broker Logger has completed processing its queue." in captured
+    assert "Timeout while waiting for broker" not in captured
 
     # A fresh start schedules a fresh worker that reconnects and delivers.
-    handler.failures_before_success = 0
     sent_before = len(handler.sent)
     await handler.start_logging()
     handler.emit(_make_record("recovered"))
     await _wait_for(lambda: len(handler.sent) == sent_before + 1)
-
     assert handler.sent[-1]["message"] == "recovered"
-    assert handler.connect_attempts == 2
+    # connect() runs once for the initial start, once after each of the two send
+    # failures (AR-015 resets the client so the next iteration reconnects), and
+    # once more for the restart.
+    assert handler.connect_attempts == 4
     await handler.stop_logging(timeout=0.5)

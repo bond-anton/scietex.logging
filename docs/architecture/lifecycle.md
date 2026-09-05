@@ -71,8 +71,13 @@ semantics below).
    backend (registered first) drains last and reports the other backends'
    outcomes via synthetic records.
 3. Signal workers to stop (`running_event.clear()`).
-4. Gather worker tasks (workers exit their loop and, for broker workers, call
-   `disconnect()`).
+4. Gather worker tasks, bounded by the same `timeout` used for the drains
+   (`asyncio.wait_for`). A worker blocked inside `connect()`/`send_message()`
+   cannot observe the running-event clear until the call returns, so on
+   `asyncio.TimeoutError` `stop_logging` cancels the straggler tasks and
+   re-gathers with `return_exceptions=True` rather than hanging graceful
+   shutdown on an unreachable broker. Broker workers run `disconnect()` in a
+   `finally`, so the client is released on both normal exit and cancellation.
 5. Reset `log_workers_tasks = []` so a later stop does not re-gather finished
    tasks. `stop_logging` does **not** call `self.close()`.
 
