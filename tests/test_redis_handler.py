@@ -68,3 +68,21 @@ async def test_redis_handler_logs_to_stream():
     await handler.stop_logging()
     await redis_client.delete(stream_name)  # Clear the test stream after the test
     await redis_client.aclose()  # Close the Redis client connection
+
+
+def test_redis_config_is_typed_and_validated():
+    """redis_config dict is converted into a typed RedisConfig on the handler."""
+    handler = AsyncRedisHandler(
+        stream_name="s",
+        redis_config={"host": "example.com", "port": 7000, "db": 2},
+    )
+    assert handler.config.backend_config.host == "example.com"
+    assert handler.config.backend_config.port == 7000
+    assert handler.config.backend_config.db == 2
+    # client_config remains a dict for the redis client call.
+    assert handler.client_config == {"host": "example.com", "port": 7000, "db": 2}
+
+
+def test_redis_unknown_kwarg_raises_type_error():
+    with pytest.raises(TypeError):
+        AsyncRedisHandler(stream_name="s", stdout_enabel=True)

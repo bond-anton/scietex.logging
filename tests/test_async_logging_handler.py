@@ -32,3 +32,21 @@ async def test_pure_handler_starts_and_stops_cleanly():
     assert handler.log_queues == {}
     assert not handler.logging_accept_event.is_set()
     assert not handler.logging_running_event.is_set()
+
+
+def test_unknown_kwarg_raises_type_error():
+    """A typo'd kwarg fails loudly instead of being silently swallowed."""
+    with pytest.raises(TypeError):
+        BareHandler(service_name="TestService", worker_id=1, stdout_enabel=True)
+
+
+def test_config_exposes_machinery_options():
+    handler = BareHandler(
+        service_name="Svc", worker_id=7, queue_maxsize=123, error_handler=lambda r, e: None
+    )
+    assert handler.config.service_name == "Svc"
+    assert handler.config.worker_id == 7
+    assert handler.config.queue_maxsize == 123
+    assert handler.config.error_handler is not None
+    assert handler.queue_maxsize == 123
+    assert handler.error_handler is not None

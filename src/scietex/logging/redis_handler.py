@@ -8,6 +8,10 @@ except ImportError as e:
         "Please install it by running:\n\n    pip install scietex.logging[redis]\n"
     ) from e
 
+import logging
+from collections.abc import Callable
+
+from .config import LoggingConfig, RedisConfig
 from .message_broker_handler import AsyncBrokerHandler
 
 
@@ -37,8 +41,11 @@ class AsyncRedisHandler(AsyncBrokerHandler):
         stream_name: str,
         service_name: str | None = None,
         worker_id: int | None = None,
+        *,
         redis_config: dict | None = None,
-        **kwargs,
+        error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
+        stdout_enable: bool = True,
+        queue_maxsize: int = 10000,
     ) -> None:
         """
         Initialize the asynchronous Redis logging handler.
@@ -48,25 +55,42 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             service_name (str, optional): Service name for log identification. Defaults to None.
             worker_id (int, optional): Identifier for the logging worker instance. Defaults to None.
             redis_config (dict, optional): Configuration dictionary for Redis connection.
-                Defaults to {"host": "localhost", "port": 6379, "db": 0}.
-            **kwargs: Additional keyword arguments, such as `stdout_enable`.
+                Defaults to {"host": "localhost", "port": 6379, "db": 0}. Unknown keys
+                raise ``TypeError`` when the config is converted to a ``RedisConfig``.
+            error_handler (callable, optional): Callback invoked with ``(record, exc)``
+                when a log record cannot be delivered. Defaults to None, in which case
+                errors are reported via the ``scietex.logging`` module logger.
+            stdout_enable (bool): Flag to enable console logging (defaults to True).
+            queue_maxsize (int): Maximum number of records each backend queue can hold.
+                Defaults to 10000.
 
         Attributes:
             stream_name (str): The Redis stream name where log entries are sent.
             client (redis.Redis | None): The Redis client connection, or None if not connected.
+
+        Raises:
+            TypeError: If an unknown keyword argument is passed or ``redis_config``
+                contains an unknown key.
         """
         super().__init__(
+            queue_name="redis",
             service_name=service_name,
             worker_id=worker_id,
-            queue_name="redis",
-            **kwargs,
+            error_handler=error_handler,
+            stdout_enable=stdout_enable,
+            queue_maxsize=queue_maxsize,
         )
         self.stream_name = stream_name
-        self.client_config: dict = redis_config or {
-            "host": "localhost",
-            "port": 6379,
-            "db": 0,
-        }
+        raw = redis_config or {"host": "localhost", "port": 6379, "db": 0}
+        self.config = LoggingConfig(
+            service_name=self.config.service_name,
+            worker_id=self.config.worker_id,
+            error_handler=self.config.error_handler,
+            queue_maxsize=self.config.queue_maxsize,
+            stdout_enable=self.config.stdout_enable,
+            backend_config=RedisConfig(**raw),
+        )
+        self.client_config: dict = raw
 
     async def connect(self) -> None:
         """

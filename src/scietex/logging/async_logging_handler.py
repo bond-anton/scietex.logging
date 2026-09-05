@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from .config import LoggingConfig, validate_queue_maxsize
 from .formatter import ScietexFormatter
 
 _error_logger = logging.getLogger("scietex.logging")
@@ -103,7 +104,6 @@ class AsyncLoggingHandler(logging.Handler):
         *,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         queue_maxsize: int = 10000,
-        **kwargs,
     ) -> None:
         """
         Initialize the asynchronous logging handler machinery.
@@ -119,17 +119,27 @@ class AsyncLoggingHandler(logging.Handler):
             queue_maxsize (int): Maximum number of records each backend queue can
                 hold. When a queue is full, `emit` drops the record and reports it
                 through the error channel instead of blocking. Defaults to 10000.
-            **kwargs: Additional keyword arguments accepted for subclass
-                compatibility; they are ignored by the base machinery.
+                Must be a positive int; invalid values raise ``ValueError``.
+
+        Raises:
+            TypeError: If an unknown keyword argument is passed.
         """
         super().__init__()
-        self.error_handler = error_handler
-        self.queue_maxsize = queue_maxsize
         if worker_id is None:
             worker_id = 1
         if service_name is None:
             service_name = "Service"
-        self.formatter = ScietexFormatter(service_name=service_name, worker_id=worker_id)
+        self.config = LoggingConfig(
+            service_name=service_name,
+            worker_id=worker_id,
+            error_handler=error_handler,
+            queue_maxsize=validate_queue_maxsize(queue_maxsize),
+        )
+        self.error_handler = self.config.error_handler
+        self.queue_maxsize = self.config.queue_maxsize
+        self.formatter = ScietexFormatter(
+            service_name=self.config.service_name, worker_id=self.config.worker_id
+        )
         self.logging_accept_event = asyncio.Event()  # Indicates if logging accepting events
         self.logging_running_event = asyncio.Event()  # Indicates if logging is running
 

@@ -75,8 +75,20 @@ from scietex.logging import AsyncLoggingHandler
 
 
 class MyHandler(AsyncLoggingHandler):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        service_name=None,
+        worker_id=None,
+        *,
+        error_handler=None,
+        queue_maxsize=10000,
+    ):
+        super().__init__(
+            service_name=service_name,
+            worker_id=worker_id,
+            error_handler=error_handler,
+            queue_maxsize=queue_maxsize,
+        )
         # register your own backend(s) via self.register_backend(...)
         # worker is a zero-arg factory returning a fresh coroutine per start:
         self.register_backend("my_backend", asyncio.Queue(), self._worker, self.drain)
@@ -106,8 +118,10 @@ handler = AsyncBaseHandler(error_handler=on_error)
 
 Each backend queue is **bounded** by `queue_maxsize`, a keyword-only constructor
 parameter on `AsyncLoggingHandler` and `AsyncBaseHandler` (default `10000`). It
-is stored as `self.queue_maxsize` and applied to every backend queue the handler
-registers — the console queue and, for broker handlers, the broker queue.
+is validated to a positive int via `validate_queue_maxsize` (invalid values
+raise `ValueError`), stored as `self.queue_maxsize`, and applied to every
+backend queue the handler registers — the console queue and, for broker
+handlers, the broker queue.
 
 ```python
 handler = AsyncBaseHandler(queue_maxsize=5000)
@@ -119,6 +133,25 @@ channel (`error_handler` callback, or the `scietex.logging` module logger when
 none is configured). `emit` never blocks and never buffers unboundedly, so the
 producer stays non-blocking under sustained overload. Under such overload,
 records are dropped and reported rather than buffered without limit.
+
+### Typed Configuration
+
+Every handler builds a frozen dataclass `self.config` from its explicit
+constructor keyword arguments (defined in `src/scietex/logging/config.py`):
+
+- `LoggingConfig` — shared machinery options for every handler:
+  `service_name`, `worker_id`, `error_handler`, `queue_maxsize`,
+  `stdout_enable`, and `backend_config` (the backend-specific config, or `None`
+  for the pure-machinery/console-only handlers).
+- `RedisConfig` — Redis connection settings (`host`, `port`, `db`). Stored as
+  `self.config.backend_config` on `AsyncRedisHandler`.
+- `ValkeyConfig` — Valkey node addresses (a list of `(host, port)` tuples).
+  Stored as `self.config.backend_config` on `AsyncValkeyHandler`.
+
+The handler constructors **no longer accept `**kwargs`**. Unknown or typo'd
+keyword arguments now raise `TypeError` at construction time instead of being
+silently swallowed. `AsyncRedisHandler` converts its `redis_config` dict into a
+typed `RedisConfig`; unknown keys in that dict also raise `TypeError`.
 
 ### Threading Contract
 

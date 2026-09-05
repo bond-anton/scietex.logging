@@ -49,7 +49,9 @@ handler = AsyncRedisHandler(
 ### Configuration
 
 - `stream_name`: The Redis stream name (required)
-- `redis_config`: Dictionary with Redis connection parameters
+- `redis_config`: Dictionary with Redis connection parameters (accepted for
+  backward compatibility). It is converted into a typed `RedisConfig` stored as
+  `self.config.backend_config`; unknown keys in the dict raise `TypeError`.
   - `host`: Redis server host (default: "localhost")
   - `port`: Redis server port (default: 6379)
   - `db`: Redis database number (default: 0)
@@ -82,6 +84,10 @@ handler = AsyncValkeyHandler(stream_name="my_log_stream")
 
 - `stream_name`: The Valkey stream name (required)
 - `valkey_config`: `GlideClientConfiguration` object for Valkey connection
+  (accepted for backward compatibility). The handler stores a typed
+  `ValkeyConfig` (a list of `(host, port)` addresses) as
+  `self.config.backend_config`; `self.client_config` remains the
+  `GlideClientConfiguration` used for the client call.
 
 ## Backend Comparison
 

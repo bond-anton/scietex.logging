@@ -61,8 +61,12 @@ per-backend queues/workers, the error channel, and the generic
 **Class.** `AsyncLoggingHandler(logging.Handler)` — `async_logging_handler.py:48`
 
 **Public interface.**
-- `AsyncLoggingHandler(service_name=None, worker_id=None, *, error_handler=None, queue_maxsize=10000, **kwargs)`
+- `AsyncLoggingHandler(service_name=None, worker_id=None, *, error_handler=None, queue_maxsize=10000)`
   - Constructs a `ScietexFormatter(service_name, worker_id)`.
+  - Builds a typed `self.config = LoggingConfig(...)` from its explicit keyword
+    args; `queue_maxsize` is validated to a positive int via
+    `validate_queue_maxsize`. No `**kwargs` — unknown keyword args raise
+    `TypeError`.
   - Stores `queue_maxsize` as `self.queue_maxsize`; each backend queue is bounded
     by it (default 10000).
 - `register_backend(name, queue, worker, drain=None)` —
@@ -86,9 +90,16 @@ per-backend queues/workers, the error channel, and the generic
 `logging_accept_event`, `logging_running_event` (asyncio.Events),
 `log_queues: dict[str, asyncio.Queue]`,
 `log_worker_factories: list[Callable[[], Coroutine]]`,
-`log_workers_tasks`, `_drain_hooks`, `error_handler`.
+`log_workers_tasks`, `_drain_hooks`, `error_handler`, `config` (LoggingConfig).
 
-**Depends on.** `formatter.ScietexFormatter`; stdlib `asyncio`, `logging`.
+**Configuration.** Typed config objects live in `config.py`:
+`LoggingConfig` (shared machinery options), `RedisConfig`, `ValkeyConfig`
+(backend-specific, stored as `config.backend_config`), and the
+`validate_queue_maxsize` helper. Every handler builds its `self.config` from its
+explicit constructor keyword args; none accept `**kwargs`.
+
+**Depends on.** `formatter.ScietexFormatter`; `config` (`LoggingConfig`,
+`validate_queue_maxsize`); stdlib `asyncio`, `logging`.
 
 **Depended on by.** `AsyncBaseHandler` (extends); `ConsoleBackend` (its drain
 hook is registered here); `AsyncBrokerHandler` (via `AsyncBaseHandler`).
@@ -128,7 +139,9 @@ console backend as a peer. Public signature unchanged.
 **Class.** `AsyncBaseHandler(AsyncLoggingHandler)` — `basic_handler.py:15`
 
 **Public interface.**
-- `AsyncBaseHandler(service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000, **kwargs)`
+- `AsyncBaseHandler(service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000)`
+  - Builds a typed `self.config = LoggingConfig(...)` (adding `stdout_enable`);
+    no `**kwargs` — unknown keyword args raise `TypeError`.
   - When `stdout_enable` is True, constructs a `ConsoleBackend` (with
     `maxsize=queue_maxsize`) and registers it under the name `"console"` via
     `register_backend`.
@@ -154,10 +167,10 @@ connect/disconnect/send_message contract concrete backends implement.
 **Class.** `AsyncBrokerHandler(AsyncBaseHandler, abc.ABC)` — `message_broker_handler.py:13`
 
 **Public interface.**
-- `AsyncBrokerHandler(queue_name, service_name=None, worker_id=None, **kwargs)`
+- `AsyncBrokerHandler(queue_name, service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000)`
   - Registers `log_queues[queue_name]` (a bounded `asyncio.Queue(maxsize=self.queue_maxsize)`)
     and `self._worker` (a bound method used as a worker factory) via
-    `register_backend`. `queue_maxsize` flows through `**kwargs` unchanged.
+    `register_backend`. No `**kwargs` — unknown keyword args raise `TypeError`.
   - `client` attribute (Any | None) — connection slot.
 - `async connect()` — `message_broker_handler.py:63`. Abstract; subclass hook.
 - `async disconnect()` — `message_broker_handler.py:76`. Abstract; subclass hook.
@@ -189,9 +202,12 @@ apps implementing custom backends (per docs).
 **Class.** `AsyncRedisHandler(AsyncBrokerHandler)` — `redis_handler.py:14`
 
 **Public interface.**
-- `AsyncRedisHandler(stream_name, service_name=None, worker_id=None,
-  redis_config=None, **kwargs)` — passes `queue_name="redis"` to super.
-  `client_config` defaults to `{"host": "localhost", "port": 6379, "db": 0}`.
+- `AsyncRedisHandler(stream_name, service_name=None, worker_id=None, *,
+  redis_config=None, error_handler=None, stdout_enable=True, queue_maxsize=10000)`
+  — passes `queue_name="redis"` to super. Converts `redis_config` into a typed
+  `RedisConfig` stored as `self.config.backend_config` (unknown dict keys raise
+  `TypeError`); `self.client_config` remains a dict for the redis client call,
+  defaulting to `{"host": "localhost", "port": 6379, "db": 0}`.
 - `async connect()` — `redis_handler.py:71`. Creates `redis.Redis(**config,
   decode_responses=True)` if `client is None`.
 - `async disconnect()` — `redis_handler.py:84`. `await client.aclose()`.
@@ -212,9 +228,12 @@ the `valkey-glide` client.
 **Class.** `AsyncValkeyHandler(AsyncBrokerHandler)` — `valkey_handler.py:14`
 
 **Public interface.**
-- `AsyncValkeyHandler(stream_name, service_name=None, worker_id=None,
-  valkey_config=None, **kwargs)` — passes `queue_name="valkey"` to super.
-  `client_config` defaults to `GlideClientConfiguration([NodeAddress()])`.
+- `AsyncValkeyHandler(stream_name, service_name=None, worker_id=None, *,
+  valkey_config=None, error_handler=None, stdout_enable=True, queue_maxsize=10000)`
+  — passes `queue_name="valkey"` to super. Stores a typed `ValkeyConfig` (list of
+  `(host, port)` addresses) as `self.config.backend_config`; `self.client_config`
+  remains a `GlideClientConfiguration`, defaulting to
+  `GlideClientConfiguration([NodeAddress()])`.
 - `async connect()` — `valkey_handler.py:71`. `await GlideClient.create(config)`
   if `client is None`; swallows `ClosingError`.
 - `async disconnect()` — `valkey_handler.py:86`. `await client.close()`.

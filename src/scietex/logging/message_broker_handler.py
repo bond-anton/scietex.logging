@@ -2,6 +2,8 @@
 
 import abc
 import asyncio
+import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -40,7 +42,10 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         queue_name: str,
         service_name: str | None = None,
         worker_id: int | None = None,
-        **kwargs,
+        *,
+        error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
+        stdout_enable: bool = True,
+        queue_maxsize: int = 10000,
     ) -> None:
         """
         Initialize the asynchronous Message broker logging handler.
@@ -49,13 +54,27 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
             queue_name (str): The name of the queue from which log records are read.
             service_name (str, optional): Service name for log identification. Defaults to None.
             worker_id (int, optional): Identifier for the logging worker instance. Defaults to None.
-            **kwargs: Additional keyword arguments, such as `stdout_enable`.
+            error_handler (callable, optional): Callback invoked with ``(record, exc)``
+                when a log record cannot be delivered. Defaults to None, in which case
+                errors are reported via the ``scietex.logging`` module logger.
+            stdout_enable (bool): Flag to enable console logging (defaults to True).
+            queue_maxsize (int): Maximum number of records each backend queue can hold.
+                Defaults to 10000.
 
         Attributes:
             queue_name (str): The name of the queue for the handler.
             client (Any | None): The client for sending logs to broker, or None if not connected.
+
+        Raises:
+            TypeError: If an unknown keyword argument is passed.
         """
-        super().__init__(service_name=service_name, worker_id=worker_id, **kwargs)
+        super().__init__(
+            service_name=service_name,
+            worker_id=worker_id,
+            error_handler=error_handler,
+            stdout_enable=stdout_enable,
+            queue_maxsize=queue_maxsize,
+        )
         self.queue_name: str = queue_name
         self.client: Any | None = None
         self.register_backend(

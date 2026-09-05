@@ -217,3 +217,15 @@ async def test_stop_logging_drains_all_backends_generically(capsys):
     # The broker drain completed and the console reported its outcome as a status record.
     assert "Broker Logger has completed processing its queue." in captured
     assert handler.log_queues["broker"].empty()
+
+
+def test_unknown_kwarg_raises_type_error_on_base_handler():
+    """A typo'd kwarg on AsyncBaseHandler fails loudly."""
+    with pytest.raises(TypeError):
+        AsyncBaseHandler(service_name="TestService", worker_id=1, stdout_enabel=True)
+
+
+def test_config_exposes_stdout_enable():
+    handler = AsyncBaseHandler(service_name="TestService", worker_id=1, stdout_enable=False)
+    assert handler.config.stdout_enable is False
+    assert handler.stdout_enable is False  # backward-compat alias

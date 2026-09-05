@@ -9,6 +9,7 @@ import logging
 from collections.abc import Callable
 
 from .async_logging_handler import AsyncLoggingHandler
+from .config import LoggingConfig
 from .console_backend import ConsoleBackend
 
 
@@ -36,7 +37,6 @@ class AsyncBaseHandler(AsyncLoggingHandler):
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         stdout_enable: bool = True,
         queue_maxsize: int = 10000,
-        **kwargs,
     ) -> None:
         """
         Initialize the asynchronous base logging handler.
@@ -52,26 +52,34 @@ class AsyncBaseHandler(AsyncLoggingHandler):
             stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can
                 hold. Defaults to 10000.
-            **kwargs: Additional keyword arguments passed through to the base machinery.
 
         Attributes:
             stdout_enable (bool): Flag to enable console logging (defaults to True).
             error_handler (callable | None): Callback for reporting delivery errors.
+
+        Raises:
+            TypeError: If an unknown keyword argument is passed.
         """
         super().__init__(
             service_name=service_name,
             worker_id=worker_id,
             error_handler=error_handler,
             queue_maxsize=queue_maxsize,
-            **kwargs,
         )
-        self.stdout_enable = stdout_enable
+        self.config = LoggingConfig(
+            service_name=self.config.service_name,
+            worker_id=self.config.worker_id,
+            error_handler=self.config.error_handler,
+            queue_maxsize=self.config.queue_maxsize,
+            stdout_enable=stdout_enable,
+        )
+        self.stdout_enable = self.config.stdout_enable
         self._console_backend: ConsoleBackend | None = None
         if self.stdout_enable:
             self._console_backend = ConsoleBackend(
                 self.formatter,
                 self.logging_running_event,
-                maxsize=queue_maxsize,
+                maxsize=self.config.queue_maxsize,
             )
             self.register_backend(
                 "console",

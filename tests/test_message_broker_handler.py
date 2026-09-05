@@ -120,6 +120,12 @@ async def test_send_failure_surfaces_and_does_not_task_done():
     await handler.stop_logging(timeout=0.5)
 
 
+def test_broker_unknown_kwarg_raises_type_error():
+    """A typo'd kwarg on a broker handler fails loudly."""
+    with pytest.raises(TypeError):
+        FakeBrokerHandler(queue_name="broker", stdout_enabel=True)
+
+
 def test_broker_handler_is_abstract():
     """AsyncBrokerHandler and subclasses missing abstract methods cannot be instantiated."""
     with pytest.raises(TypeError):

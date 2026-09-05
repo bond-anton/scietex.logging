@@ -76,3 +76,15 @@ async def test_valkey_handler_logs_to_stream():
     await handler.stop_logging()
     await valkey_client.delete([stream_name])  # Clear the test stream after the test
     await valkey_client.close()  # Close the Valkey client connection
+
+
+def test_valkey_config_is_typed():
+    """valkey_config is reflected in a typed ValkeyConfig on the handler."""
+    handler = AsyncValkeyHandler(stream_name="s")
+    assert handler.config.backend_config.addresses == [("localhost", 6379)]
+    assert handler.client_config is not None  # GlideClientConfiguration kept for connect()
+
+
+def test_valkey_unknown_kwarg_raises_type_error():
+    with pytest.raises(TypeError):
+        AsyncValkeyHandler(stream_name="s", stdout_enabel=True)

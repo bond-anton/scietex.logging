@@ -39,7 +39,10 @@ sub-packages. Architecturally it decomposes into four cooperating layers:
 5. **Concrete handler layer** — `src/scietex/logging/basic_handler.py`
    `AsyncBaseHandler` (extends `AsyncLoggingHandler`). A thin concrete subclass
    that registers the console backend as a peer when `stdout_enable=True`.
-   Public signature unchanged.
+   Public constructor signatures are unchanged, but `**kwargs` is gone: each
+   handler builds a typed `self.config` (`LoggingConfig` etc., from
+   `config.py`) from its explicit keyword args, and unknown/typo'd kwargs now
+   raise `TypeError` instead of being silently swallowed.
 
 6. **Broker handler layer** — `src/scietex/logging/message_broker_handler.py`
    `AsyncBrokerHandler` (extends `AsyncBaseHandler`, `abc.ABC`). Registers a
