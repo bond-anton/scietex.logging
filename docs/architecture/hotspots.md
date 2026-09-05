@@ -45,20 +45,23 @@ subtle and worth confirming for new backends.
 
 ---
 
-## 3. Worker coroutine lifecycle — created once, not restartable
+## 3. Worker lifecycle — restartable via worker factories
 
-**Location.** `AsyncLoggingHandler.__init__` (`async_logging_handler.py:120-125`),
-`start_logging` (`async_logging_handler.py:170`), `stop_logging`.
+**Location.** `AsyncLoggingHandler.__init__` (`async_logging_handler.py:126`),
+`start_logging` (`async_logging_handler.py:162`), `stop_logging`.
 
-**What it appears to do.** Worker *coroutines* are created in `__init__` (by
-each backend's registration) and appended to `log_workers`. `start_logging`
-schedules them with `asyncio.create_task`. `stop_logging` gathers the tasks.
+**What it appears to do.** Worker *factories* (zero-argument callables returning
+a fresh coroutine) are registered in `__init__` by each backend and appended to
+`log_worker_factories`. `start_logging` invokes each factory and schedules the
+resulting coroutine with `asyncio.create_task`. `stop_logging` gathers the
+tasks and resets `log_workers_tasks`.
 
-**Why significant.** Because coroutines are consumed when scheduled, a second
-`start_logging()` after `stop_logging()` would schedule already-consumed
-coroutines. Whether a handler is restartable is `UNKNOWN` and untested. The
-separation between "worker coroutine" and "worker task" is a subtle ownership
-boundary worth clarifying.
+**Why significant.** Because workers are factories, the handler is restartable:
+each `start_logging` schedules fresh tasks from a clean queue. `start_logging`
+raises `RuntimeError` if already running; `stop_logging` is idempotent and no
+longer calls `close()`. Restart is only supported on the same event loop
+(events/queues are loop-bound). The factory/task separation is the ownership
+boundary that makes the lifecycle restartable.
 
 **Related.** `lifecycle.md`; `tests/test_basic_handler.py`.
 

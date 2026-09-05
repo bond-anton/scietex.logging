@@ -64,21 +64,24 @@ by the console worker (formatted to stdout) and once by the broker worker
 ## Flow 4: Shutdown / drain (control flow)
 
 **Source.** Host application calls `await handler.stop_logging(timeout=5.0)`
-(`async_logging_handler.py:209`).
+(`async_logging_handler.py:224`).
 
 **Processing.**
 1. `logging_accept_event.clear()` — stops `emit` from enqueuing new records.
-2. `logging_running_event.clear()` — signals workers to stop after draining.
-3. For each registered backend's `drain(timeout, results)` hook, in **reverse
-   registration order**: the hook waits for its queue to drain and appends a
-   `BackendDrainResult` describing the outcome. The console backend (registered
-   first) drains last, so it can observe every other backend's outcome and
-   enqueue synthetic INFO/ERROR status records for them before draining its own
-   queue (`console_backend.py:99`).
+2. For each registered backend's `drain(timeout, results)` hook, in **reverse
+   registration order** (while the workers are still running): the hook waits
+   for its queue to drain and appends a `BackendDrainResult` describing the
+   outcome. The console backend (registered first) drains last, so it can
+   observe every other backend's outcome and enqueue synthetic INFO/ERROR
+   status records for them before draining its own queue (`console_backend.py:99`).
+3. `logging_running_event.clear()` — signals workers to stop after draining.
 4. `await asyncio.gather(*log_workers_tasks)` — workers exit.
-5. `self.close()` — stdlib `logging.Handler.close()`.
+5. `log_workers_tasks = []` — forget finished tasks so a later stop does not
+   re-gather them. `stop_logging` does **not** call `close()`; the handler may
+   be restarted via `start_logging` on the same loop.
 
-**Destination.** All queues drained; workers terminated; handler closed.
+**Destination.** All queues drained; workers terminated; handler idle and
+restartable.
 
 ## Cross-cutting notes
 

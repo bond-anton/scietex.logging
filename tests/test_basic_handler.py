@@ -185,7 +185,7 @@ async def test_console_backend_registered_as_peer():
 
     assert "console" in handler.log_queues
     assert handler.log_queues["console"] is backend.queue
-    assert len(handler.log_workers) == 1
+    assert len(handler.log_worker_factories) == 1
     # The console's drain hook is registered like any other backend's.
     assert handler._drain_hooks == [backend.drain]
 
@@ -201,7 +201,7 @@ def test_console_backend_absent_when_stdout_disabled():
     assert handler._console_backend is None
     assert "console" not in handler.log_queues
     assert handler.log_queues == {}
-    assert handler.log_workers == []
+    assert handler.log_worker_factories == []
     assert handler._drain_hooks == []
 
 

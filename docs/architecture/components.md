@@ -64,21 +64,26 @@ per-backend queues/workers, the error channel, and the generic
 - `AsyncLoggingHandler(service_name=None, worker_id=None, *, error_handler=None, **kwargs)`
   - Constructs a `ScietexFormatter(service_name, worker_id)`.
 - `register_backend(name, queue, worker, drain=None)` —
-  `async_logging_handler.py:127`. Registers a backend's queue, worker
-  coroutine, and optional `drain(timeout, results)` hook.
-- `async start_logging()` — `async_logging_handler.py:156`. Sets both events,
-  spawns worker tasks.
-- `emit(record)` — `async_logging_handler.py:172`. Synchronous; called by the
+  `async_logging_handler.py:132`. Registers a backend's queue, worker
+  **factory** (zero-argument callable returning a fresh coroutine), and
+  optional `drain(timeout, results)` hook.
+- `async start_logging()` — `async_logging_handler.py:162`. Sets both events,
+  invokes each worker factory and spawns worker tasks. Raises `RuntimeError` if
+  already running.
+- `emit(record)` — `async_logging_handler.py:187`. Synchronous; called by the
   logging framework. No-op if `logging_accept_event` not set. For each
   registered queue, calls `queue.put_nowait(record)`; a failed put is reported
   through the error channel.
-- `async stop_logging(timeout=5.0)` — `async_logging_handler.py:209`. Clears
+- `async stop_logging(timeout=5.0)` — `async_logging_handler.py:224`. Clears
   both events, then drains every registered backend through its `drain` hook
-  (in reverse registration order), gathers worker tasks, calls `close()`.
+  (in reverse registration order), gathers worker tasks, and resets
+  `log_workers_tasks`. Idempotent (no-op when not running); does **not** call
+  `close()`. The handler may be restarted via `start_logging` on the same loop.
 
 **Key instance state.** `formatter` (ScietexFormatter),
 `logging_accept_event`, `logging_running_event` (asyncio.Events),
-`log_queues: dict[str, asyncio.Queue]`, `log_workers: list[Coroutine]`,
+`log_queues: dict[str, asyncio.Queue]`,
+`log_worker_factories: list[Callable[[], Coroutine]]`,
 `log_workers_tasks`, `_drain_hooks`, `error_handler`.
 
 **Depends on.** `formatter.ScietexFormatter`; stdlib `asyncio`, `logging`.
@@ -147,8 +152,8 @@ connect/disconnect/send_message contract concrete backends implement.
 
 **Public interface.**
 - `AsyncBrokerHandler(queue_name, service_name=None, worker_id=None, **kwargs)`
-  - Registers `log_queues[queue_name]` and `self._worker()` via
-    `register_backend`.
+  - Registers `log_queues[queue_name]` and `self._worker` (a bound method used
+    as a worker factory) via `register_backend`.
   - `client` attribute (Any | None) — connection slot.
 - `async connect()` — `message_broker_handler.py:63`. Abstract; subclass hook.
 - `async disconnect()` — `message_broker_handler.py:76`. Abstract; subclass hook.

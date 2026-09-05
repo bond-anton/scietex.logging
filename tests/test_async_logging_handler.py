@@ -14,7 +14,7 @@ def test_pure_handler_owns_no_backend():
     handler = BareHandler(service_name="TestService", worker_id=1)
 
     assert handler.log_queues == {}
-    assert handler.log_workers == []
+    assert handler.log_worker_factories == []
     assert handler._drain_hooks == []
 
 

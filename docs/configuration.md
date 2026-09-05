@@ -69,6 +69,8 @@ queue/worker/event machinery but registers no backend of its own, so you add
 only the backends you want:
 
 ```python
+import asyncio
+
 from scietex.logging import AsyncLoggingHandler
 
 
@@ -76,6 +78,15 @@ class MyHandler(AsyncLoggingHandler):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # register your own backend(s) via self.register_backend(...)
+        # worker is a zero-arg factory returning a fresh coroutine per start:
+        self.register_backend("my_backend", asyncio.Queue(), self._worker, self.drain)
+
+    async def _worker(self):
+        # drains self.log_queues["my_backend"]; called fresh on each start_logging
+        ...
+
+    async def drain(self, timeout, results):
+        ...
 ```
 
 ### Error Handler

@@ -121,7 +121,8 @@ The `examples/` directory contains runnable scripts demonstrating this
   `start_logging()` and cleared in `stop_logging()`.
 - **Graceful shutdown.** `stop_logging()` clears the events, then drains every
   registered backend through its per-backend `drain(timeout, results)` hook (in
-  reverse registration order), gathers worker tasks, and calls `close()`.
+  reverse registration order) and gathers worker tasks. It does not call
+  `close()`; the handler may be restarted via `start_logging` on the same loop.
 
 ## Notable runtime characteristics
 
