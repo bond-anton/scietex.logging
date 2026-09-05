@@ -52,7 +52,9 @@ class AsyncPostgresHandler(AsyncBrokerHandler):
 3. **`send_message(record)`**: Send a formatted log record to your backend
 
 A failure in `connect()` or `send_message()` must raise; the worker reports it through the
-error channel and retries, so records are never silently dropped.
+error channel. A failed `connect()` is retried (report + short sleep + retry), but a failed
+`send_message()` is not retried — it is reported and the worker moves on to the next record.
+Records are never silently dropped.
 
 The record is a dictionary with the following keys:
 - `level`: Log level abbreviation (DBG, INF, WRN, ERR, CRT)

@@ -112,8 +112,8 @@ The `examples/` directory contains runnable scripts demonstrating this
 
 - **Per-handler worker coroutines.** Each handler owns one or more worker
   coroutines, each draining one `asyncio.Queue`:
-  - `ConsoleBackend._worker` (console queue) — `console_backend.py:78`.
-  - `AsyncBrokerHandler._worker` (broker queue) — `message_broker_handler.py:104`.
+  - `ConsoleBackend._worker` (console queue) — `console_backend.py:81`.
+  - `AsyncBrokerHandler._worker` (broker queue) — `message_broker_handler.py:130`.
   Workers loop while `logging_running_event` is set **or** their queue is
   non-empty, using a 1-second `asyncio.wait_for` timeout on `queue.get()`.
 - **Synchronous queue puts.** `emit()` calls `queue.put_nowait(record)` on each
@@ -137,4 +137,4 @@ The `examples/` directory contains runnable scripts demonstrating this
   way `AsyncBrokerHandler` registers its broker backend. A broker handler with
   `stdout_enable=True` runs *both* a console worker and a broker worker.
 - **Connection lifecycle is per-worker.** The broker worker calls
-  `connect()` on start and `disconnect()` on exit (`message_broker_handler.py:116,146`).
+  `connect()` on start and `disconnect()` on exit (`message_broker_handler.py:85,98`).

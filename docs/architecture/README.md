@@ -20,7 +20,7 @@ machinery is separated from the sinks:
 - **Redis** (streams) — optional, requires the `redis` package.
 - **Valkey** (streams) — optional, requires the `valkey-glide` package.
 
-The package is small: ~1085 lines of source across 8 modules under
+The package is small: ~1320 lines of source across 9 modules under
 `src/scietex/logging/`.
 
 ## Document Index
@@ -42,8 +42,9 @@ The package is small: ~1085 lines of source across 8 modules under
 - **Build**: setuptools, `src/` layout; package data ships `py.typed`
 - **Runtime deps**: none (base); `redis>=5.0.0` (`[redis]`), `valkey-glide~=2.5.0` (`[valkey]`)
 - **Public API** (`__init__.py`): `AsyncBaseHandler`, `AsyncBrokerHandler`,
-  `ScietexFormatter`; `AsyncRedisHandler` / `AsyncValkeyHandler` added
-  conditionally on successful import
+  `AsyncLoggingHandler`, `ConsoleBackend`, `ScietexFormatter`;
+  `AsyncRedisHandler` / `AsyncValkeyHandler` added conditionally on successful
+  import
 - **Class hierarchy**: `logging.Handler` → `AsyncLoggingHandler` (pure
   machinery, no sink) → `AsyncBaseHandler` (registers `ConsoleBackend` peer) →
   `AsyncBrokerHandler` → {`AsyncRedisHandler`, `AsyncValkeyHandler`}

@@ -9,7 +9,7 @@ do, why it is significant, and related files.
 
 ## 1. `AsyncLoggingHandler` — the shared machinery core
 
-**Location.** `src/scietex/logging/async_logging_handler.py` (`AsyncLoggingHandler`, 267-line module).
+**Location.** `src/scietex/logging/async_logging_handler.py` (`AsyncLoggingHandler`, 316-line module).
 
 **What it appears to do.** One class owns the stdlib `logging.Handler`
 integration (`emit`), the async queue/event machinery, worker task lifecycle,
@@ -28,7 +28,7 @@ central structural decision of the package.
 
 ## 2. `stop_logging` — generic drain via per-backend hooks
 
-**Location.** `AsyncLoggingHandler.stop_logging`, `async_logging_handler.py:209-241`.
+**Location.** `AsyncLoggingHandler.stop_logging`, `async_logging_handler.py:250-290`.
 
 **What it appears to do.** Clears both events, then iterates the registered
 `drain` hooks in **reverse registration order**, awaiting each with the shared
@@ -47,8 +47,8 @@ subtle and worth confirming for new backends.
 
 ## 3. Worker lifecycle — restartable via worker factories
 
-**Location.** `AsyncLoggingHandler.__init__` (`async_logging_handler.py:126`),
-`start_logging` (`async_logging_handler.py:162`), `stop_logging`.
+**Location.** `AsyncLoggingHandler.__init__` (`async_logging_handler.py:100`),
+`start_logging` (`async_logging_handler.py:183`), `stop_logging`.
 
 **What it appears to do.** Worker *factories* (zero-argument callables returning
 a fresh coroutine) are registered in `__init__` by each backend and appended to
@@ -69,7 +69,7 @@ boundary that makes the lifecycle restartable.
 
 ## 4. `emit` — synchronous puts with error reporting
 
-**Location.** `AsyncLoggingHandler.emit`, `async_logging_handler.py:172-207`.
+**Location.** `AsyncLoggingHandler.emit`, `async_logging_handler.py:208-248`.
 
 **What it appears to do.** For each registered queue, calls
 `queue.put_nowait(record)` synchronously. A failed put is reported through the
@@ -87,8 +87,8 @@ error-handling policy routes failures to the configured `error_handler` or the
 ## 5. Bounded queues with drop + report overflow
 
 **Location.** `asyncio.Queue(maxsize=...)` construction in `console_backend.py:77`
-and `message_broker_handler.py:62`; the explicit `except asyncio.QueueFull`
-branch in `emit` (`async_logging_handler.py:232`).
+and `message_broker_handler.py:81`; the explicit `except asyncio.QueueFull`
+branch in `emit` (`async_logging_handler.py:242`).
 
 **What it appears to do.** Every backend queue is bounded by `queue_maxsize`
 (default 10000), set on `AsyncLoggingHandler`/`AsyncBaseHandler` and stored as
@@ -152,8 +152,8 @@ argument shape its client expects. No uniform client wrapper was added.
 
 ## 8. Optional-dependency guard duplication
 
-**Location.** `redis_handler.py:3-9`, `valkey_handler.py:3-9`, and the guarded
-imports in `__init__.py:112-123`.
+**Location.** `redis_handler.py:5-8`, `valkey_handler.py:5-8`, and the guarded
+imports in `__init__.py:116-127`.
 
 **What it appears to do.** Each backend module hard-imports its client and
 raises a descriptive `ImportError`; `__init__.py` wraps each import in
@@ -206,39 +206,46 @@ provisioning.
 
 ---
 
-## 11. Formatter mutates the shared `LogRecord`
+## 11. Formatter copies the record; broker dict built independently
 
-**Location.** `ScietexFormatter.format`, `formatter.py:89-109`.
+**Location.** `ScietexFormatter.format`, `formatter.py:90-113`.
 
-**What it appears to do.** `format` sets `record.worker_name` and overwrites
-`record.levelname` on the record object before delegating to the parent
-formatter.
+**What it appears to do.** `format` first copies the record
+(`record = copy.copy(record)` at `formatter.py:104`), then sets
+`record.worker_name` and overwrites `record.levelname` on the **copy** before
+delegating to the parent formatter. The caller's shared `LogRecord` is never
+mutated.
 
-**Why significant.** `LogRecord`s are shared objects. Because `emit` fans one
-record to multiple queues, and each backend's worker formats the same record,
-the mutation is idempotent here (same formatter). But if a handler had multiple
-formatters or the record were reused across handlers with different
-service/worker identities, mutation could leak. The broker worker reads
-`record.worker_name` / `record.levelname` that the formatter set — an implicit
-ordering dependency between formatting and dict-building.
+**Why significant.** `LogRecord`s are shared objects: `emit` fans one record to
+multiple queues, and each backend's worker formats the same record. Because
+`format` mutates only a copy, no mutation leaks to the caller or to other
+backends. The broker worker additionally computes its dict fields
+**independently** — `level = level_abbreviation(record.levelno)` and
+`name = getattr(self.formatter, "worker_name", record.name)`
+(`message_broker_handler.py:155-164`) — rather than reading formatter-mutated
+attributes, so there is **no implicit ordering dependency** between formatting
+and dict-building.
 
-**Related.** `data-flow.md` Flow 2; `message_broker_handler.py:127-138`.
+**Related.** `data-flow.md` Flow 2; `message_broker_handler.py:155-164`.
 
 ---
 
 ## 12. `AsyncBrokerHandler._worker` — connection + drain coupling
 
-**Location.** `message_broker_handler.py:104-148`.
+**Location.** `message_broker_handler.py:130-174`.
 
 **What it appears to do.** The worker calls `connect()` once at start, then
 loops draining the queue and calling `send_message`, then `disconnect()` at
-exit. If `connect()` fails or the client is None, records are still dequeued
-and `task_done()` called (dropped silently).
+exit. On a `connect()` failure it reports via the error channel, sleeps ~1s,
+and retries **without dequeuing** the record. On a `send_message()` failure it
+reports via the error channel and continues to the next record **without
+calling `task_done()`**.
 
 **Why significant.** Connection lifecycle, message dispatch, and queue draining
-are interleaved in one loop. Failure modes (connect failure, send failure,
-client None) are not surfaced — records are silently dropped. The worker's
-`task_done()` is called even when `send_message` was skipped (client None),
-so the queue drains without the message being delivered.
+are interleaved in one loop. Failure modes are surfaced through the error
+channel rather than silently dropping records: a failed `connect()` is retried
+(no record is dequeued), and a failed `send_message()` is reported and skipped
+(no `task_done()`, so the queue does not acknowledge an undelivered record).
+Records are never silently dropped.
 
 **Related.** `lifecycle.md`; `redis_handler.py`, `valkey_handler.py`.
