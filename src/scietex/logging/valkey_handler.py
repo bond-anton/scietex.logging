@@ -1,6 +1,6 @@
 """Asynchronous Valkey logging handler for non-blocking logging."""
 
-from .config import LoggingConfig, ValkeyConfig, optional_dependency_error
+from .config import ValkeyConfig, optional_dependency_error
 
 try:
     from glide import GlideClient, GlideClientConfiguration, NodeAddress
@@ -68,6 +68,11 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
         Raises:
             TypeError: If an unknown keyword argument is passed.
         """
+        client_config = (
+            valkey_config
+            if valkey_config is not None
+            else GlideClientConfiguration([NodeAddress()])
+        )
         super().__init__(
             queue_name="valkey",
             service_name=service_name,
@@ -75,23 +80,12 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
             error_handler=error_handler,
             stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
-        )
-        self.stream_name = stream_name
-        self.client_config: GlideClientConfiguration
-        if valkey_config is not None:
-            self.client_config = valkey_config
-        else:
-            self.client_config = GlideClientConfiguration([NodeAddress()])
-        self.config = LoggingConfig(
-            service_name=self.config.service_name,
-            worker_id=self.config.worker_id,
-            error_handler=self.config.error_handler,
-            queue_maxsize=self.config.queue_maxsize,
-            stdout_enable=self.config.stdout_enable,
             backend_config=ValkeyConfig(
-                addresses=[(node.host, node.port) for node in self.client_config.addresses]
+                addresses=[(node.host, node.port) for node in client_config.addresses]
             ),
         )
+        self.stream_name = stream_name
+        self.client_config: GlideClientConfiguration = client_config
 
     async def connect(self) -> None:
         """

@@ -86,3 +86,28 @@ def test_redis_config_is_typed_and_validated():
 def test_redis_unknown_kwarg_raises_type_error():
     with pytest.raises(TypeError):
         AsyncRedisHandler(stream_name="s", stdout_enabel=True)
+
+
+def test_redis_config_accepts_valid_extra_options():
+    """A redis_config dict with legitimate client options no longer raises TypeError."""
+    handler = AsyncRedisHandler(
+        stream_name="s",
+        redis_config={
+            "host": "example.com",
+            "port": 7000,
+            "db": 2,
+            "password": "secret",
+            "ssl": True,
+        },
+    )
+    assert handler.config.backend_config.host == "example.com"
+    assert handler.config.backend_config.password == "secret"
+    assert handler.config.backend_config.ssl is True
+    # client_config remains the raw dict passed to redis.Redis.
+    assert handler.client_config == {
+        "host": "example.com",
+        "port": 7000,
+        "db": 2,
+        "password": "secret",
+        "ssl": True,
+    }

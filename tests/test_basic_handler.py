@@ -86,7 +86,6 @@ async def test_emit_logs_to_queue():
 async def test_console_worker_outputs_log(capsys):
     """Test that the console worker processes and outputs logs correctly."""
     handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
-    handler.stdout_enable = True  # Ensure stdout is enabled
 
     await handler.start_logging()
 
@@ -192,10 +191,16 @@ async def test_error_channel_invoked_on_emit_failure(monkeypatch):
     )
     await handler.start_logging()
 
-    def failing_put(item):
-        raise RuntimeError("put failed")
+    # Fail only the emit put; let the shutdown status reporting enqueue cleanly.
+    calls = 0
 
-    monkeypatch.setattr(handler.log_queues["console"], "put_nowait", failing_put)
+    def failing_put_once(item):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("put failed")
+
+    monkeypatch.setattr(handler.log_queues["console"], "put_nowait", failing_put_once)
 
     record = logging.LogRecord("test", logging.INFO, "", 0, "msg", None, None)
     handler.emit(record)
@@ -216,8 +221,10 @@ async def test_console_backend_registered_as_peer():
     assert "console" in handler.log_queues
     assert handler.log_queues["console"] is backend.queue
     assert len(handler.log_worker_factories) == 1
-    # The console's drain hook is registered like any other backend's.
+    # The console's drain hook is registered like any other backend's, and its
+    # status reporter is registered separately as a post-drain observer.
     assert handler._drain_hooks == [backend.drain]
+    assert handler._status_reporters == [backend.report_status]
 
     await handler.start_logging()
     await handler.stop_logging()
@@ -233,6 +240,7 @@ def test_console_backend_absent_when_stdout_disabled():
     assert handler.log_queues == {}
     assert handler.log_worker_factories == []
     assert handler._drain_hooks == []
+    assert handler._status_reporters == []
 
 
 @pytest.mark.asyncio

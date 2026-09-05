@@ -9,7 +9,7 @@ import logging
 from collections.abc import Callable
 
 from .async_logging_handler import AsyncLoggingHandler
-from .config import LoggingConfig
+from .config import RedisConfig, ValkeyConfig
 from .console_backend import ConsoleBackend
 
 
@@ -24,7 +24,8 @@ class AsyncBaseHandler(AsyncLoggingHandler):
         backends (such as Redis or Valkey) can be added in subclasses.
 
     Attributes:
-        stdout_enable (bool): Flag to enable console logging (defaults to True).
+        stdout_enable (bool): Flag to enable console logging (defaults to True);
+            read-only alias for `config.stdout_enable`.
         _console_backend (ConsoleBackend | None): Console sink, created when
             `stdout_enable` is True; otherwise None.
     """
@@ -37,6 +38,7 @@ class AsyncBaseHandler(AsyncLoggingHandler):
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         stdout_enable: bool = True,
         queue_maxsize: int = 10000,
+        backend_config: RedisConfig | ValkeyConfig | None = None,
     ) -> None:
         """
         Initialize the asynchronous base logging handler.
@@ -52,6 +54,8 @@ class AsyncBaseHandler(AsyncLoggingHandler):
             stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can
                 hold. Defaults to 10000.
+            backend_config (RedisConfig | ValkeyConfig | None): Backend-specific
+                config forwarded by broker subclasses. Defaults to None.
 
         Attributes:
             stdout_enable (bool): Flag to enable console logging (defaults to True).
@@ -65,17 +69,11 @@ class AsyncBaseHandler(AsyncLoggingHandler):
             worker_id=worker_id,
             error_handler=error_handler,
             queue_maxsize=queue_maxsize,
-        )
-        self.config = LoggingConfig(
-            service_name=self.config.service_name,
-            worker_id=self.config.worker_id,
-            error_handler=self.config.error_handler,
-            queue_maxsize=self.config.queue_maxsize,
             stdout_enable=stdout_enable,
+            backend_config=backend_config,
         )
-        self.stdout_enable = self.config.stdout_enable
         self._console_backend: ConsoleBackend | None = None
-        if self.stdout_enable:
+        if self.config.stdout_enable:
             self._console_backend = ConsoleBackend(
                 self.formatter,
                 self.logging_running_event,
@@ -87,6 +85,12 @@ class AsyncBaseHandler(AsyncLoggingHandler):
                 self._console_backend._worker,
                 self._console_backend.drain,
             )
+            self.register_status_reporter(self._console_backend.report_status)
+
+    @property
+    def stdout_enable(self) -> bool:
+        """Read-only alias for ``config.stdout_enable``."""
+        return self.config.stdout_enable
 
     def setFormatter(self, fmt: logging.Formatter | None) -> None:
         """

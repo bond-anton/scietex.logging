@@ -1,6 +1,6 @@
 """Asynchronous Redis logging handler for non-blocking logging."""
 
-from .config import LoggingConfig, RedisConfig, optional_dependency_error
+from .config import RedisConfig, optional_dependency_error
 
 try:
     import redis.asyncio as redis
@@ -53,8 +53,9 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             service_name (str, optional): Service name for log identification. Defaults to None.
             worker_id (int, optional): Identifier for the logging worker instance. Defaults to None.
             redis_config (dict, optional): Configuration dictionary for Redis connection.
-                Defaults to {"host": "localhost", "port": 6379, "db": 0}. Unknown keys
-                raise ``TypeError`` when the config is converted to a ``RedisConfig``.
+                Defaults to {"host": "localhost", "port": 6379, "db": 0}. Keys are
+                passed through to ``redis.Redis`` unchanged; a faithful typed projection
+                is stored as ``self.config.backend_config``.
             error_handler (callable, optional): Callback invoked with ``(record, exc)``
                 when a log record cannot be delivered. Defaults to None, in which case
                 errors are reported via the ``scietex.logging`` module logger.
@@ -67,9 +68,9 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             client (redis.Redis | None): The Redis client connection, or None if not connected.
 
         Raises:
-            TypeError: If an unknown keyword argument is passed or ``redis_config``
-                contains an unknown key.
+            TypeError: If an unknown keyword argument is passed.
         """
+        raw = redis_config or {"host": "localhost", "port": 6379, "db": 0}
         super().__init__(
             queue_name="redis",
             service_name=service_name,
@@ -77,17 +78,9 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             error_handler=error_handler,
             stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
-        )
-        self.stream_name = stream_name
-        raw = redis_config or {"host": "localhost", "port": 6379, "db": 0}
-        self.config = LoggingConfig(
-            service_name=self.config.service_name,
-            worker_id=self.config.worker_id,
-            error_handler=self.config.error_handler,
-            queue_maxsize=self.config.queue_maxsize,
-            stdout_enable=self.config.stdout_enable,
             backend_config=RedisConfig(**raw),
         )
+        self.stream_name = stream_name
         self.client_config: dict = raw
 
     async def connect(self) -> None:

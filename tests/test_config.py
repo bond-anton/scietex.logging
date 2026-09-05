@@ -1,5 +1,7 @@
 """Tests for the typed configuration objects (AR-008)."""
 
+import typing
+
 import pytest
 
 from scietex.logging.config import (
@@ -32,6 +34,40 @@ def test_redis_config_defaults():
     assert cfg.host == "localhost"
     assert cfg.port == 6379
     assert cfg.db == 0
+
+
+def test_redis_config_accepts_full_client_option_surface():
+    """RedisConfig mirrors the redis client options, so valid options are never rejected."""
+    cfg = RedisConfig(
+        host="example.com",
+        port=7000,
+        db=2,
+        password="secret",
+        username="svc",
+        ssl=True,
+        socket_timeout=5.0,
+        socket_connect_timeout=5.0,
+        socket_keepalive=True,
+        health_check_interval=30,
+        decode_responses=True,
+        client_name="my-client",
+    )
+    assert cfg.host == "example.com"
+    assert cfg.port == 7000
+    assert cfg.db == 2
+    assert cfg.password == "secret"
+    assert cfg.username == "svc"
+    assert cfg.ssl is True
+    assert cfg.socket_timeout == 5.0
+    assert cfg.health_check_interval == 30
+    assert cfg.decode_responses is True
+    assert cfg.client_name == "my-client"
+
+
+def test_backend_config_is_a_union_not_any():
+    """LoggingConfig.backend_config is typed as a union of the backend configs, not Any."""
+    hints = typing.get_type_hints(LoggingConfig)
+    assert hints["backend_config"] == RedisConfig | ValkeyConfig | None
 
 
 def test_valkey_config_defaults():

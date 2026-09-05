@@ -26,20 +26,24 @@ central structural decision of the package.
 
 ---
 
-## 2. `stop_logging` — generic drain via per-backend hooks
+## 2. `stop_logging` — coordinator-owned drain via per-backend hooks
 
-**Location.** `AsyncLoggingHandler.stop_logging`, `async_logging_handler.py:250-290`.
+**Location.** `AsyncLoggingHandler.stop_logging`, `async_logging_handler.py:301-361`.
 
-**What it appears to do.** Clears both events, then iterates the registered
-`drain` hooks in **reverse registration order**, awaiting each with the shared
-timeout and collecting `BackendDrainResult`s. Finally gathers worker tasks and
-closes the handler.
+**What it appears to do.** Clears the accept event, then iterates the registered
+`drain` hooks in **registration order**, awaiting each with the shared timeout
+and collecting the `BackendDrainResult` each hook returns. After every drain
+concludes, it invokes each registered status reporter with the collected
+results. Finally it clears the running event, gathers worker tasks, and resets
+`log_workers_tasks`.
 
 **Why significant.** Shutdown is now generic — no queue-name special-casing.
-Each backend controls its own drain; the console backend (registered first)
-drains last so it can observe every other backend's outcome and synthesize
-status records. The reverse-registration ordering and the timeout handling are
-subtle and worth confirming for new backends.
+Each backend controls its own drain and returns its own result; the coordinator
+owns result collection. The console backend is a *status reporter* (registered
+via `register_status_reporter`), invoked after all drains with the full results
+list, so it synthesizes status records without depending on drain registration
+order. The timeout handling and the drain-then-report sequence are subtle and
+worth confirming for new backends.
 
 **Related.** `data-flow.md` Flow 4; `console_backend.py`; `message_broker_handler.py`.
 
@@ -47,8 +51,8 @@ subtle and worth confirming for new backends.
 
 ## 3. Worker lifecycle — restartable via worker factories
 
-**Location.** `AsyncLoggingHandler.__init__` (`async_logging_handler.py:100`),
-`start_logging` (`async_logging_handler.py:183`), `stop_logging`.
+**Location.** `AsyncLoggingHandler.__init__` (`async_logging_handler.py:111`),
+`start_logging` (`async_logging_handler.py:234`), `stop_logging`.
 
 **What it appears to do.** Worker *factories* (zero-argument callables returning
 a fresh coroutine) are registered in `__init__` by each backend and appended to
@@ -69,7 +73,7 @@ boundary that makes the lifecycle restartable.
 
 ## 4. `emit` — synchronous puts with error reporting
 
-**Location.** `AsyncLoggingHandler.emit`, `async_logging_handler.py:208-248`.
+**Location.** `AsyncLoggingHandler.emit`, `async_logging_handler.py:259-299`.
 
 **What it appears to do.** For each registered queue, calls
 `queue.put_nowait(record)` synchronously. A failed put is reported through the
@@ -116,9 +120,10 @@ never deadlocks on a bounded queue.
 
 **What it appears to do.** Every handler instance that has `stdout_enable=True`
 registers its own `ConsoleBackend` (queue + worker). Broker handlers therefore
-run console + broker workers independently. `stop_logging` drains backends in
-reverse registration order, so the console (registered first) drains last and
-reports the other backends' outcomes.
+run console + broker workers independently. `stop_logging` drains each backend
+(collecting its returned result) and then invokes the console's `report_status`
+as a status reporter with the full results list, so the console reports the
+other backends' outcomes as a post-drain observer rather than by drain order.
 
 **Why significant.** The console backend is both a standalone backend
 (`AsyncBaseHandler`) and an auxiliary output attached to broker handlers. This
@@ -220,13 +225,15 @@ mutated.
 multiple queues, and each backend's worker formats the same record. Because
 `format` mutates only a copy, no mutation leaks to the caller or to other
 backends. The broker worker additionally computes its dict fields
-**independently** — `level = level_abbreviation(record.levelno)` and
-`name = getattr(self.formatter, "worker_name", record.name)`
-(`message_broker_handler.py:155-164`) — rather than reading formatter-mutated
-attributes, so there is **no implicit ordering dependency** between formatting
-and dict-building.
+**independently** — `level = level_abbreviation(record.levelno)`,
+`name = f"{self.config.service_name}:{self.config.worker_id}"`, and
+`time = datetime.fromtimestamp(record.created, timezone.utc).isoformat()`
+(`message_broker_handler.py:172-178`) — from config and the record rather than
+from formatter-mutated attributes, so the broker wire format is invariant under
+`setFormatter` and there is **no implicit ordering dependency** between
+formatting and dict-building.
 
-**Related.** `data-flow.md` Flow 2; `message_broker_handler.py:155-164`.
+**Related.** `data-flow.md` Flow 2; `message_broker_handler.py:172-178`.
 
 ---
 

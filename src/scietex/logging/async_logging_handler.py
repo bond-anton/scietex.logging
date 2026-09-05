@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from .config import LoggingConfig, validate_queue_maxsize
+from .config import LoggingConfig, RedisConfig, ValkeyConfig, validate_queue_maxsize
 from .formatter import ScietexFormatter
 
 _error_logger = logging.getLogger("scietex.logging")
@@ -43,7 +43,9 @@ class BackendDrainResult:
     error: BaseException | None = None
 
 
-DrainHook = Callable[[float, list[BackendDrainResult]], Awaitable[None]]
+DrainHook = Callable[[float], Awaitable[BackendDrainResult]]
+
+StatusReporter = Callable[[list[BackendDrainResult]], Awaitable[None]]
 
 
 class AsyncLoggingHandler(logging.Handler):
@@ -66,9 +68,12 @@ class AsyncLoggingHandler(logging.Handler):
     or blocking the calling thread.
 
     Attributes:
+        config (LoggingConfig): The single runtime source of truth for handler
+            options; read at work time by `emit`/`stop_logging` and the backends.
         log_queues (dict[str, asyncio.Queue]): A dictionary of asyncio.Queue objects
             for each logging backend.
-        queue_maxsize (int): Maximum number of records each backend queue can hold.
+        queue_maxsize (int): Read-only alias for `config.queue_maxsize`; maximum
+            number of records each backend queue can hold.
         logging_accept_event (asyncio.Event): Event to signal when the handler can
             accept new logs.
         logging_running_event (asyncio.Event): Event to signal when logging is active.
@@ -76,16 +81,22 @@ class AsyncLoggingHandler(logging.Handler):
             worker factories; each returns a fresh worker coroutine when called.
         log_workers_tasks (list[asyncio.Task]): List of asyncio tasks for each worker,
             created in `start_logging`.
-        error_handler (callable | None): Optional callback invoked with
-            ``(record, exc)`` when a log record cannot be delivered.
+        error_handler (callable | None): Read-only alias for `config.error_handler`;
+            optional callback invoked with ``(record, exc)`` when a log record cannot
+            be delivered.
         _loop (asyncio.AbstractEventLoop | None): Event loop captured at
             `start_logging`; `emit()` is only valid on that loop's thread.
         _drain_hooks (list[DrainHook]): Backend drain hooks in registration order,
-            invoked (in reverse) by `stop_logging`.
+            each invoked by `stop_logging` and returning its own `BackendDrainResult`.
+        _status_reporters (list[StatusReporter]): Post-drain observers invoked by
+            `stop_logging` with the collected drain results (e.g. the console).
 
     Methods:
         register_backend(name, queue, worker, drain):
             Registers a backend's queue, worker factory, and optional drain hook.
+
+        register_status_reporter(reporter):
+            Registers a post-drain observer invoked with all backend drain results.
 
         start_logging():
             Starts all worker tasks to process log records asynchronously.
@@ -104,9 +115,16 @@ class AsyncLoggingHandler(logging.Handler):
         *,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         queue_maxsize: int = 10000,
+        stdout_enable: bool = True,
+        backend_config: RedisConfig | ValkeyConfig | None = None,
     ) -> None:
         """
         Initialize the asynchronous logging handler machinery.
+
+        Assembles the single ``LoggingConfig`` that governs this handler at work
+        time. ``stdout_enable`` and ``backend_config`` are forwarded by the
+        concrete subclasses (console and broker handlers respectively); the base
+        stores them on ``config`` without acting on them.
 
         Args:
             service_name (str, optional): Name of the service for log identification.
@@ -120,6 +138,10 @@ class AsyncLoggingHandler(logging.Handler):
                 hold. When a queue is full, `emit` drops the record and reports it
                 through the error channel instead of blocking. Defaults to 10000.
                 Must be a positive int; invalid values raise ``ValueError``.
+            stdout_enable (bool): Whether the console backend is registered by
+                `AsyncBaseHandler`. Defaults to True.
+            backend_config (RedisConfig | ValkeyConfig | None): Backend-specific
+                config attached by broker subclasses. Defaults to None.
 
         Raises:
             TypeError: If an unknown keyword argument is passed.
@@ -134,9 +156,9 @@ class AsyncLoggingHandler(logging.Handler):
             worker_id=worker_id,
             error_handler=error_handler,
             queue_maxsize=validate_queue_maxsize(queue_maxsize),
+            stdout_enable=stdout_enable,
+            backend_config=backend_config,
         )
-        self.error_handler = self.config.error_handler
-        self.queue_maxsize = self.config.queue_maxsize
         self.formatter = ScietexFormatter(
             service_name=self.config.service_name, worker_id=self.config.worker_id
         )
@@ -146,9 +168,22 @@ class AsyncLoggingHandler(logging.Handler):
         self.log_queues: dict[str, asyncio.Queue[logging.LogRecord]] = {}
         self.log_worker_factories: list[Callable[[], Coroutine[Any, Any, None]]] = []
         self._drain_hooks: list[DrainHook] = []
+        self._status_reporters: list[StatusReporter] = []
 
         self.log_workers_tasks: list[asyncio.Task[None]] = []
         self._loop: asyncio.AbstractEventLoop | None = None
+
+    @property
+    def error_handler(
+        self,
+    ) -> Callable[[logging.LogRecord | None, Exception], None] | None:
+        """Read-only alias for ``config.error_handler``."""
+        return self.config.error_handler
+
+    @property
+    def queue_maxsize(self) -> int:
+        """Read-only alias for ``config.queue_maxsize``."""
+        return self.config.queue_maxsize
 
     def register_backend(
         self,
@@ -163,22 +198,38 @@ class AsyncLoggingHandler(logging.Handler):
         A backend is registered by its queue name so `emit` fans records into it,
         by its worker factory so `start_logging` schedules a fresh worker task each
         cycle, and optionally by a `drain` hook that `stop_logging` calls to let the
-        backend control its own shutdown. Backends registered first are drained last,
-        so a status-reporting backend (e.g. the console) can observe every other
-        backend's drain outcome before draining itself.
+        backend drain its own queue. Each drain hook returns its own
+        `BackendDrainResult`; `stop_logging` collects them all and hands the results
+        to the registered status reporters.
 
         Args:
             name (str): Unique name for the backend's queue.
             queue (asyncio.Queue): Queue holding records for this backend.
             worker (Callable[[], Coroutine]): Zero-argument callable returning a
                 fresh coroutine that processes records from the queue.
-            drain (DrainHook, optional): Async callable ``(timeout, results)``
-                invoked during `stop_logging` to drain this backend.
+            drain (DrainHook, optional): Async callable ``(timeout) ->
+                BackendDrainResult`` invoked during `stop_logging` to drain this
+                backend.
         """
         self.log_queues[name] = queue
         self.log_worker_factories.append(worker)
         if drain is not None:
             self._drain_hooks.append(drain)
+
+    def register_status_reporter(self, reporter: StatusReporter) -> None:
+        """
+        Register a post-drain observer invoked with every backend's drain result.
+
+        `stop_logging` drains each backend (collecting its `BackendDrainResult`) and
+        then calls each registered reporter with the full results list, so a
+        status-reporting backend (e.g. the console) can surface how every backend
+        fared without relying on drain registration order.
+
+        Args:
+            reporter (StatusReporter): Async callable ``(results)`` invoked after all
+                backends have drained.
+        """
+        self._status_reporters.append(reporter)
 
     async def start_logging(self) -> None:
         """
@@ -253,9 +304,10 @@ class AsyncLoggingHandler(logging.Handler):
 
         Stops accepting new log records, drains every registered backend through
         its drain hook while the workers are still running, then signals the
-        workers to stop and gathers their tasks. Backends are drained in reverse
-        registration order so a status-reporting backend registered first can
-        observe every other backend's drain outcome before draining itself.
+        workers to stop and gathers their tasks. The coordinator owns result
+        collection: each drain hook returns its own `BackendDrainResult`, and the
+        collected results are handed to the registered status reporters (e.g. the
+        console) as an explicit post-drain step.
 
         This method is idempotent: calling it when logging is not running (never
         started, or already stopped) is a no-op. After it returns, the handler may
@@ -273,12 +325,17 @@ class AsyncLoggingHandler(logging.Handler):
         # Stop accepting new log records
         self.logging_accept_event.clear()
 
-        # Drain every backend generically while the workers are still running. Results
-        # are collected so a backend that reports shutdown status (e.g. the console)
-        # can observe how each other backend fared before it drains itself.
+        # Drain every backend generically while the workers are still running. The
+        # coordinator owns result collection: each drain hook returns its own
+        # BackendDrainResult, and the collected results are handed to the registered
+        # status reporters (e.g. the console) as an explicit post-drain step. This
+        # removes the reverse-registration-order coupling between a status reporter
+        # and the backends it reports on.
         results: list[BackendDrainResult] = []
-        for drain in reversed(self._drain_hooks):
-            await drain(timeout, results)
+        for drain in self._drain_hooks:
+            results.append(await drain(timeout))
+        for reporter in self._status_reporters:
+            await reporter(results)
 
         # Signal workers to stop processing now that every drain has concluded.
         self.logging_running_event.clear()
@@ -315,9 +372,9 @@ class AsyncLoggingHandler(logging.Handler):
                 None when the failure is not tied to a specific record.
             exc (Exception): The exception that caused the failure.
         """
-        if self.error_handler is not None:
+        if self.config.error_handler is not None:
             try:
-                self.error_handler(record, exc)
+                self.config.error_handler(record, exc)
             except Exception:
                 # The error reporter must never crash the logging path.
                 pass

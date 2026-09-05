@@ -96,24 +96,61 @@ async def test_worker_exits_when_running_clears_and_queue_empty():
 
 
 @pytest.mark.asyncio
-async def test_drain_queues_status_records_for_each_outcome(capsys):
-    """drain() surfaces every other backend's outcome as a synthetic status record."""
+async def test_report_status_queues_synthetic_records(capsys):
+    """report_status() surfaces every backend's outcome as a synthetic status record."""
     running_event = asyncio.Event()
     running_event.set()
     backend = ConsoleBackend(FakeFormatter(), running_event)
     worker = asyncio.create_task(backend._worker())
 
     results = [
+        BackendDrainResult(name="console", status=DrainStatus.COMPLETED),
         BackendDrainResult(name="redis", status=DrainStatus.COMPLETED),
         BackendDrainResult(name="valkey", status=DrainStatus.TIMEOUT),
         BackendDrainResult(name="broker", status=DrainStatus.ERROR, error=RuntimeError("boom")),
     ]
-    await backend.drain(timeout=5, results=results)
+    await backend.report_status(results)
+    # Let the worker flush the status records before capturing stdout.
+    await backend.queue.join()
 
     captured = capsys.readouterr().out
+    # The console's own result is included alongside the other backends' outcomes.
+    assert "Console Logger has completed processing its queue." in captured
     assert "Redis Logger has completed processing its queue." in captured
     assert "Timeout while waiting for valkey logger to complete its queue." in captured
     assert "Error while waiting for broker Logger: boom" in captured
 
     running_event.clear()
     await worker
+
+
+@pytest.mark.asyncio
+async def test_drain_returns_console_completed_result():
+    """drain() drains the console queue and returns the console's own COMPLETED outcome."""
+    running_event = asyncio.Event()
+    running_event.set()
+    backend = ConsoleBackend(FakeFormatter(), running_event)
+    worker = asyncio.create_task(backend._worker())
+
+    await backend.queue.put(_make_record("drain me"))
+    result = await backend.drain(timeout=5)
+
+    assert result.name == "console"
+    assert result.status is DrainStatus.COMPLETED
+
+    running_event.clear()
+    await worker
+
+
+@pytest.mark.asyncio
+async def test_drain_reports_timeout_when_queue_not_drained():
+    """drain() reports TIMEOUT when the console queue does not drain in time."""
+    running_event = asyncio.Event()
+    running_event.set()
+    backend = ConsoleBackend(FakeFormatter(), running_event)
+    backend.queue.put_nowait(_make_record("stuck"))  # no worker: never acknowledged
+
+    result = await backend.drain(timeout=0.01)
+
+    assert result.name == "console"
+    assert result.status is DrainStatus.TIMEOUT

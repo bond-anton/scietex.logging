@@ -34,7 +34,7 @@ sub-packages. Architecturally it decomposes into four cooperating layers:
    `ConsoleBackend`. The console (stdout) sink as a **peer backend**: it owns
    its queue, its worker coroutine, and its shutdown-status reporting (the
    synthetic "… has completed processing its queue." records live in its
-   `drain` hook).
+   `report_status` method, invoked as a post-drain status reporter).
 
 5. **Concrete handler layer** — `src/scietex/logging/basic_handler.py`
    `AsyncBaseHandler` (extends `AsyncLoggingHandler`). A thin concrete subclass
@@ -112,8 +112,8 @@ The `examples/` directory contains runnable scripts demonstrating this
 
 - **Per-handler worker coroutines.** Each handler owns one or more worker
   coroutines, each draining one `asyncio.Queue`:
-  - `ConsoleBackend._worker` (console queue) — `console_backend.py:81`.
-  - `AsyncBrokerHandler._worker` (broker queue) — `message_broker_handler.py:130`.
+  - `ConsoleBackend._worker` (console queue) — `console_backend.py:86`.
+  - `AsyncBrokerHandler._worker` (broker queue) — `message_broker_handler.py:139`.
   Workers loop while `logging_running_event` is set **or** their queue is
   non-empty, using a 1-second `asyncio.wait_for` timeout on `queue.get()`.
 - **Synchronous queue puts.** `emit()` calls `queue.put_nowait(record)` on each
@@ -122,10 +122,12 @@ The `examples/` directory contains runnable scripts demonstrating this
 - **Event-driven gating.** `logging_accept_event` gates `emit()`; 
   `logging_running_event` gates worker loops. Both are set in
   `start_logging()` and cleared in `stop_logging()`.
-- **Graceful shutdown.** `stop_logging()` clears the events, then drains every
-  registered backend through its per-backend `drain(timeout, results)` hook (in
-  reverse registration order) and gathers worker tasks. It does not call
-  `close()`; the handler may be restarted via `start_logging` on the same loop.
+- **Graceful shutdown.** `stop_logging()` clears the accept event, then drains
+  every registered backend through its per-backend `drain(timeout)` hook in
+  registration order (collecting each returned `BackendDrainResult`), invokes
+  each registered status reporter with the collected results, and gathers worker
+  tasks. It does not call `close()`; the handler may be restarted via
+  `start_logging` on the same loop.
 
 ## Notable runtime characteristics
 
@@ -137,4 +139,4 @@ The `examples/` directory contains runnable scripts demonstrating this
   way `AsyncBrokerHandler` registers its broker backend. A broker handler with
   `stdout_enable=True` runs *both* a console worker and a broker worker.
 - **Connection lifecycle is per-worker.** The broker worker calls
-  `connect()` on start and `disconnect()` on exit (`message_broker_handler.py:85,98`).
+  `connect()` on start and `disconnect()` on exit (`message_broker_handler.py:92,105`).

@@ -52,6 +52,11 @@ class ConsoleBackend:
     and writes them to standard output. It observes the handler's running event
     so it can wind down when logging stops.
 
+    During shutdown the coordinator drains the console queue via `drain` and, after
+    every backend has drained, invokes `report_status` to enqueue synthetic status
+    records describing how each backend fared. The console is therefore a post-drain
+    observer, not a drain hook that reads a shared results list mid-iteration.
+
     Attributes:
         queue (asyncio.Queue[logging.LogRecord]): Queue holding records destined
             for standard output.
@@ -99,18 +104,40 @@ class ConsoleBackend:
             except asyncio.TimeoutError:
                 pass
 
-    async def drain(self, timeout: float, results: list[BackendDrainResult]) -> None:
+    async def drain(self, timeout: float) -> BackendDrainResult:
         """
-        Report other backends' drain outcomes to the console, then drain our queue.
+        Drain the console queue and return the outcome.
 
-        For each drain result, a synthetic status record is queued so the console
-        output surfaces how every other backend fared during shutdown. The console
-        queue is then drained, flushing both the status records and any remaining
-        application records.
+        Waits for every queued record to be acknowledged by the console worker,
+        then returns a result describing how the drain concluded so the coordinator
+        can surface it to the registered status reporters.
 
         Args:
             timeout (float): Timeout for draining the console queue.
-            results (list[BackendDrainResult]): Drain outcomes from other backends.
+
+        Returns:
+            BackendDrainResult: How the console queue drained.
+        """
+        try:
+            await asyncio.wait_for(self.queue.join(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return BackendDrainResult("console", DrainStatus.TIMEOUT)
+        except Exception as exc:
+            return BackendDrainResult("console", DrainStatus.ERROR, exc)
+        else:
+            return BackendDrainResult("console", DrainStatus.COMPLETED)
+
+    async def report_status(self, results: list[BackendDrainResult]) -> None:
+        """
+        Enqueue a synthetic status record for each backend's drain outcome.
+
+        Called by the coordinator after all backends have drained, so the console
+        surfaces how every backend fared during shutdown. Status records are
+        best-effort: when the console queue is full they are dropped rather than
+        blocking shutdown on a bounded queue the worker may already be draining.
+
+        Args:
+            results (list[BackendDrainResult]): Drain outcomes from every backend.
 
         Returns:
             None
@@ -123,9 +150,3 @@ class ConsoleBackend:
                 # console queue is full, drop them rather than block shutdown on a
                 # bounded queue that the worker may already be draining.
                 pass
-        try:
-            await asyncio.wait_for(self.queue.join(), timeout=timeout)
-        except Exception:
-            # A timeout or queue error must not abort shutdown; remaining records
-            # are processed as the worker winds down below.
-            pass

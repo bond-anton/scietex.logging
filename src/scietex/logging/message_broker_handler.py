@@ -9,6 +9,7 @@ from typing import Any
 
 from .async_logging_handler import BackendDrainResult, DrainStatus
 from .basic_handler import AsyncBaseHandler
+from .config import RedisConfig, ValkeyConfig
 from .formatter import level_abbreviation
 
 
@@ -46,6 +47,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         stdout_enable: bool = True,
         queue_maxsize: int = 10000,
+        backend_config: RedisConfig | ValkeyConfig | None = None,
     ) -> None:
         """
         Initialize the asynchronous Message broker logging handler.
@@ -60,6 +62,8 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
             stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can hold.
                 Defaults to 10000.
+            backend_config (RedisConfig | ValkeyConfig | None): Backend-specific config
+                attached by concrete broker subclasses. Defaults to None.
 
         Attributes:
             queue_name (str): The name of the queue for the handler.
@@ -74,11 +78,15 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
             error_handler=error_handler,
             stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
+            backend_config=backend_config,
         )
         self.queue_name: str = queue_name
         self.client: Any | None = None
         self.register_backend(
-            self.queue_name, asyncio.Queue(maxsize=self.queue_maxsize), self._worker, self.drain
+            self.queue_name,
+            asyncio.Queue(maxsize=self.config.queue_maxsize),
+            self._worker,
+            self.drain,
         )
 
     @abc.abstractmethod
@@ -154,17 +162,20 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
                     record = await asyncio.wait_for(self.log_queues[self.queue_name].get(), 1)
                 except asyncio.TimeoutError:
                     continue
-                # Compute the broker fields directly instead of reading formatter-mutated
-                # record attributes, keeping output deterministic regardless of stdout_enable.
+                # Compute the broker fields from the handler identity (config) and the
+                # record directly, not from formatter internals. A plain
+                # logging.Formatter installed via setFormatter has no worker_name
+                # attribute and a non-ISO formatTime, so deriving name/time from the
+                # formatter would silently change the broker wire format. The identity
+                # lives on config, and time is always ISO-8601 UTC regardless of any
+                # custom formatter/datefmt.
                 level = level_abbreviation(record.levelno)
-                name = getattr(self.formatter, "worker_name", record.name)
+                name = f"{self.config.service_name}:{self.config.worker_id}"
                 log_entry: dict[str, str] = {
                     "level": level,
                     "message": record.getMessage(),
                     "name": name,
-                    "time": self.formatter.formatTime(record)
-                    if self.formatter
-                    else datetime.now(timezone.utc).isoformat(),
+                    "time": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
                 }
                 try:
                     await self.send_message(log_entry)
@@ -196,27 +207,25 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
                 self._report_error(None, exc)
             self.client = None
 
-    async def drain(self, timeout: float, results: list[BackendDrainResult]) -> None:
+    async def drain(self, timeout: float) -> BackendDrainResult:
         """
-        Drain the broker queue and record the outcome for status reporting.
+        Drain the broker queue and return the outcome for status reporting.
 
-        Waits for every queued record to be acknowledged by the worker, then appends
-        a result describing how the drain concluded so a status-reporting backend
-        (e.g. the console) can surface it during shutdown.
+        Waits for every queued record to be acknowledged by the worker, then returns
+        a result describing how the drain concluded so the coordinator can surface it
+        to the registered status reporters (e.g. the console).
 
         Args:
             timeout (float): Timeout for the queue to drain.
-            results (list[BackendDrainResult]): Shared list to which the outcome is
-                appended.
 
         Returns:
-            None
+            BackendDrainResult: How the drain concluded.
         """
         try:
             await asyncio.wait_for(self.log_queues[self.queue_name].join(), timeout=timeout)
         except asyncio.TimeoutError:
-            results.append(BackendDrainResult(self.queue_name, DrainStatus.TIMEOUT))
+            return BackendDrainResult(self.queue_name, DrainStatus.TIMEOUT)
         except Exception as exc:
-            results.append(BackendDrainResult(self.queue_name, DrainStatus.ERROR, exc))
+            return BackendDrainResult(self.queue_name, DrainStatus.ERROR, exc)
         else:
-            results.append(BackendDrainResult(self.queue_name, DrainStatus.COMPLETED))
+            return BackendDrainResult(self.queue_name, DrainStatus.COMPLETED)

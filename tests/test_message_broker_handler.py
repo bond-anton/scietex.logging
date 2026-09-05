@@ -2,9 +2,11 @@
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 import pytest
 
+from scietex.logging.async_logging_handler import DrainStatus
 from scietex.logging.message_broker_handler import AsyncBrokerHandler
 
 
@@ -208,3 +210,90 @@ async def test_broker_output_deterministic_without_console():
     assert entry["name"] == "TestService:1"
 
     await handler.stop_logging(timeout=0.5)
+
+
+@pytest.mark.asyncio
+async def test_broker_payload_invariant_under_plain_formatter():
+    """Broker name/time derive from handler identity, not the formatter internals."""
+    handler = FakeBrokerHandler(
+        queue_name="broker",
+        service_name="TestService",
+        worker_id=1,
+        stdout_enable=False,
+    )
+    # A plain stdlib formatter has no worker_name attribute and a non-ISO
+    # formatTime; broker output must be unaffected by swapping it in.
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
+
+    await handler.start_logging()
+    record = _make_record("hello")
+    handler.emit(record)
+
+    await _wait_for(lambda: bool(handler.sent))
+    entry = handler.sent[0]
+    assert entry["name"] == "TestService:1"
+    assert entry["time"] == datetime.fromtimestamp(record.created, timezone.utc).isoformat()
+
+    await handler.stop_logging(timeout=0.5)
+
+
+@pytest.mark.asyncio
+async def test_drain_returns_completed_result():
+    """drain() returns a COMPLETED BackendDrainResult when the queue drains."""
+    handler = FakeBrokerHandler(queue_name="broker", stdout_enable=False)
+
+    await handler.start_logging()
+    handler.emit(_make_record("hello"))
+    await _wait_for(lambda: bool(handler.sent))
+
+    result = await handler.drain(timeout=0.5)
+
+    assert result.name == "broker"
+    assert result.status is DrainStatus.COMPLETED
+
+    await handler.stop_logging(timeout=0.5)
+
+
+@pytest.mark.asyncio
+async def test_drain_returns_timeout_result():
+    """drain() returns a TIMEOUT result when the queue does not drain in time."""
+    handler = FakeBrokerHandler(queue_name="broker", stdout_enable=False)
+    handler.log_queues["broker"].put_nowait(_make_record("stuck"))  # no worker: never acked
+
+    result = await handler.drain(timeout=0.01)
+
+    assert result.name == "broker"
+    assert result.status is DrainStatus.TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_drain_returns_error_result(monkeypatch):
+    """drain() returns an ERROR result carrying the exception on join() failure."""
+    handler = FakeBrokerHandler(queue_name="broker", stdout_enable=False)
+
+    async def failing_join():
+        raise RuntimeError("join failed")
+
+    monkeypatch.setattr(handler.log_queues["broker"], "join", failing_join)
+
+    result = await handler.drain(timeout=0.5)
+
+    assert result.name == "broker"
+    assert result.status is DrainStatus.ERROR
+    assert isinstance(result.error, RuntimeError)
+
+
+@pytest.mark.asyncio
+async def test_stdout_disabled_registers_no_status_reporter(capsys):
+    """stdout_enable=False leaves no status reporter, so no shutdown status is printed."""
+    handler = FakeBrokerHandler(queue_name="broker", stdout_enable=False)
+
+    assert handler._status_reporters == []
+
+    await handler.start_logging()
+    handler.emit(_make_record("hello"))
+    await _wait_for(lambda: bool(handler.sent))
+    await handler.stop_logging(timeout=0.5)
+
+    captured = capsys.readouterr().out
+    assert "has completed processing its queue" not in captured
