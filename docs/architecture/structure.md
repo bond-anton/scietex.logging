@@ -23,7 +23,7 @@ scietex.logging/
 
 | Module | Responsibility |
 |---|---|
-| `__init__.py` | Public API. Re-exports `AsyncBaseHandler`, `AsyncBrokerHandler`, `AsyncLoggingHandler`, `ConsoleBackend`, `ScietexFormatter`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler`; defines `__version__ = "0.2.0"`. |
+| `__init__.py` | Public API. Re-exports `AsyncBaseHandler`, `AsyncBrokerHandler`, `AsyncLoggingHandler`, `ConsoleBackend`, `ScietexFormatter`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler`; defines `__version__ = "1.0.0"`. |
 | `async_logging_handler.py` | `AsyncLoggingHandler` — pure shared async machinery (queues/events/workers, `register_backend`, `start_logging`/`emit`/`stop_logging`, error channel); no sink of its own. |
 | `console_backend.py` | `ConsoleBackend` — the console (stdout) sink as a peer backend (queue + worker + drain hook). |
 | `basic_handler.py` | `AsyncBaseHandler` — thin concrete subclass of `AsyncLoggingHandler` that registers the console backend as a peer when `stdout_enable=True`. |
