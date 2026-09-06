@@ -76,6 +76,11 @@ per-backend queues/workers, the error channel, and the generic
     `TypeError`. `LoggingConfig` is the single runtime source of truth; the
     flat `queue_maxsize`/`error_handler` attributes are read-only `@property`
     aliases over `self.config`.
+- `worker_name` (read-only `@property`) — `async_logging_handler.py:202`.
+  Handler identity `f"{config.service_name}:{config.worker_id}"`. `config` is
+  the single owner of handler identity; the default `ScietexFormatter` and the
+  broker worker both derive from it, so console and broker output cannot diverge
+  (AR-107). A user-injected formatter keeps its own `worker_name`.
 - `register_backend(name, queue, worker, drain=None)` —
   `async_logging_handler.py:200`. Registers a backend's queue, worker
   **factory** (zero-argument callable returning a fresh coroutine), and
@@ -241,12 +246,13 @@ connect/disconnect/send_message contract concrete backends implement.
 
 **Log-entry dict shape** (built in `_worker`, `message_broker_handler.py:192-199`):
 `{"level": level_abbreviation(record.levelno), "message": record.getMessage(),
-"name": f"{self.config.service_name}:{self.config.worker_id}",
+"name": self.worker_name,
 "time": datetime.fromtimestamp(record.created, timezone.utc).isoformat()}`.
 `level` is computed via `level_abbreviation(record.levelno)` (imported from
-`config.py`, AR-026); `name` and `time` are derived from `self.config` and the
-record directly, **not** from the formatter, so the dict is deterministic and
-invariant under `setFormatter`.
+`config.py`, AR-026); `name` is the handler identity property `worker_name`
+(`f"{config.service_name}:{config.worker_id}"`, AR-107) and `time` is derived
+from the record directly, **not** from the formatter, so the dict is
+deterministic and invariant under `setFormatter`.
 
 **Depends on.** `basic_handler.AsyncBaseHandler`; `config` (`level_abbreviation`);
 stdlib `asyncio`, `datetime`.

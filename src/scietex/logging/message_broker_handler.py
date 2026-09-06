@@ -190,7 +190,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
                 # lives on config, and time is always ISO-8601 UTC regardless of any
                 # custom formatter/datefmt.
                 level = level_abbreviation(record.levelno)
-                name = f"{self.config.service_name}:{self.config.worker_id}"
+                name = self.worker_name
                 log_entry: dict[str, str] = {
                     "level": level,
                     "message": record.getMessage(),

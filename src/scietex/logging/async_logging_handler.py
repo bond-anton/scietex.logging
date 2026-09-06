@@ -199,6 +199,17 @@ class AsyncLoggingHandler(logging.Handler):
         """Read-only alias for ``config.queue_maxsize``."""
         return self.config.queue_maxsize
 
+    @property
+    def worker_name(self) -> str:
+        """Read-only handler identity ``service_name:worker_id`` derived from config.
+
+        The single owner of handler identity is ``config``; the default
+        ``ScietexFormatter`` is built from the same fields and the broker worker
+        reads this property, so console and broker output cannot diverge (AR-107).
+        A user-injected formatter keeps its own ``worker_name``.
+        """
+        return f"{self.config.service_name}:{self.config.worker_id}"
+
     def register_backend(
         self,
         name: str,

@@ -119,6 +119,15 @@ def test_config_is_single_source_of_truth():
         handler.error_handler = None
 
 
+def test_worker_name_property_derives_from_config():
+    """worker_name is a read-only property derived from config (AR-107)."""
+    handler = BareHandler(service_name="Svc", worker_id=7)
+    assert handler.worker_name == "Svc:7"
+    assert handler.worker_name == f"{handler.config.service_name}:{handler.config.worker_id}"
+    with pytest.raises(AttributeError):
+        handler.worker_name = "other"  # read-only
+
+
 @pytest.mark.asyncio
 async def test_stop_logging_collects_results_and_reports():
     """stop_logging drains each backend, collects results, then reports them."""
