@@ -172,6 +172,10 @@ its worker coroutine, and its shutdown-status reporting.
   set or the queue is non-empty, formatting records and writing them to stdout.
   Format/write failures are routed through `_report_error` (the configured
   `error_handler` or the module logger), with `task_done()` in a `finally`.
+- `worker` (read-only `@property`) — `console_backend.py:102`. Returns the bound
+  `_worker` coroutine method as a zero-arg worker factory, so `AsyncBaseHandler`
+  and custom integrators register the backend's worker without reaching into a
+  private attribute (AR-115).
 - `async drain(timeout) -> BackendDrainResult` — `console_backend.py:160`. Waits
   for its own queue to drain and returns a `BackendDrainResult` describing how
   the drain concluded.
@@ -203,7 +207,8 @@ console backend as a peer. Public signature unchanged.
   - When `stdout_enable` is True, constructs a `ConsoleBackend` (with
     `formatter_provider=lambda: self.formatter`, `maxsize=queue_maxsize`, and
     `error_handler=self._report_error`) and registers it under the name
-    `"console"` via `register_backend`, and registers the console's
+    `"console"` via `register_backend` (registering `backend.worker` as the
+    worker factory, AR-115), and registers the console's
     `report_status` as a status reporter via `register_status_reporter`.
 - Inherits `start_logging`, `emit`, `stop_logging` from `AsyncLoggingHandler`.
 

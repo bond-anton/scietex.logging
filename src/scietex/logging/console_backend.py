@@ -10,7 +10,8 @@ way `AsyncBrokerHandler` registers its broker queue and worker.
 import asyncio
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from .async_logging_handler import BackendDrainResult, DrainStatus
 from .config import report_error
@@ -97,6 +98,16 @@ class ConsoleBackend:
         self.formatter_provider = formatter_provider
         self.running_event = running_event
         self.error_handler = error_handler
+
+    @property
+    def worker(self) -> Callable[[], Coroutine[Any, Any, None]]:
+        """Public worker-factory accessor for registration (AR-115).
+
+        Returns the bound ``_worker`` coroutine method so ``AsyncBaseHandler``
+        and custom integrators can register this backend's worker without
+        reaching into a private attribute.
+        """
+        return self._worker
 
     async def _worker(self) -> None:
         """

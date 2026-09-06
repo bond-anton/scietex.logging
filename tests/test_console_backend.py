@@ -230,3 +230,15 @@ def test_report_error_helper_routes_to_handler_or_module_logger(caplog):
     with caplog.at_level(logging.ERROR, logger="scietex.logging"):
         report_error("ConsoleBackend", bad, None, RuntimeError("boom"))
     assert any("failed to deliver a log record" in r.getMessage() for r in caplog.records)
+
+
+def test_worker_property_exposes_bound_worker():
+    """worker is a public read-only accessor for the worker coroutine (AR-115)."""
+    running_event = asyncio.Event()
+    backend = ConsoleBackend(lambda: FakeFormatter(), running_event)
+
+    assert backend.worker.__func__ is ConsoleBackend._worker  # same underlying coroutine
+    assert backend.worker.__self__ is backend  # bound to this instance
+    assert callable(backend.worker)
+    with pytest.raises(AttributeError):
+        backend.worker = None  # read-only

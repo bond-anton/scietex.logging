@@ -88,7 +88,7 @@ class AsyncBaseHandler(AsyncLoggingHandler):
             self.register_backend(
                 "console",
                 self._console_backend.queue,
-                self._console_backend._worker,
+                self._console_backend.worker,
                 self._console_backend.drain,
             )
             self.register_status_reporter(self._console_backend.report_status)
