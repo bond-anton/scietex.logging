@@ -2,9 +2,10 @@
 
 This module is the neutral leaf of the package: it hosts the configuration
 dataclasses (``LoggingConfig``, ``RedisConfig``, ``ValkeyConfig``) alongside the
-cross-module helpers ``validate_queue_maxsize``, ``level_abbreviation``, and
-``optional_dependency_error``. It imports only the standard library, so formatter
-and broker handlers can depend on it without creating an import cycle.
+cross-module helpers ``validate_queue_maxsize``, ``level_abbreviation``,
+``optional_dependency_error``, and ``report_error``. It imports only the
+standard library, so formatter and broker handlers can depend on it without
+creating an import cycle.
 """
 
 from __future__ import annotations
@@ -12,6 +13,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+
+# The single module logger used by report_error below, so every reporting
+# component logs delivery failures to the same "scietex.logging" channel.
+_error_logger = logging.getLogger("scietex.logging")
 
 
 @dataclass(frozen=True)
@@ -155,4 +160,43 @@ def optional_dependency_error(module_name: str, extra: str) -> str:
     return (
         f"The '{module_name}' module is required to use this feature. "
         f"Please install it by running:\n\n    pip install scietex.logging[{extra}]\n"
+    )
+
+
+def report_error(
+    handler_name: str,
+    error_handler: Callable[[logging.LogRecord | None, Exception], None] | None,
+    record: logging.LogRecord | None,
+    exc: Exception,
+) -> None:
+    """Report a delivery error through the configured error channel (AR-108).
+
+    Shared by the handler machinery and the console backend so the
+    "fall through to the module logger on a raising error_handler" guarantee is
+    single-sourced. If ``error_handler`` is set it is invoked with ``(record,
+    exc)``; otherwise (or if it raises) the error is logged through the
+    ``scietex.logging`` module logger. ``handler_name`` names the reporting
+    component in the log line.
+
+    Args:
+        handler_name (str): The reporting component's name (e.g. the class name).
+        error_handler (Callable | None): Optional ``(record, exc)`` callback.
+        record (logging.LogRecord | None): The record whose delivery failed, or
+            None when the failure is not tied to a specific record.
+        exc (Exception): The exception that caused the failure.
+    """
+    if error_handler is not None:
+        try:
+            error_handler(record, exc)
+            return
+        except Exception:
+            # The error reporter must never crash the logging path, but a
+            # raising user callback must not swallow the telemetry either.
+            # Fall through to the module logger below.
+            pass
+    _error_logger.error(
+        "%s failed to deliver a log record: %s",
+        handler_name,
+        exc,
+        exc_info=(type(exc), exc, exc.__traceback__),
     )

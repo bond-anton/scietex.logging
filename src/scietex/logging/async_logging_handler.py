@@ -15,10 +15,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from .config import LoggingConfig, RedisConfig, ValkeyConfig, validate_queue_maxsize
+from .config import LoggingConfig, RedisConfig, ValkeyConfig, report_error, validate_queue_maxsize
 from .formatter import ScietexFormatter
-
-_error_logger = logging.getLogger("scietex.logging")
 
 
 class DrainStatus(Enum):
@@ -474,31 +472,9 @@ class AsyncLoggingHandler(logging.Handler):
             self._report_error(record, exc)
 
     def _report_error(self, record: logging.LogRecord | None, exc: Exception) -> None:
-        """
-        Report a delivery error through the configured error channel.
+        """Report a delivery error through the configured error channel.
 
-        If an `error_handler` callback is configured it is invoked; otherwise the
-        error is logged through the `scietex.logging` module logger. A user
-        `error_handler` that raises never silences the telemetry: the error is
-        still logged through the module logger rather than swallowed.
-
-        Args:
-            record (logging.LogRecord | None): The record whose delivery failed, or
-                None when the failure is not tied to a specific record.
-            exc (Exception): The exception that caused the failure.
+        Delegates to the shared ``config.report_error`` helper (AR-108) so the
+        handler and the console backend share one error-routing policy.
         """
-        if self.config.error_handler is not None:
-            try:
-                self.config.error_handler(record, exc)
-                return
-            except Exception:
-                # The error reporter must never crash the logging path, but a
-                # raising user callback must not swallow the telemetry either.
-                # Fall through to the module logger below.
-                pass
-        _error_logger.error(
-            "%s failed to deliver a log record: %s",
-            type(self).__name__,
-            exc,
-            exc_info=(type(exc), exc, exc.__traceback__),
-        )
+        report_error(type(self).__name__, self.config.error_handler, record, exc)

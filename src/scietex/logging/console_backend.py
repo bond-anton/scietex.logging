@@ -13,8 +13,7 @@ import sys
 from collections.abc import Callable
 
 from .async_logging_handler import BackendDrainResult, DrainStatus
-
-_error_logger = logging.getLogger("scietex.logging")
+from .config import report_error
 
 
 def _status_record(result: BackendDrainResult) -> logging.LogRecord:
@@ -129,33 +128,11 @@ class ConsoleBackend:
                 self.queue.task_done()
 
     def _report_error(self, record: logging.LogRecord | None, exc: Exception) -> None:
-        """
-        Report a console delivery error through the configured error channel.
+        """Report a console delivery error through the configured error channel.
 
-        If an `error_handler` callback is configured it is invoked; otherwise the
-        error is logged through the `scietex.logging` module logger. A raising
-        `error_handler` never silences the telemetry: the error is still logged
-        through the module logger rather than swallowed.
-
-        Args:
-            record (logging.LogRecord | None): The record whose delivery failed,
-                or None when the failure is not tied to a specific record.
-            exc (Exception): The exception that caused the failure.
+        Delegates to the shared ``config.report_error`` helper (AR-108).
         """
-        if self.error_handler is not None:
-            try:
-                self.error_handler(record, exc)
-                return
-            except Exception:
-                # The error reporter must never crash the logging path, but a
-                # raising callback must not swallow the telemetry either. Fall
-                # through to the module logger below.
-                pass
-        _error_logger.error(
-            "ConsoleBackend failed to deliver a log record: %s",
-            exc,
-            exc_info=(type(exc), exc, exc.__traceback__),
-        )
+        report_error("ConsoleBackend", self.error_handler, record, exc)
 
     async def drain(self, timeout: float) -> BackendDrainResult:
         """

@@ -129,8 +129,11 @@ per-backend queues/workers, the error channel, and the generic
 
 **Configuration.** Typed config objects live in `config.py`:
 `LoggingConfig` (shared machinery options), `RedisConfig`, `ValkeyConfig`
-(backend-specific, stored as `config.backend_config`), and the
-`validate_queue_maxsize` helper. Every handler builds its `self.config` from its
+(backend-specific, stored as `config.backend_config`), and the cross-module
+stdlib-only helpers `validate_queue_maxsize` and `report_error`. The
+`scietex.logging` module logger used by `report_error` also lives in `config.py`
+(AR-108), so the handler machinery and the console backend share one
+error-routing policy. Every handler builds its `self.config` from its
 explicit constructor keyword args; none accept `**kwargs`. `LoggingConfig` is
 the single runtime source of truth: handlers read `self.config.*` at work time,
 and the flat `queue_maxsize`/`stdout_enable`/`error_handler` attributes are

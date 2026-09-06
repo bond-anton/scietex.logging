@@ -214,3 +214,19 @@ async def test_worker_reports_via_module_logger_when_no_error_handler(caplog):
 
     assert any("format exploded" in record.message for record in caplog.records)
     assert backend.queue.empty()
+
+
+def test_report_error_helper_routes_to_handler_or_module_logger(caplog):
+    """The shared report_error helper honors the error_handler and falls back (AR-108)."""
+    from scietex.logging.config import report_error
+
+    calls = []
+    report_error("ConsoleBackend", lambda r, e: calls.append(e), None, RuntimeError("boom"))
+    assert len(calls) == 1
+
+    def bad(record, exc):
+        raise RuntimeError("handler broken")
+
+    with caplog.at_level(logging.ERROR, logger="scietex.logging"):
+        report_error("ConsoleBackend", bad, None, RuntimeError("boom"))
+    assert any("failed to deliver a log record" in r.getMessage() for r in caplog.records)
