@@ -70,6 +70,17 @@ directly, so they are invariant under `setFormatter`/`formatter=`. A custom
 formatter affects the console (stdout) sink only — see
 [Formatter scope: console output only](configuration.md#formatter-scope-console-output-only).
 
+### Console-by-default and reserved names
+
+`AsyncBrokerHandler` extends `AsyncBaseHandler`, so a custom broker backend
+**attaches a console sink by default** (`stdout_enable=True`). Pass
+`stdout_enable=False` for a broker-only handler (see `examples/custom_backend.py`).
+
+The built-in backends reserve the queue names `"console"`, `"redis"`, and
+`"valkey"`. Choose a distinct `queue_name` for your custom backend — using a
+reserved name raises `ValueError` at construction when the console backend is
+enabled.
+
 ## Worker Configuration
 
 ### Threading Contract

@@ -101,6 +101,19 @@ class MyHandler(AsyncLoggingHandler):
     async def drain(self, timeout): ...
 ```
 
+### Reserved backend names
+
+`register_backend` rejects a duplicate queue name with `ValueError` (AR-028).
+The built-in backends reserve these names, so a custom `AsyncBrokerHandler`
+subclass must not use them as its `queue_name`:
+
+- `"console"` — registered by `AsyncBaseHandler` when `stdout_enable=True`
+  (the default). `AsyncBrokerHandler(queue_name="console")` therefore raises at
+  construction unless you pass `stdout_enable=False`.
+- `"redis"` / `"valkey"` — registered by `AsyncRedisHandler` / `AsyncValkeyHandler`.
+
+Choose a distinct `queue_name` for a custom backend (e.g. `"postgres"`, `"http"`).
+
 ### Error Handler
 
 Provide an `error_handler` callback to receive delivery failures (queue full, connection
@@ -116,6 +129,11 @@ handler = AsyncBaseHandler(error_handler=on_error)
 
 See `examples/error_handler_and_queue_bounds.py` for a runnable example that
 combines an `error_handler` with a bounded queue.
+
+The `error_handler` callback runs **synchronously on the producer's thread**
+inside `emit` (and on the worker for backend delivery failures). Keep it fast
+and non-blocking — a slow callback stalls the logging call under exactly the
+overload condition that triggers it.
 
 ### Queue Bounds and Overflow
 
@@ -221,6 +239,16 @@ Consequences to be aware of:
   `stdout_enable=False` the formatter has no visible effect at all.
 - If you need to change what a broker backend sends, that is a property of the
   backend's `send_message` implementation, not of the formatter.
+
+### Formatters must not mutate the record
+
+The same `LogRecord` is fanned out to every backend queue at emit time. The
+shipped `ScietexFormatter` copies the record before formatting, so it never
+mutates the shared record. A **custom formatter must do the same**: if it
+mutates the record in place (e.g. `record.custom_field = ...`), the mutation
+leaks to the broker worker and to any other backend that later reads the same
+record. Copy the record first (`import copy; record = copy.copy(record)`) or
+avoid mutating it.
 
 ## Complete Example
 

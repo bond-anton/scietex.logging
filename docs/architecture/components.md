@@ -255,6 +255,13 @@ connect/disconnect/send_message contract concrete backends implement.
   Waits for the broker queue to join and returns a `BackendDrainResult`
   describing how the drain concluded.
 
+Because `AsyncBrokerHandler` extends `AsyncBaseHandler`, every broker backend
+**inherits the console sink by default** (`stdout_enable=True`); pass
+`stdout_enable=False` for a broker-only handler. The queue names `"console"`,
+`"redis"`, and `"valkey"` are reserved by the built-in backends, so a custom
+`queue_name` must avoid them (a collision raises `ValueError` at construction,
+AR-028).
+
 **Log-entry dict shape** (built in `_worker`, `message_broker_handler.py:192-199`):
 `{"level": level_abbreviation(record.levelno), "message": record.getMessage(),
 "name": self.worker_name,
