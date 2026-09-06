@@ -216,14 +216,16 @@ class AsyncLoggingHandler(logging.Handler):
         drain: DrainHook | None = None,
     ) -> None:
         """
-        Register a backend's queue, worker factory, and optional drain hook.
+        Register a backend's queue, worker factory, and drain hook.
 
         A backend is registered by its queue name so `emit` fans records into it,
         by its worker factory so `start_logging` schedules a fresh worker task each
-        cycle, and optionally by a `drain` hook that `stop_logging` calls to let the
-        backend drain its own queue. Each drain hook returns its own
-        `BackendDrainResult`; `stop_logging` collects them all and hands the results
-        to the registered status reporters.
+        cycle, and by a `drain` hook that `stop_logging` calls to let the backend
+        drain its own queue. When `drain` is omitted a generic `queue.join()` drain
+        is registered instead, so a drain-less backend is still flushed and
+        status-reported at stop rather than silently dropped (AR-110). Each drain
+        hook returns its own `BackendDrainResult`; `stop_logging` collects them all
+        and hands the results to the registered status reporters.
 
         Args:
             name (str): Unique name for the backend's queue.
@@ -232,7 +234,8 @@ class AsyncLoggingHandler(logging.Handler):
                 fresh coroutine that processes records from the queue.
             drain (DrainHook, optional): Async callable ``(timeout) ->
                 BackendDrainResult`` invoked during `stop_logging` to drain this
-                backend.
+                backend. Defaults to a generic ``queue.join()`` drain of this
+                backend's own queue.
 
         Raises:
             ValueError: If ``name`` is already registered. A duplicate name would
@@ -243,8 +246,24 @@ class AsyncLoggingHandler(logging.Handler):
             raise ValueError(f"backend name {name!r} is already registered")
         self.log_queues[name] = queue
         self.log_worker_factories.append(worker)
-        if drain is not None:
-            self._drain_hooks.append(drain)
+        if drain is None:
+            # A backend registered without a drain hook must not be silently
+            # dropped at stop (AR-110). Default to a generic queue.join() drain —
+            # the same behavior every built-in backend's drain implements — so a
+            # drain-less custom backend still flushes its queue and reports a
+            # status result instead of losing records at every shutdown.
+            async def default_drain(timeout: float) -> BackendDrainResult:
+                try:
+                    await asyncio.wait_for(queue.join(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    return BackendDrainResult(name, DrainStatus.TIMEOUT)
+                except Exception as exc:
+                    return BackendDrainResult(name, DrainStatus.ERROR, exc)
+                else:
+                    return BackendDrainResult(name, DrainStatus.COMPLETED)
+
+            drain = default_drain
+        self._drain_hooks.append(drain)
 
     def register_status_reporter(self, reporter: StatusReporter) -> None:
         """

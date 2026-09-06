@@ -83,9 +83,12 @@ per-backend queues/workers, the error channel, and the generic
   (AR-107). A user-injected formatter keeps its own `worker_name`.
 - `register_backend(name, queue, worker, drain=None)` —
   `async_logging_handler.py:200`. Registers a backend's queue, worker
-  **factory** (zero-argument callable returning a fresh coroutine), and
-  optional `drain(timeout) -> BackendDrainResult` hook. Raises `ValueError` if
-  `name` is already registered (AR-028).
+  **factory** (zero-argument callable returning a fresh coroutine), and a
+  `drain(timeout) -> BackendDrainResult` hook. When `drain` is omitted, a
+  generic `queue.join()` drain is registered instead, so a drain-less backend
+  still flushes and reports a status result at stop rather than being silently
+  dropped (AR-110). Raises `ValueError` if `name` is already registered
+  (AR-028).
 - `register_status_reporter(reporter)` — `async_logging_handler.py:238`.
   Registers a post-drain observer invoked with the collected
   `BackendDrainResult`s after every backend has drained.

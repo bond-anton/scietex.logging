@@ -221,6 +221,35 @@ def test_register_backend_duplicate_name_raises():
 
 
 @pytest.mark.asyncio
+async def test_register_backend_without_drain_gets_default_queue_join_drain():
+    """A backend registered without a drain hook gets a generic queue.join() drain (AR-110)."""
+    handler = BareHandler()
+    queue: asyncio.Queue[logging.LogRecord] = asyncio.Queue()
+    delivered: list[str] = []
+
+    async def worker() -> None:
+        while handler.logging_running_event.is_set() or not queue.empty():
+            try:
+                record = await asyncio.wait_for(queue.get(), 1)
+            except asyncio.TimeoutError:
+                continue
+            delivered.append(record.getMessage())
+            queue.task_done()
+
+    handler.register_backend("nodrain", queue, worker)  # no drain arg
+
+    assert len(handler._drain_hooks) == 1  # a default drain hook was registered
+
+    await handler.start_logging()
+    handler.emit(_make_record("hello"))
+    await _wait_for(lambda: len(delivered) == 1)
+    await handler.stop_logging(timeout=0.5)
+
+    assert delivered == ["hello"]
+    assert queue.empty()
+
+
+@pytest.mark.asyncio
 async def test_report_error_falls_back_to_module_logger_when_error_handler_raises(caplog):
     """A raising error_handler falls back to the module logger, not silence (AR-031)."""
 
