@@ -85,12 +85,14 @@ handler = AsyncValkeyHandler(stream_name="my_log_stream")
 - `stream_name`: The Valkey stream name (required)
 - `valkey_config`: Dictionary with Valkey connection parameters (accepted for
   backward compatibility). It is converted into a typed `ValkeyConfig` (mirroring
-  `GlideClientConfiguration`'s scalar plain options: `addresses` plus `use_tls`,
-  `request_timeout`, `database_id`, `client_name`, `inflight_requests_limit`,
-  `client_az`, `lazy_connect`, `read_only`) stored as `self.config.backend_config`.
-  `connect()` reads that typed config (the single source of truth), translating
-  it into a `GlideClientConfiguration` and dropping `None`-valued fields so glide
-  applies its own defaults.
+  `GlideClientConfiguration`'s scalar plain options: `addresses` plus `username`,
+  `password`, `use_tls`, `request_timeout`, `database_id`, `client_name`,
+  `inflight_requests_limit`, `client_az`, `lazy_connect`, `read_only`) stored as
+  `self.config.backend_config`. `connect()` reads that typed config (the single
+  source of truth), translating it into a `GlideClientConfiguration` and dropping
+  `None`-valued fields so glide applies its own defaults. The scalar `username`
+  and `password` fields are combined into a glide `ServerCredentials` and passed
+  as `credentials` to `GlideClientConfiguration`.
 
 ## Backend Comparison
 

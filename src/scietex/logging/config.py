@@ -105,18 +105,24 @@ class ValkeyConfig:
     Mirrors the scalar plain options of ``GlideClientConfiguration`` so that
     ``ValkeyConfig(**raw)`` never rejects a legitimate scalar client option.
     Enum-typed options (``read_from``, ``protocol``, ``node_discovery_mode``) and
-    object-valued options (``credentials``, ``reconnect_strategy``,
-    ``pubsub_subscriptions``, ``advanced_config``, ``compression``,
-    ``client_side_cache``, ``address_resolver``, ``client_circuit_breaker``) are
-    intentionally not modeled here. Optional fields default to ``None``, meaning
-    "let glide apply its own default".
+    object-valued options (``reconnect_strategy``, ``pubsub_subscriptions``,
+    ``advanced_config``, ``compression``, ``client_side_cache``,
+    ``address_resolver``, ``client_circuit_breaker``) are intentionally not
+    modeled here. Credentials are modeled as the scalar ``username``/``password``
+    fields and translated into glide's ``ServerCredentials`` by the handler's
+    ``connect()``. Optional fields default to ``None``, meaning "let glide apply
+    its own default".
 
     Attributes:
         addresses (list[tuple[str, int]]): (host, port) pairs for the Valkey nodes.
             Defaults to a single localhost:6379 node.
+        username (str | None): Username for authentication (default None).
+        password (str | None): Password for authentication (default None).
     """
 
     addresses: list[tuple[str, int]] = field(default_factory=lambda: [("localhost", 6379)])
+    username: str | None = None
+    password: str | None = None
     use_tls: bool | None = None
     request_timeout: int | None = None
     database_id: int | None = None

@@ -5,7 +5,14 @@ import logging
 import socket
 
 import pytest
-from glide import GlideClient, GlideClientConfiguration, MaxId, MinId, NodeAddress
+from glide import (
+    GlideClient,
+    GlideClientConfiguration,
+    MaxId,
+    MinId,
+    NodeAddress,
+    ServerCredentials,
+)
 
 from scietex.logging import (
     AsyncValkeyHandler,
@@ -130,6 +137,52 @@ async def test_valkey_connect_translates_config_to_glide(monkeypatch):
     assert isinstance(config, GlideClientConfiguration)
     assert [(node.host, node.port) for node in config.addresses] == [("localhost", 6379)]
     assert config.request_timeout == 100
+
+
+@pytest.mark.asyncio
+async def test_valkey_connect_translates_credentials_to_glide(monkeypatch):
+    """connect() builds a ServerCredentials from username/password and passes it to glide."""
+    captured = {}
+
+    async def fake_create(config):
+        captured["config"] = config
+        return None
+
+    monkeypatch.setattr(GlideClient, "create", fake_create)
+    handler = AsyncValkeyHandler(
+        stream_name="s",
+        valkey_config={
+            "addresses": [("localhost", 6379)],
+            "username": "svc",
+            "password": "secret",
+        },
+    )
+    await handler.connect()
+    config = captured["config"]
+    assert isinstance(config, GlideClientConfiguration)
+    assert isinstance(config.credentials, ServerCredentials)
+    assert config.credentials.username == "svc"
+    assert config.credentials.password == "secret"
+
+
+@pytest.mark.asyncio
+async def test_valkey_connect_omits_credentials_when_unset(monkeypatch):
+    """connect() leaves glide's credentials default when no username/password is given."""
+    captured = {}
+
+    async def fake_create(config):
+        captured["config"] = config
+        return None
+
+    monkeypatch.setattr(GlideClient, "create", fake_create)
+    handler = AsyncValkeyHandler(
+        stream_name="s",
+        valkey_config={"addresses": [("localhost", 6379)]},
+    )
+    await handler.connect()
+    config = captured["config"]
+    assert isinstance(config, GlideClientConfiguration)
+    assert config.credentials is None
 
 
 def test_valkey_unknown_kwarg_raises_type_error():

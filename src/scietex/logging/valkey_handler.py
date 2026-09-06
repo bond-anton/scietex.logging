@@ -3,7 +3,7 @@
 from .config import ValkeyConfig, optional_dependency_error
 
 try:
-    from glide import GlideClient, GlideClientConfiguration, NodeAddress
+    from glide import GlideClient, GlideClientConfiguration, NodeAddress, ServerCredentials
 except ImportError as e:
     raise ImportError(optional_dependency_error("valkey-glide", "valkey"), name="glide") from e
 
@@ -120,8 +120,18 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
                 node_addresses = [NodeAddress()]
             else:
                 node_addresses = [NodeAddress(host, port) for host, port in addresses]
+            username = cfg.pop("username", None)
+            password = cfg.pop("password", None)
+            credentials = None
+            if username is not None or password is not None:
+                credentials = ServerCredentials(password=password, username=username)
             kwargs = {k: v for k, v in cfg.items() if v is not None}
-            client_config = GlideClientConfiguration(node_addresses, **kwargs)
+            if credentials is None:
+                client_config = GlideClientConfiguration(node_addresses, **kwargs)
+            else:
+                client_config = GlideClientConfiguration(
+                    node_addresses, credentials=credentials, **kwargs
+                )
             self.client = await GlideClient.create(client_config)
 
     async def disconnect(self) -> None:
