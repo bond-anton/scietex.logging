@@ -10,8 +10,10 @@ Features:
 ---------
 - **Asynchronous Logging**: Log messages are queued and handled asynchronously, ensuring minimal
   interference with the main application flow.
-- **Multiple Backends**: Console, Redis, Valkey, and MQTT logging are supported out of the box,
-  with an option to extend to other backends.
+- **Multiple Backends**: Console, File, Redis, Valkey, and MQTT logging are supported
+  out of the box, with an option to extend to other backends.
+- **File Logging**: Plain-text file logging with rotation variants and structured JSON output
+  are available out of the box with no extra dependencies.
 - **Configurable Logging Levels**: Supports all standard logging levels
   (e.g., DEBUG, INFO, WARNING, ERROR, CRITICAL).
 - **Optional Dependency Management**: Only install the necessary dependencies for the backends
@@ -106,6 +108,23 @@ Advanced usage with MQTT logging:
 
     asyncio.run(main())
 
+Advanced usage with file logging:
+
+    import logging
+    from scietex.logging import AsyncFileHandler, JsonFormatter
+
+    logger = logging.getLogger("MyAsyncLogger")
+    logger.setLevel(logging.DEBUG)
+    handler = AsyncFileHandler("app.log", formatter=JsonFormatter())
+    logger.addHandler(handler)
+
+    async def main():
+        await handler.start_logging()
+        logger.error("This error message will be written to app.log as JSON!")
+        await handler.stop_logging()
+
+    asyncio.run(main())
+
 Extending the Package:
 ----------------------
 Custom backends can be implemented by subclassing `AsyncBrokerHandler` and implementing the
@@ -116,20 +135,34 @@ behaviors.
 
 """
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 from .async_logging_handler import AsyncLoggingHandler
 from .basic_handler import AsyncBaseHandler
 from .config import LoggingConfig, MqttConfig, RedisConfig, ValkeyConfig
 from .console_backend import ConsoleBackend
+from .file_backend import FileBackend
+from .file_handler import (
+    AsyncFileHandler,
+    AsyncRotatingFileHandler,
+    AsyncTimedRotatingFileHandler,
+    AsyncWatchedFileHandler,
+)
 from .formatter import ScietexFormatter
+from .json_formatter import JsonFormatter
 from .message_broker_handler import AsyncBrokerHandler
 
 __all__ = [
     "AsyncBaseHandler",
     "AsyncBrokerHandler",
+    "AsyncFileHandler",
     "AsyncLoggingHandler",
+    "AsyncRotatingFileHandler",
+    "AsyncTimedRotatingFileHandler",
+    "AsyncWatchedFileHandler",
     "ConsoleBackend",
+    "FileBackend",
+    "JsonFormatter",
     "LoggingConfig",
     "MqttConfig",
     "RedisConfig",
