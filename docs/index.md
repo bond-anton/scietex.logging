@@ -5,6 +5,7 @@
 ## Features
 
 - **Asynchronous Logging**: Log messages are queued and handled asynchronously, reducing impact on application performance.
+- **Loop-Independent `emit`**: `emit()` is thread-safe and may be called from any thread — including one with no running asyncio loop — so you can log from worker threads, thread pools, and callbacks without dropping records.
 - **Multiple Backends**: Supports console, file, Redis, Valkey, and MQTT logging out of the box.
 - **Flexible Logging Levels**: Compatible with Python's standard logging levels (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).
 - **Optional Dependencies**: Only installs dependencies for the specific backends you need.
