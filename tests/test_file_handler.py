@@ -1,5 +1,6 @@
 """Tests for AsyncFileHandler and its rotation variants."""
 
+import asyncio
 import io
 import logging
 import os
@@ -195,3 +196,118 @@ async def test_watched_file_handler_writes(tmp_path):
     await handler.stop_logging()
 
     assert "watched message" in path.read_text()
+
+
+@pytest.mark.asyncio
+async def test_file_handler_writes_off_the_event_loop_thread():
+    """An injected file-like receives writes off the loop thread and is never closed."""
+    import threading
+
+    loop_thread = threading.current_thread().name
+
+    class RecordingStream(io.StringIO):
+        def __init__(self):
+            super().__init__()
+            self.threads = []
+
+        def write(self, text):
+            self.threads.append(threading.current_thread().name)
+            return super().write(text)
+
+    stream = RecordingStream()
+    handler = AsyncFileHandler(
+        service_name="TestService",
+        worker_id=1,
+        file=stream,
+        stdout_enable=False,
+    )
+    await handler.start_logging()
+
+    logger = logging.getLogger("OffLoopFileLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("off loop")
+    await handler.stop_logging()
+
+    # The injected file-like survives stop (never closed by the handler), so we
+    # can inspect the thread each write ran on.
+    assert "off loop" in stream.getvalue()
+    assert stream.threads and all(t != loop_thread for t in stream.threads)
+    assert not stream.closed  # the caller owns the injected file-like
+
+
+@pytest.mark.asyncio
+async def test_cancelled_worker_closes_stream_after_inflight_write(tmp_path):
+    """A worker cancelled mid-write closes the stream only after the write finishes."""
+    import threading
+    import time
+
+    path = tmp_path / "app.log"
+    handler = AsyncFileHandler(str(path), service_name="TestService", worker_id=1)
+    await handler.start_logging()
+
+    # Make the stream's write block so we can cancel the worker mid-write.
+    original_open = handler._open_stream
+    state = {"write_started": threading.Event(), "write_finished": threading.Event()}
+
+    class SlowStream:
+        def __init__(self, inner):
+            self.inner = inner
+            self.closed = False
+
+        def write(self, text):
+            state["write_started"].set()
+            time.sleep(0.5)  # simulate a slow disk write
+            self.inner.write(text)
+            state["write_finished"].set()
+            return len(text)
+
+        def flush(self):
+            self.inner.flush()
+
+        def close(self):
+            self.closed = True
+            self.inner.close()
+
+    def slow_open():
+        return SlowStream(original_open())
+
+    handler._open_stream = slow_open
+    logger = logging.getLogger("CancelFileLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("cancel me")
+
+    # Yield to the event loop until the write is in flight on the executor
+    # thread. A blocking Event.wait() here would stall the loop and deadlock
+    # the worker, which must run to pick up the record.
+    while not state["write_started"].is_set():
+        await asyncio.sleep(0.01)
+
+    # stop_logging with a tiny timeout: the drain times out and the worker is
+    # cancelled mid-write. Its finally must close the stream only after the
+    # in-flight write completes (no write-after-close).
+    await handler.stop_logging(timeout=0.05)
+
+    assert state["write_finished"].is_set(), "in-flight write was lost"
+    assert "cancel me" in path.read_text()
+    assert handler._stream is None  # closed cleanly
+
+
+@pytest.mark.asyncio
+async def test_file_handler_restartable_with_executor(tmp_path):
+    """A file handler survives multiple start/stop cycles with fresh executors."""
+    path = tmp_path / "app.log"
+    handler = AsyncFileHandler(str(path), service_name="TestService", worker_id=1)
+
+    for i in range(3):
+        await handler.start_logging()
+        logger = logging.getLogger(f"RestartFileLogger{i}")
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(handler)
+        logger.info("cycle %d", i)
+        await handler.stop_logging()
+
+    content = path.read_text()
+    for i in range(3):
+        assert f"cycle {i}" in content

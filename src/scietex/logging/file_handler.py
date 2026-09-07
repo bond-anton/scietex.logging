@@ -17,6 +17,7 @@ from logging.handlers import (
 )
 from typing import Any
 
+from ._executor import _WriteExecutor
 from .async_logging_handler import BackendDrainResult, DrainStatus
 from .basic_handler import AsyncBaseHandler
 from .file_backend import FileBackend
@@ -175,17 +176,36 @@ class AsyncFileHandler(AsyncBaseHandler):
             finally:
                 self._stream = None
 
+    def _write_record(self, text: str) -> None:
+        """Write ``text`` to the current stream and flush (runs on the executor thread).
+
+        The stream is opened lazily here (on the executor thread) so all stream
+        access stays on the single executor thread.
+        """
+        stream = self._open_stream()
+        stream.write(text)
+        stream.flush()
+
     async def _worker(self) -> None:
         """
         Asynchronous worker that drains the file queue and writes to the file.
 
         Opens the file lazily on first use (respecting ``delay``), then loops
-        draining the queue and writing formatted records. The file is closed in
-        a ``finally`` so it is released on both normal exit and cancellation.
+        draining the queue and writing formatted records. Each record is
+        formatted on the event-loop thread (the shared record must not be
+        mutated off-loop) and the blocking write+flush is offloaded to a
+        single-thread executor so a slow filesystem never stalls the loop.
+
+        The file is closed in a ``finally`` on the *same* executor thread,
+        serialized strictly after any in-flight write, so a worker cancelled
+        mid-write never closes the stream under a live write (no write-after-
+        close). The executor is a worker-local shut down in the finally, so each
+        start/stop cycle gets a fresh executor and the handler stays restartable.
 
         Returns:
             None
         """
+        executor = _WriteExecutor()
         try:
             while self.logging_running_event.is_set() or not self.log_queues["file"].empty():
                 try:
@@ -193,9 +213,8 @@ class AsyncFileHandler(AsyncBaseHandler):
                 except asyncio.TimeoutError:
                     continue
                 try:
-                    stream = self._open_stream()
-                    stream.write(self.formatter.format(record) + "\n")
-                    stream.flush()
+                    text = self.formatter.format(record) + "\n"
+                    await executor.run(lambda: self._write_record(text))
                 except Exception as exc:
                     # A broken file or a buggy formatter must not silently kill
                     # the file worker. Report the failure and keep draining so
@@ -205,7 +224,11 @@ class AsyncFileHandler(AsyncBaseHandler):
                     self.log_queues["file"].task_done()
         finally:
             # Release the file whether the worker exits normally or is cancelled.
-            self._close_stream()
+            # Submit _close_stream to the SAME single-thread executor so it is
+            # serialized strictly after any in-flight write (no write-after-close),
+            # then wait for the executor to finish and release its thread.
+            await executor.run(self._close_stream)
+            await executor.shutdown()
 
     async def drain(self, timeout: float) -> BackendDrainResult:
         """
