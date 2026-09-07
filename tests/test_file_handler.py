@@ -159,6 +159,168 @@ async def test_rotating_file_handler_rolls_over(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_rotating_handler_rolls_over_off_the_loop_thread(tmp_path):
+    """AsyncRotatingFileHandler rolls over with writes happening off the loop thread."""
+    import threading
+
+    path = tmp_path / "rot.log"
+    handler = AsyncRotatingFileHandler(
+        str(path),
+        service_name="TestService",
+        worker_id=1,
+        maxBytes=100,
+        backupCount=2,
+        stdout_enable=False,
+    )
+    loop_thread = threading.current_thread().name
+    write_threads: list[str] = []
+
+    original_open = handler._open_stream
+
+    def recording_open():
+        inner = original_open()
+
+        class RecordingStream:
+            def write(self, text):
+                write_threads.append(threading.current_thread().name)
+                return inner.write(text)
+
+            def flush(self):
+                inner.flush()
+
+            def seek(self, offset, whence=0):
+                return inner.seek(offset, whence)
+
+            def tell(self):
+                return inner.tell()
+
+            def close(self):
+                inner.close()
+
+        return RecordingStream()
+
+    handler._open_stream = recording_open
+    await handler.start_logging()
+
+    logger = logging.getLogger("RotatingOffLoopLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    for i in range(50):
+        logger.info("line %d with enough padding to exceed the byte cap", i)
+    await handler.stop_logging()
+
+    backups = [p for p in os.listdir(tmp_path) if p.startswith("rot.log.")]
+    assert len(backups) >= 1
+    # The writes ran on a worker thread, not the loop thread (recorded into the
+    # external list, which survives the stream being closed on stop).
+    assert write_threads and all(t != loop_thread for t in write_threads)
+
+
+@pytest.mark.asyncio
+async def test_rotating_handler_backups_and_order(tmp_path):
+    """Rollover produces .1/.2 backups and preserves record ordering across files."""
+    import re
+
+    path = tmp_path / "rot.log"
+    handler = AsyncRotatingFileHandler(
+        str(path),
+        service_name="TestService",
+        worker_id=1,
+        maxBytes=512,
+        backupCount=2,
+        stdout_enable=False,
+    )
+    await handler.start_logging()
+
+    logger = logging.getLogger("RotOrderLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    n = 30
+    for i in range(n):
+        logger.info("seq %03d %s", i, "p" * 80)
+    await handler.stop_logging()
+
+    def seqs(file):
+        return [int(m) for m in re.findall(r"seq (\d+)", file.read_text())]
+
+    # Rollover keeps the two most recent backups; the oldest are deleted. Collect
+    # the surviving sequence oldest-first (.2 -> .1 -> main).
+    ordered = []
+    for name in (2, 1):
+        backup = tmp_path / f"rot.log.{name}"
+        if backup.exists():
+            ordered.extend(seqs(backup))
+    ordered.extend(seqs(path))
+
+    assert (tmp_path / "rot.log.1").exists()
+    assert (tmp_path / "rot.log.2").exists()
+    # No reordering across files, and the newest record lands in the main file.
+    assert ordered == sorted(ordered)
+    assert ordered[-1] == n - 1
+
+
+@pytest.mark.asyncio
+async def test_rotating_handler_cancelled_no_write_after_close(tmp_path):
+    """A rotating worker cancelled mid-write closes the stream only after the write."""
+    import threading
+    import time
+
+    path = tmp_path / "rot.log"
+    handler = AsyncRotatingFileHandler(
+        str(path),
+        service_name="TestService",
+        worker_id=1,
+        maxBytes=0,
+        backupCount=0,
+        stdout_enable=False,
+    )
+    await handler.start_logging()
+
+    original_open = handler._open_stream
+    state = {"write_started": threading.Event(), "write_finished": threading.Event()}
+
+    class SlowStream:
+        def __init__(self, inner):
+            self.inner = inner
+            self.closed = False
+
+        def write(self, text):
+            state["write_started"].set()
+            time.sleep(0.5)  # simulate a slow disk write
+            self.inner.write(text)
+            state["write_finished"].set()
+            return len(text)
+
+        def flush(self):
+            self.inner.flush()
+
+        def close(self):
+            self.closed = True
+            self.inner.close()
+
+    def slow_open():
+        return SlowStream(original_open())
+
+    handler._open_stream = slow_open
+    logger = logging.getLogger("RotCancelLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("cancel me")
+
+    # Yield to the loop until the write is in flight on the executor thread.
+    while not state["write_started"].is_set():
+        await asyncio.sleep(0.01)
+
+    # stop_logging with a tiny timeout cancels the worker mid-write; its finally
+    # must close the stream only after the in-flight write completes.
+    await handler.stop_logging(timeout=0.05)
+
+    assert state["write_finished"].is_set(), "in-flight write was lost"
+    assert "cancel me" in path.read_text()
+    assert handler._stream is None  # closed cleanly
+
+
+@pytest.mark.asyncio
 async def test_timed_rotating_file_handler_writes(tmp_path):
     """AsyncTimedRotatingFileHandler writes records (rollover is time-driven)."""
     path = tmp_path / "timed.log"
