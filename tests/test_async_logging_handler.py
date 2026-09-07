@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import threading
 import time
 
 import pytest
@@ -33,6 +34,102 @@ async def _wait_for(predicate, timeout: float = 5.0) -> None:
 
 class BareHandler(AsyncLoggingHandler):
     """Handler that registers no backend, proving the base owns no sink."""
+
+
+class DeliveringHandler(AsyncLoggingHandler):
+    """BareHandler subclass that registers one real backend with a draining worker."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.delivered: list[str] = []
+        self.queue: asyncio.Queue[logging.LogRecord] = asyncio.Queue(maxsize=100)
+        self.register_backend("deliver", self.queue, self._worker, self._drain)
+
+    async def _worker(self) -> None:
+        while self.logging_running_event.is_set() or not self.queue.empty():
+            try:
+                record = await asyncio.wait_for(self.queue.get(), 1)
+            except asyncio.TimeoutError:
+                continue
+            self.delivered.append(record.getMessage())
+            self.queue.task_done()
+
+    async def _drain(self, timeout: float) -> BackendDrainResult:
+        try:
+            await asyncio.wait_for(self.queue.join(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return BackendDrainResult("deliver", DrainStatus.TIMEOUT)
+        return BackendDrainResult("deliver", DrainStatus.COMPLETED)
+
+
+@pytest.mark.asyncio
+async def test_emit_from_worker_thread_delivers():
+    """Off-loop emit (from a threading.Thread) delivers the record to the backend."""
+    handler = DeliveringHandler(service_name="TestService", worker_id=1)
+    await handler.start_logging()
+
+    thread = threading.Thread(target=lambda: handler.emit(_make_record("from-thread")))
+    thread.start()
+    thread.join()
+
+    await _wait_for(lambda: len(handler.delivered) == 1)
+    assert handler.delivered == ["from-thread"]
+    await handler.stop_logging(timeout=0.5)
+
+
+@pytest.mark.asyncio
+async def test_emit_from_no_loop_thread_delivers():
+    """emit from a thread with no running asyncio loop delivers (no RuntimeError)."""
+    handler = DeliveringHandler(service_name="TestService", worker_id=1)
+    await handler.start_logging()
+
+    # A plain threading.Thread has no running loop; emit must still deliver.
+    thread = threading.Thread(target=lambda: handler.emit(_make_record("no-loop")))
+    thread.start()
+    thread.join()
+
+    await _wait_for(lambda: len(handler.delivered) == 1)
+    assert handler.delivered == ["no-loop"]
+    await handler.stop_logging(timeout=0.5)
+
+
+@pytest.mark.asyncio
+async def test_emit_ordering_preserved_across_threads():
+    """Records emitted from multiple threads arrive at the backend in FIFO order."""
+    handler = DeliveringHandler(service_name="TestService", worker_id=1)
+    await handler.start_logging()
+
+    # Emit N records from N threads, then one from the loop thread. The bridge
+    # drains the ingress FIFO, so the per-backend order matches emit order.
+    n = 20
+    threads = [
+        threading.Thread(target=lambda i=i: handler.emit(_make_record(f"t{i}"))) for i in range(n)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    handler.emit(_make_record("loop-last"))
+
+    await _wait_for(lambda: len(handler.delivered) == n + 1)
+    assert handler.delivered == [f"t{i}" for i in range(n)] + ["loop-last"]
+    await handler.stop_logging(timeout=0.5)
+
+
+@pytest.mark.asyncio
+async def test_restartable_with_bridge():
+    """Two full start/stop cycles deliver both cycles' records via fresh bridges."""
+    handler = DeliveringHandler(service_name="TestService", worker_id=1)
+
+    for i in range(2):
+        await handler.start_logging()
+        handler.emit(_make_record(f"cycle-{i}"))
+        await _wait_for(lambda: len(handler.delivered) == i + 1)
+        await handler.stop_logging(timeout=0.5)
+
+    assert handler.delivered == ["cycle-0", "cycle-1"]
+    assert handler._ingress is None  # released on stop
+    assert handler._bridge_task is None  # released on stop
 
 
 def test_pure_handler_owns_no_backend():
