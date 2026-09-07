@@ -346,8 +346,8 @@ class AsyncLoggingHandler(logging.Handler):
         thread, including a thread with no running asyncio loop: the record is
         written to a thread-safe stdlib ``queue.Queue`` ingress and a bridge
         task on the event-loop thread re-dispatches it into the per-backend
-        ``asyncio.Queue``s. If the logging accept event is not set, the record
-        is dropped silently (never raises).
+        ``asyncio.Queue`` queues. If the logging accept event is not set, the
+        record is dropped silently (never raises).
 
         Args:
             record (logging.LogRecord): The log record to be processed.
