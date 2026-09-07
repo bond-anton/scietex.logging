@@ -5,6 +5,26 @@ All notable changes to `scietex.logging` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-09-07
+
+### Changed
+
+- **Loop-independent (thread-safe) `emit`**: `emit()` can now be called from any
+  thread, including a thread with no running event loop. Previously, an off-loop
+  `emit` dropped the record and reported it through the error channel; now it
+  delivers. This is a behavior change, not an API break: `emit(self, record)`
+  keeps its stdlib signature and no constructor, `__all__` surface, or
+  `start_logging()`/`stop_logging()` contract changes.
+- **Implementation**: a shared bounded thread-safe ingress queue
+  (stdlib `queue.Queue`) plus a bridge asyncio task that re-dispatches records
+  into the per-backend queues. Formatting still happens on the event-loop thread
+  in each worker; the bridge only moves records.
+- **Overflow nuance**: when the ingress is full, `emit` reports `queue.Full`
+  (previously `asyncio.QueueFull` at the backend queue). Per-backend overflow
+  still reports `asyncio.QueueFull`.
+- **Resource note**: worst-case buffering is now `(1 + N) × queue_maxsize` (the
+  shared ingress plus the N backend queues).
+
 ## [1.6.0] - 2026-09-07
 
 ### Changed
