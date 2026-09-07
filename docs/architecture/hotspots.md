@@ -141,9 +141,13 @@ silently kill the always-on console worker (AR-021/AR-030).
 (`AsyncBaseHandler`) and an auxiliary output attached to broker handlers. This
 dual role is now explicit: console is a peer backend registered the same way a
 broker backend is, rather than a privileged sink baked into the base machinery.
-It is also symmetric with broker backends in its error handling.
+It is also symmetric with broker backends in its error handling. The file sink
+(`FileBackend`, registered by `AsyncFileHandler`) is a **symmetric peer** to
+console — same queue + worker + drain + `report_status` shape, writing to a
+file handle instead of `sys.stdout` — so the peer-backend pattern now has two
+local-sink instances plus the broker backends.
 
-**Related.** `overview.md`, `data-flow.md` Flow 3.
+**Related.** `overview.md`, `data-flow.md` Flow 3, `file_backend.py`.
 
 ---
 
@@ -167,9 +171,13 @@ argument shape its client expects. No uniform client wrapper was added. All
 concrete `send_message` implementations raise `RuntimeError` when `self.client
 is None` (`redis_handler.py:129-130`, `valkey_handler.py:136-137`,
 `mqtt_handler.py`) rather than silently no-oping, so an unconnected send
-surfaces as a failure (AR-034).
+surfaces as a failure (AR-034). The file handlers (`AsyncFileHandler` and its
+rotation variants) are **not** broker backends — they subclass `AsyncBaseHandler`
+directly and register a `FileBackend`, so they do not participate in this
+`connect`/`disconnect`/`send_message` contract at all.
 
-**Related.** `components.md`; `docs/advanced.md` (custom backend examples).
+**Related.** `components.md`; `docs/advanced.md` (custom backend examples);
+`file_handler.py`.
 
 ---
 
@@ -289,3 +297,26 @@ None` on both normal exit and cancellation, so a cancelled worker never leaks
 the client.
 
 **Related.** `lifecycle.md`; `redis_handler.py`, `valkey_handler.py`.
+
+---
+
+## 13. Synchronous blocking file I/O in the worker
+
+**Location.** `file_backend.py` (`FileBackend._worker`) and `file_handler.py`
+(`AsyncFileHandler._worker`).
+
+**What it appears to do.** The file worker writes each formatted record to the
+file handle with a **synchronous** `write()` + `flush()` call, mirroring the
+console worker's synchronous `sys.stdout.write`. No `asyncio.to_thread` or
+async file library is used.
+
+**Why significant.** For a local file this is fast and consistent with the
+console sink, but a slow filesystem (NFS, network-mounted volume, or a
+high-latency disk) would block the event loop for the duration of each write,
+stalling every other coroutine on the loop. This is a deliberate, documented
+trade-off (see `docs/ROADMAP.md` "2.0 — Async redesign of Console and File
+backends"), flagged for a future async redesign that would offload the write
+(e.g. `asyncio.to_thread`) without adding a dependency.
+
+**Related.** `docs/ROADMAP.md`; `console_backend.py` (same synchronous-write
+pattern); `file_backend.py`, `file_handler.py`.

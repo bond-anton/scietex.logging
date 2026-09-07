@@ -18,12 +18,14 @@ sub-packages. Architecturally it decomposes into four cooperating layers:
    Conditionally imports the Redis/Valkey handlers so the base package works
    without optional dependencies.
 
-2. **Formatter layer** — `src/scietex/logging/formatter.py`
+2. **Formatter layer** — `src/scietex/logging/formatter.py` and
+   `src/scietex/logging/json_formatter.py`
    `ScietexFormatter` (a `logging.Formatter`). Enriches records with a
    `worker_name` (`service_name:worker_id`) and 3-letter level abbreviations;
    emits ISO-8601 UTC timestamps. The `level_abbreviation` helper it uses now
    lives in `config.py` (the neutral leaf) and is re-exported here for backward
-   compatibility (AR-026).
+   compatibility (AR-026). `JsonFormatter` (a `logging.Formatter`) renders each
+   record as a single-line JSON object (NDJSON). Both are stdlib-only.
 
 3. **Machinery base layer** — `src/scietex/logging/async_logging_handler.py`
    `AsyncLoggingHandler` (a `logging.Handler`). Pure shared machinery with **no
@@ -38,7 +40,13 @@ sub-packages. Architecturally it decomposes into four cooperating layers:
    synthetic "… has completed processing its queue." records live in its
    `report_status` method, invoked as a post-drain status reporter).
 
-5. **Concrete handler layer** — `src/scietex/logging/basic_handler.py`
+5. **File backend** — `src/scietex/logging/file_backend.py`
+   `FileBackend`. The file sink as a **peer backend**, cloned from
+   `ConsoleBackend`: it owns its queue, its worker coroutine, and its
+   shutdown-status reporting, writing to whatever `stream_provider()` returns
+   instead of `sys.stdout`.
+
+6. **Concrete handler layer** — `src/scietex/logging/basic_handler.py`
    `AsyncBaseHandler` (extends `AsyncLoggingHandler`). A thin concrete subclass
    that registers the console backend as a peer when `stdout_enable=True`.
    Public constructor signatures are unchanged, but `**kwargs` is gone: each
@@ -46,13 +54,21 @@ sub-packages. Architecturally it decomposes into four cooperating layers:
    `config.py`) from its explicit keyword args, and unknown/typo'd kwargs now
    raise `TypeError` instead of being silently swallowed.
 
-6. **Broker handler layer** — `src/scietex/logging/message_broker_handler.py`
+7. **File handler layer** — `src/scietex/logging/file_handler.py`
+   `AsyncFileHandler` (extends `AsyncBaseHandler`). Registers the `"file"`
+   backend as a peer, mirroring how `AsyncBaseHandler` registers the console
+   backend. The rotation variants `AsyncRotatingFileHandler`,
+   `AsyncTimedRotatingFileHandler`, and `AsyncWatchedFileHandler` subclass it
+   and reuse the stdlib rollover logic, driven from the worker (the sole
+   writer).
+
+8. **Broker handler layer** — `src/scietex/logging/message_broker_handler.py`
    `AsyncBrokerHandler` (extends `AsyncBaseHandler`, `abc.ABC`). Registers a
    generic "message broker" backend via `register_backend`: a named queue, a
    client connection slot, and an abstract `connect` / `disconnect` /
    `send_message` contract that concrete backends implement.
 
-7. **Concrete broker backends**
+9. **Concrete broker backends**
    - `src/scietex/logging/redis_handler.py` — `AsyncRedisHandler` writes to a
      Redis stream via `redis.asyncio`.
    - `src/scietex/logging/valkey_handler.py` — `AsyncValkeyHandler` writes to
@@ -77,6 +93,7 @@ per-backend asyncio.Queue              [async boundary]
    ▼
 per-backend worker coroutine           [consumer, async]
    ├─ ConsoleBackend worker → ScietexFormatter.format → sys.stdout
+   ├─ FileBackend worker → formatter.format → file handle (plain or JSON)
    └─ broker worker  → build dict → send_message → Redis/Valkey stream / MQTT topic
 ```
 
@@ -110,7 +127,7 @@ module docstring in `__init__.py`) is:
 
 The `examples/` directory contains runnable scripts demonstrating this
 (`basic_console_logging.py`, `redis_logging.py`, `valkey_logging.py`,
-`mqtt_logging.py`, `console_and_redis_logging.py`).
+`mqtt_logging.py`, `file_logging.py`, `console_and_redis_logging.py`).
 
 ## Important runtime processes
 

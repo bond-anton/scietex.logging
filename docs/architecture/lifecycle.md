@@ -34,6 +34,18 @@ raises `ValueError`.
 `backend_config`, not a stored raw dict. No connection is opened at
 construction.
 
+**`AsyncFileHandler.__init__`** (`file_handler.py`): calls super, then registers
+the `"file"` backend (queue + worker factory + drain hook) via
+`register_backend`, mirroring how `AsyncBaseHandler` registers the console
+backend. The file handle is **not** opened at construction — it is opened
+lazily by the worker on first write and closed in the worker's `finally`
+(mirroring the broker worker's client teardown). When an external `file`-like
+object is injected it is stored durably and the handler never closes it
+(`_owns_file`/`_injected_file`, mirroring the broker `client` seam). The
+rotation variants (`AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`,
+`AsyncWatchedFileHandler`) reuse stdlib rollover logic driven from the worker,
+the sole writer.
+
 **State after construction.** Events unset; queues empty; worker factories
 registered (not yet invoked); no client connection. The handler is inert until
 `start_logging()`.
@@ -66,6 +78,10 @@ semantics below).
   queue.empty()`, doing `await asyncio.wait_for(queue.get(), 1)`. A 1-second
   timeout on `get()` lets the loop re-check the running event even when idle.
 - **Console worker** (`ConsoleBackend._worker`) formats and writes to stdout.
+- **File worker** (`AsyncFileHandler._worker`) lazily opens the file handle on
+  first write, formats each record (plain via `ScietexFormatter` or JSON via
+  `JsonFormatter`), and writes synchronously; rotation variants check rollover
+  per record.
 - **Broker worker** builds a dict and calls `send_message` (network I/O).
 - **Connection stays open** for the worker's lifetime (opened in `connect` at
   worker start, closed in `disconnect` at worker exit).
@@ -135,11 +151,14 @@ moved across loops. To log on a different loop, construct a fresh handler.
 | `asyncio.Queue`s | backend `__init__` (console/broker) | handler instance | drained in `stop_logging`; not explicitly closed |
 | worker factories | backend `__init__` | handler instance | invoked in `start_logging`; tasks gathered in `stop_logging` |
 | client connection (`client`) | `connect()` (worker start) | handler instance | `disconnect()` (worker exit) |
+| file handle (`_stream`) | worker first write (lazy open) | handler instance | worker `finally` (close + flush) |
 | formatter | `__init__` | handler instance | — |
 
 The `client connection` row above holds only for a **self-managed** client (one
 built by the handler's own `connect()`). An **injected** client is owned by the
-caller, not the handler, and is never closed by `disconnect()`.
+caller, not the handler, and is never closed by `disconnect()`. Likewise, an
+**injected** `file`-like object is owned by the caller and never closed by the
+file worker.
 
 **Ownership model.** All async resources are instance-scoped and owned by the
 handler. There is no global state and no shared resource across handler

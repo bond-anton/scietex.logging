@@ -13,16 +13,20 @@ the version. Guards optional backend imports so the base package loads without
 extras.
 
 **Public interface.** `__all__ = ["AsyncBaseHandler", "AsyncBrokerHandler",
-"AsyncLoggingHandler", "ConsoleBackend", "LoggingConfig", "MqttConfig",
-"RedisConfig", "ScietexFormatter", "ValkeyConfig"]`, extended with
-`"AsyncRedisHandler"`, `"AsyncValkeyHandler"`, and `"AsyncMqttHandler"` when
-their modules import successfully. `__version__`. The config types
-(`LoggingConfig`, `RedisConfig`, `ValkeyConfig`, `MqttConfig`) are exported
-alongside the handler classes and `ConsoleBackend` (AR-035).
+"AsyncFileHandler", "AsyncLoggingHandler", "AsyncRotatingFileHandler",
+"AsyncTimedRotatingFileHandler", "AsyncWatchedFileHandler", "ConsoleBackend",
+"FileBackend", "JsonFormatter", "LoggingConfig", "MqttConfig", "RedisConfig",
+"ScietexFormatter", "ValkeyConfig"]`, extended with `"AsyncRedisHandler"`,
+`"AsyncValkeyHandler"`, and `"AsyncMqttHandler"` when their modules import
+successfully. `__version__`. The config types (`LoggingConfig`, `RedisConfig`,
+`ValkeyConfig`, `MqttConfig`) are exported alongside the handler classes and
+`ConsoleBackend` / `FileBackend` (AR-035). The file handlers and `JsonFormatter`
+are stdlib-only, so they are exported **unconditionally** (no guarded import).
 
 **Depends on.** `async_logging_handler`, `basic_handler`, `console_backend`,
-`formatter`, `message_broker_handler`, `redis_handler` (guarded),
-`valkey_handler` (guarded), `mqtt_handler` (guarded).
+`file_backend`, `file_handler`, `formatter`, `json_formatter`,
+`message_broker_handler`, `redis_handler` (guarded), `valkey_handler` (guarded),
+`mqtt_handler` (guarded).
 
 **Depended on by.** Host applications (`from scietex.logging import ...`);
 tests import both from the package root and from submodules.
@@ -55,6 +59,37 @@ identity and abbreviated levels, and formats timestamps as ISO-8601 UTC.
 
 **Depended on by.** `AsyncLoggingHandler` (constructs one in `__init__`);
 `AsyncBrokerHandler._worker` (via `level_abbreviation` from `config`); tests.
+
+---
+
+## 2a. JSON formatter — `json_formatter.py`
+
+**Purpose.** A `logging.Formatter` subclass that renders each record as a
+single-line JSON object (NDJSON), suitable for file sinks and log aggregators.
+
+**Class.** `JsonFormatter(logging.Formatter)` — `json_formatter.py:19`
+
+**Public interface.**
+- `JsonFormatter()` — no constructor options; inherits the stdlib
+  `logging.Formatter` surface.
+- `format(record) -> str` — `json_formatter.py:36`. Copies the record
+  (`copy.copy`) so the caller's shared `LogRecord` is never mutated (shared-
+  record fan-out discipline, mirroring `ScietexFormatter.format`), then emits a
+  single-line JSON object with keys `timestamp` (ISO-8601 UTC), `level` (full
+  level name), `logger` (record name), `message` (the rendered message), an
+  `exception` key (traceback as a single string) present only when the record
+  carries `exc_info`, plus any user-added `extra` fields flattened as top-level
+  keys. Stdlib `LogRecord` default attributes are excluded via the module-level
+  `_STDLIB_ATTRS` set (`json_formatter.py:16`, captured once from a bare
+  `logging.LogRecord`), so `msg`, `args`, `levelno`, `pathname`, `thread`, etc.
+  never leak into the line. Non-serializable extra values degrade to their
+  `repr` via `json.dumps(default=repr)` rather than raising in the worker.
+
+**Depends on.** stdlib `logging`, `json`, `copy`, `datetime`. No intra-package
+imports.
+
+**Depended on by.** `__init__.py` (re-export); host apps passing it as a
+`formatter=` to any handler (notably `AsyncFileHandler`); tests.
 
 ---
 
@@ -145,13 +180,18 @@ read-only `@property` aliases over it. `backend_config` is typed
 `RedisConfig | ValkeyConfig | MqttConfig | None`. `RedisConfig` mirrors the full
 plain-option surface of `redis.Redis` (host/port/db plus username/password/
 socket/ssl/encoding/retry/health-check/client-name/protocol fields), so
-`RedisConfig(**raw)` never rejects a legitimate client option.
+`RedisConfig(**raw)` never rejects a legitimate client option. The file sinks
+have **no** `backend_config` seam: their options (`filename`, `mode`,
+`encoding`, `delay`, `errors`) are passed directly as constructor keyword args
+matching the stdlib `FileHandler` signature, so no `FileConfig` dataclass
+exists.
 
 **Depends on.** `formatter.ScietexFormatter`; `config` (`LoggingConfig`,
 `validate_queue_maxsize`); stdlib `asyncio`, `logging`.
 
 **Depended on by.** `AsyncBaseHandler` (extends); `ConsoleBackend` (its drain
-hook is registered here); `AsyncBrokerHandler` (via `AsyncBaseHandler`).
+hook is registered here); `FileBackend` (its drain hook is registered here);
+`AsyncBrokerHandler` (via `AsyncBaseHandler`).
 
 ---
 
@@ -193,6 +233,50 @@ its worker coroutine, and its shutdown-status reporting.
 
 ---
 
+## 4a. File backend — `file_backend.py`
+
+**Purpose.** The file sink as a **peer backend**, cloned from `ConsoleBackend`.
+Owns its queue, its worker coroutine, and its shutdown-status reporting. The
+only structural difference from the console is the write target: instead of
+`sys.stdout`, it writes to whatever `stream_provider()` returns.
+
+**Class.** `FileBackend` — `file_backend.py:49`
+
+**Public interface.**
+- `FileBackend(formatter_provider, running_event, stream_provider, maxsize=10000, error_handler=None)` — `file_backend.py:49`.
+  Creates its own bounded `asyncio.Queue(maxsize=maxsize)`; holds the shared
+  `logging_running_event`. `formatter_provider` is a zero-arg callable returning
+  the handler's current formatter, read at work time so the file backend never
+  holds a stale copy (AR-030). `stream_provider` is a zero-arg callable
+  returning the current writable file object, read at work time so the handler's
+  lazily-opened handle is always current. `error_handler` is an optional
+  callback invoked with `(record, exc)` when a record cannot be written
+  (AR-021).
+- `async _worker()` — `file_backend.py:121`. Loops while the running event is
+  set or the queue is non-empty, formatting records and writing them to the
+  stream returned by `stream_provider()`. Format/write failures are routed
+  through `_report_error` (the configured `error_handler` or the module logger),
+  with `task_done()` in a `finally`.
+- `worker` (read-only `@property`) — `file_backend.py:112`. Returns the bound
+  `_worker` coroutine method as a zero-arg worker factory, so `AsyncFileHandler`
+  and custom integrators register the backend's worker without reaching into a
+  private attribute (AR-115).
+- `async drain(timeout) -> BackendDrainResult` — `file_backend.py:158`. Waits
+  for its own queue to drain and returns a `BackendDrainResult` describing how
+  the drain concluded.
+- `async report_status(results)` — `file_backend.py:181`. Enqueues a synthetic
+  status `LogRecord` for each backend's drain outcome. Registered by
+  `AsyncFileHandler` as a status reporter, so it is invoked by `stop_logging`
+  after every backend has drained.
+
+**Depends on.** stdlib `asyncio`, `logging`; `async_logging_handler`
+(`BackendDrainResult`, `DrainStatus`); `config` (`report_error`).
+
+**Depended on by.** `AsyncFileHandler` (registers it as a peer backend under the
+name `"file"`).
+
+---
+
 ## 5. Concrete handler — `basic_handler.py`
 
 **Purpose.** Thin concrete subclass of `AsyncLoggingHandler` that registers the
@@ -219,8 +303,67 @@ console backend as a peer. Public signature unchanged.
 **Depends on.** `async_logging_handler.AsyncLoggingHandler`;
 `console_backend.ConsoleBackend`.
 
-**Depended on by.** `AsyncBrokerHandler` (extends); host apps using console
-logging; tests.
+**Depended on by.** `AsyncBrokerHandler` (extends); `AsyncFileHandler` (extends);
+host apps using console logging; tests.
+
+---
+
+## 5a. File handler — `file_handler.py`
+
+**Purpose.** Concrete subclass of `AsyncBaseHandler` that registers the file
+backend as a peer, mirroring how `AsyncBaseHandler` registers the console
+backend. The rotation variants subclass it and reuse the stdlib rollover logic.
+
+**Classes.**
+- `AsyncFileHandler(AsyncBaseHandler)` — `file_handler.py:25`
+- `AsyncRotatingFileHandler(AsyncFileHandler)` — `file_handler.py:230`
+- `AsyncTimedRotatingFileHandler(AsyncFileHandler)` — `file_handler.py:342`
+- `AsyncWatchedFileHandler(AsyncFileHandler)` — `file_handler.py:459`
+
+**Public interface.**
+- `AsyncFileHandler(filename, service_name=None, worker_id=None, *, mode='a', encoding=None, delay=False, errors=None, file=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)` — `file_handler.py:55`.
+  Mirrors the stdlib `logging.FileHandler` signature plus the scietex options.
+  When `file` is None, constructs a `FileBackend` (with
+  `formatter_provider=lambda: self.formatter`, `stream_provider=lambda:
+  self._stream`, `maxsize=queue_maxsize`, and `error_handler=self._report_error`)
+  and registers it under the name `"file"` via `register_backend` (registering
+  `backend.worker` as the worker factory, AR-115), and registers the file
+  backend's `report_status` as a status reporter via
+  `register_status_reporter`. `file=` and `filename` are mutually exclusive
+  (passing both raises `ValueError`). Inherits the console sink by default
+  (`stdout_enable=True`); pass `stdout_enable=False` for a file-only handler.
+- `_open_stream()` — `file_handler.py:140`. Opens the file lazily (respecting
+  `delay`); when a file-like was injected (`_owns_file` False) it restores the
+  durable injected reference and never opens its own file.
+- `_close_stream()` — `file_handler.py:163`. Closes the handle the handler
+  opened; a no-op for an injected file-like (the caller owns its lifetime).
+- `async _worker()` — `file_handler.py:178`. Opens the file lazily on first use,
+  loops draining the `"file"` queue and writing formatted records, and closes the
+  file in a `finally` so it is released on both normal exit and cancellation.
+- `async drain(timeout) -> BackendDrainResult` — `file_handler.py:210`. Waits
+  for the `"file"` queue to drain and returns a `BackendDrainResult`.
+- Rotation variants add stdlib rollover driven from the worker (the sole
+  writer), never from `emit()`: `AsyncRotatingFileHandler` rolls over when the
+  file exceeds `maxBytes` (`_worker` at `file_handler.py:307`);
+  `AsyncTimedRotatingFileHandler` rolls over on a `when`/`interval` schedule
+  (`_worker` at `file_handler.py:424`); `AsyncWatchedFileHandler` reopens the
+  file if it was rotated or deleted externally (`_worker` at
+  `file_handler.py:523`). Each holds a stdlib handler instance
+  (`RotatingFileHandler`/`TimedRotatingFileHandler`/`WatchedFileHandler`) purely
+  for its `shouldRollover`/`doRollover`/`reopenIfNeeded` logic, pointing its
+  `.stream` at the handler's live stream and adopting it back after a rollover.
+
+**Key instance state.** `filename`, `mode`, `encoding`, `delay`, `errors`,
+`_owns_file` (bool), `_injected_file` (Any | None), `_stream` (Any | None),
+`_file_backend` (FileBackend | None); rotation variants add `_rotator` /
+`_watcher`.
+
+**Depends on.** `basic_handler.AsyncBaseHandler`; `file_backend.FileBackend`;
+`async_logging_handler` (`BackendDrainResult`, `DrainStatus`); stdlib
+`logging.handlers` (rotation logic).
+
+**Depended on by.** `__init__.py` (re-export); host apps using file logging;
+tests.
 
 ---
 
@@ -262,9 +405,9 @@ connect/disconnect/send_message contract concrete backends implement.
 Because `AsyncBrokerHandler` extends `AsyncBaseHandler`, every broker backend
 **inherits the console sink by default** (`stdout_enable=True`); pass
 `stdout_enable=False` for a broker-only handler. The queue names `"console"`,
-`"redis"`, `"valkey"`, and `"mqtt"` are reserved by the built-in backends, so a
-custom `queue_name` must avoid them (a collision raises `ValueError` at
-construction, AR-028).
+`"file"`, `"redis"`, `"valkey"`, and `"mqtt"` are reserved by the built-in
+backends, so a custom `queue_name` must avoid them (a collision raises
+`ValueError` at construction, AR-028).
 
 **Log-entry dict shape** (built in `_worker`, `message_broker_handler.py:192-199`):
 `{"level": level_abbreviation(record.levelno), "message": record.getMessage(),
