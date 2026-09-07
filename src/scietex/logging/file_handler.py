@@ -476,13 +476,49 @@ class AsyncTimedRotatingFileHandler(AsyncFileHandler):
             errors=errors,
         )
 
+    def _write_record(self, text: str, record: logging.LogRecord | None = None) -> None:
+        """Roll over if the rollover time has passed, then write ``text``.
+
+        Runs as one atomic unit on the executor thread so the sole-writer
+        invariant holds (all stream mutation happens on the single executor
+        thread). ``record`` is a copy made on the event-loop thread. The stdlib
+        ``TimedRotatingFileHandler.shouldRollover`` ignores its record argument
+        (it only compares the current time against ``rolloverAt``), but the
+        optional ``record`` is still passed through to satisfy the stdlib
+        ``shouldRollover(record: LogRecord)`` type contract and to keep this
+        override signature-compatible with ``AsyncFileHandler._write_record(text)``.
+        """
+        stream = self._open_stream()
+        # Point the stdlib rotator at our live stream so its
+        # shouldRollover/doRollover operate on the real handle.
+        self._rotator.stream = stream
+        # The worker always passes a copy; the None default exists only so this
+        # override stays signature-compatible with AsyncFileHandler._write_record.
+        assert record is not None
+        if self._rotator.shouldRollover(record):
+            self._rotator.doRollover()
+            # doRollover closed the previous stream and, because the rotator is
+            # delay=True, left its stream None. Reopen for the current record so
+            # it lands in the freshly-rotated file.
+            self._stream = None
+            stream = self._open_stream()
+        stream.write(text)
+        stream.flush()
+
     async def _worker(self) -> None:
         """
         Worker that writes records and rolls the file over on a time interval.
 
+        Each record is formatted on the event-loop thread and the blocking
+        rollover+write unit is offloaded to a single-thread executor. The file
+        is closed on the same executor thread in the finally (serialized after
+        any in-flight write), and the executor is shut down so the handler stays
+        restartable.
+
         Returns:
             None
         """
+        executor = _WriteExecutor()
         try:
             while self.logging_running_event.is_set() or not self.log_queues["file"].empty():
                 try:
@@ -490,25 +526,21 @@ class AsyncTimedRotatingFileHandler(AsyncFileHandler):
                 except asyncio.TimeoutError:
                     continue
                 try:
-                    stream = self._open_stream()
-                    # Point the stdlib rotator at our live stream so its
-                    # shouldRollover/doRollover operate on the real handle.
-                    self._rotator.stream = stream
-                    if self._rotator.shouldRollover(record):
-                        self._rotator.doRollover()
-                        # doRollover closed the previous stream and, because the
-                        # rotator is delay=True, left its stream None. Reopen for
-                        # the current record so it lands in the freshly-rotated file.
-                        self._stream = None
-                        stream = self._open_stream()
-                    stream.write(self.formatter.format(record) + "\n")
-                    stream.flush()
+                    text = self.formatter.format(record) + "\n"
+                    # Copy the record on the loop thread so the stdlib rotator's
+                    # shouldRollover never touches the shared record on the
+                    # executor thread (mirrors AsyncRotatingFileHandler).
+                    record_copy = copy.copy(record)
+                    await executor.run(lambda: self._write_record(text, record_copy))
                 except Exception as exc:
                     self._report_error(record, exc)
                 finally:
                     self.log_queues["file"].task_done()
         finally:
-            self._close_stream()
+            # Close on the SAME single-thread executor (serialized strictly after
+            # any in-flight write), then wait for the executor to finish.
+            await executor.run(self._close_stream)
+            await executor.shutdown()
 
 
 class AsyncWatchedFileHandler(AsyncFileHandler):

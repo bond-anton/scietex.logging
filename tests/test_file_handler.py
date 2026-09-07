@@ -345,6 +345,156 @@ async def test_timed_rotating_file_handler_writes(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_timed_rotating_handler_writes_off_the_loop_thread(tmp_path):
+    """AsyncTimedRotatingFileHandler writes with the write off the loop thread."""
+    import threading
+
+    path = tmp_path / "timed.log"
+    handler = AsyncTimedRotatingFileHandler(
+        str(path),
+        service_name="TestService",
+        worker_id=1,
+        when="S",
+        interval=1,
+        backupCount=2,
+        stdout_enable=False,
+    )
+    loop_thread = threading.current_thread().name
+    write_threads: list[str] = []
+
+    original_open = handler._open_stream
+
+    def recording_open():
+        inner = original_open()
+
+        class RecordingStream:
+            def write(self, text):
+                write_threads.append(threading.current_thread().name)
+                return inner.write(text)
+
+            def flush(self):
+                inner.flush()
+
+            def close(self):
+                inner.close()
+
+        return RecordingStream()
+
+    handler._open_stream = recording_open
+    await handler.start_logging()
+
+    logger = logging.getLogger("TimedOffLoopLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("timed message")
+    await handler.stop_logging()
+
+    assert "timed message" in path.read_text()
+    assert write_threads and all(t != loop_thread for t in write_threads)
+
+
+@pytest.mark.asyncio
+async def test_timed_rotating_handler_rolls_over_and_orders(tmp_path):
+    """Timed rollover moves older records into a backup and keeps the newest in the main file."""
+    import time
+
+    path = tmp_path / "timed.log"
+    handler = AsyncTimedRotatingFileHandler(
+        str(path),
+        service_name="TestService",
+        worker_id=1,
+        when="S",
+        interval=1,
+        backupCount=2,
+        stdout_enable=False,
+    )
+    await handler.start_logging()
+
+    logger = logging.getLogger("TimedRollOrderLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("first message")
+
+    # Wait until the first record has reached disk before forcing a rollover.
+    for _ in range(200):
+        if path.exists() and "first message" in path.read_text():
+            break
+        await asyncio.sleep(0.01)
+
+    # Force the next write to roll over by moving rolloverAt into the past.
+    handler._rotator.rolloverAt = int(time.time()) - 1
+    logger.info("second message")
+    await handler.stop_logging()
+
+    backups = sorted(p for p in os.listdir(tmp_path) if p.startswith("timed.log."))
+    assert len(backups) == 1
+    assert "first message" in (tmp_path / backups[0]).read_text()
+    assert "second message" in path.read_text()
+
+
+@pytest.mark.asyncio
+async def test_timed_rotating_handler_cancelled_no_write_after_close(tmp_path):
+    """A timed worker cancelled mid-write closes the stream only after the write."""
+    import threading
+    import time
+
+    path = tmp_path / "timed.log"
+    handler = AsyncTimedRotatingFileHandler(
+        str(path),
+        service_name="TestService",
+        worker_id=1,
+        when="S",
+        interval=1,
+        backupCount=0,
+        stdout_enable=False,
+    )
+    await handler.start_logging()
+
+    original_open = handler._open_stream
+    state = {"write_started": threading.Event(), "write_finished": threading.Event()}
+
+    class SlowStream:
+        def __init__(self, inner):
+            self.inner = inner
+            self.closed = False
+
+        def write(self, text):
+            state["write_started"].set()
+            time.sleep(0.5)  # simulate a slow disk write
+            self.inner.write(text)
+            state["write_finished"].set()
+            return len(text)
+
+        def flush(self):
+            self.inner.flush()
+
+        def close(self):
+            self.closed = True
+            self.inner.close()
+
+    def slow_open():
+        return SlowStream(original_open())
+
+    handler._open_stream = slow_open
+    logger = logging.getLogger("TimedCancelLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("cancel me")
+
+    # Yield to the loop until the write is in flight on the executor thread.
+    while not state["write_started"].is_set():
+        await asyncio.sleep(0.01)
+
+    # stop_logging with a tiny timeout cancels the worker mid-write; its finally
+    # must close the stream only after the in-flight write completes.
+    await handler.stop_logging(timeout=0.05)
+
+    assert state["write_finished"].is_set(), "in-flight write was lost"
+    assert "cancel me" in path.read_text()
+    assert handler._stream is None  # closed cleanly
+
+
+@pytest.mark.asyncio
 async def test_watched_file_handler_writes(tmp_path):
     """AsyncWatchedFileHandler writes records to the watched file."""
     path = tmp_path / "watched.log"
