@@ -5,6 +5,12 @@ All notable changes to `scietex.logging` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-09-07
+
+### Docs
+
+- **ReadTheDocs documentation**: added a full Sphinx + MyST-Parser build (`docs/conf.py`, `docs/requirements.txt`, `.readthedocs.yaml`) with an autodoc API reference, a toctree over the existing Markdown guides, and a `docs` CI job running `sphinx-build -W` (warnings-as-errors). Internal directories (`architecture/`, `reviews/`, `superpowers/`, `ROADMAP.md`) are excluded from the user-facing build.
+
 ## [1.3.0] - 2026-09-07
 
 ### Features
