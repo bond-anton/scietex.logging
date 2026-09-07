@@ -256,6 +256,7 @@ handler.setFormatter(formatter)
 For a runnable example of customizing `ScietexFormatter` and applying it with
 `setFormatter`, see `examples/custom_formatter.py`.
 
+(formatter-scope)=
 ### Formatter scope: console output only
 
 A formatter — whether injected via the `formatter=` constructor keyword or

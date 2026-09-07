@@ -78,7 +78,7 @@ This record schema is **independent of the formatter**. Broker payloads are
 built from the handler's `service_name`/`worker_id` config and the log record
 directly, so they are invariant under `setFormatter`/`formatter=`. A custom
 formatter affects the console (stdout) sink only — see
-[Formatter scope: console output only](configuration.md#formatter-scope-console-output-only).
+{ref}`Formatter scope: console output only <formatter-scope>`.
 
 ### Console-by-default and reserved names
 

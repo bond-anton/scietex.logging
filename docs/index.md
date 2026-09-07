@@ -120,9 +120,26 @@ async def main():
 asyncio.run(main())
 ```
 
-## Documentation Structure
+```{toctree}
+:maxdepth: 2
+:caption: User Guide
 
-- [Configuration](./configuration.md) - Configure formatters, service names, and logging formats
-- [Backends](./backends.md) - Detailed information about all supported logging backends
-- [Advanced Topics](./advanced.md) - Custom backends, worker configuration, and error handling
-- [Examples](./examples.md) - Links to all example scripts
+configuration
+backends
+advanced
+examples
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: API Reference
+
+api/index
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Project
+
+changelog
+```
