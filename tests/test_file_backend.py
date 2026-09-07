@@ -46,6 +46,40 @@ class ExplodingFormatter(logging.Formatter):
 
 
 @pytest.mark.asyncio
+async def test_worker_writes_off_the_event_loop_thread():
+    """The blocking stream write runs on a worker thread, not the loop thread."""
+    import threading
+
+    running_event = asyncio.Event()
+    running_event.set()
+    loop_thread = threading.current_thread().name
+
+    class ThreadRecordingStream:
+        def __init__(self):
+            self.threads = []
+            self.buf = []
+
+        def write(self, text):
+            self.threads.append(threading.current_thread().name)
+            self.buf.append(text)
+            return len(text)
+
+        def flush(self):
+            pass
+
+    stream = ThreadRecordingStream()
+    backend = FileBackend(lambda: FakeFormatter(), running_event, lambda: stream)
+
+    worker = asyncio.create_task(backend._worker())
+    await backend.queue.put(_make_record("off loop"))
+    running_event.clear()
+    await asyncio.wait_for(worker, timeout=5)
+
+    assert "".join(stream.buf) == "FMT:off loop\n"
+    assert stream.threads and all(t != loop_thread for t in stream.threads)
+
+
+@pytest.mark.asyncio
 async def test_worker_writes_formatted_record_to_stream():
     """The worker drains its queue and writes formatted records to the stream."""
     running_event = asyncio.Event()

@@ -12,6 +12,7 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from ._executor import _WriteExecutor
 from .async_logging_handler import BackendDrainResult, DrainStatus
 from .config import report_error
 
@@ -126,27 +127,50 @@ class FileBackend:
         short timeout on `queue.get` lets the worker observe the running event
         being cleared without blocking forever.
 
+        Each record is formatted on the event-loop thread (the shared record
+        must not be mutated off-loop) and the blocking stream write+flush is
+        offloaded to a single-thread executor so a slow filesystem never stalls
+        the loop. The executor is a worker-local created on first write and shut
+        down in the finally, so each start/stop cycle gets a fresh executor.
+
         Returns:
             None
         """
-        while self.running_event.is_set() or not self.queue.empty():
-            try:
-                record = await asyncio.wait_for(self.queue.get(), 1)
-            except asyncio.TimeoutError:
-                continue
-            try:
-                formatter = self.formatter_provider()
-                if formatter:
-                    stream = self.stream_provider()
-                    stream.write(formatter.format(record) + "\n")
-                    stream.flush()
-            except Exception as exc:
-                # A broken stream or a buggy formatter must not silently kill the
-                # file worker. Report the failure and keep draining so the queue
-                # is still acknowledged and shutdown completes.
-                self._report_error(record, exc)
-            finally:
-                self.queue.task_done()
+        executor = _WriteExecutor()
+        try:
+            while self.running_event.is_set() or not self.queue.empty():
+                try:
+                    record = await asyncio.wait_for(self.queue.get(), 1)
+                except asyncio.TimeoutError:
+                    continue
+                try:
+                    formatter = self.formatter_provider()
+                    if formatter:
+                        text = formatter.format(record) + "\n"
+                        await executor.run(lambda: self._write_stream(text))
+                except Exception as exc:
+                    # A broken stream or a buggy formatter must not silently kill
+                    # the file worker. Report the failure and keep draining so
+                    # the queue is still acknowledged and shutdown completes.
+                    self._report_error(record, exc)
+                finally:
+                    self.queue.task_done()
+        finally:
+            # The file backend owns no stream to close (the handler does); just
+            # release the worker thread. shutdown(wait=True) waits for any
+            # in-flight write.
+            await executor.shutdown()
+
+    def _write_stream(self, text: str) -> None:
+        """Write ``text`` to the current stream and flush (runs on the executor thread).
+
+        The stream is read via ``stream_provider()`` at call time so a
+        lazily-opened handle is always current, and so all stream access stays
+        on the single executor thread.
+        """
+        stream = self.stream_provider()
+        stream.write(text)
+        stream.flush()
 
     def _report_error(self, record: logging.LogRecord | None, exc: Exception) -> None:
         """Report a file delivery error through the configured error channel.
