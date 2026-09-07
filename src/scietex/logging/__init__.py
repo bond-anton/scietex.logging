@@ -2,7 +2,7 @@
 scietex.logging: An Asynchronous Logging Package
 
 This package provides a flexible framework for asynchronous logging, supporting
-multiple logging backends, such as the console, Redis, and Valkey. It leverages
+multiple logging backends, such as the console, Redis, Valkey, and MQTT. It leverages
 `asyncio` to allow non-blocking logging, ideal for applications requiring
 high-performance logging without impacting main application tasks.
 
@@ -10,8 +10,8 @@ Features:
 ---------
 - **Asynchronous Logging**: Log messages are queued and handled asynchronously, ensuring minimal
   interference with the main application flow.
-- **Multiple Backends**: Console, Redis, and Valkey logging are supported out of the box, with an
-  option to extend to other backends.
+- **Multiple Backends**: Console, Redis, Valkey, and MQTT logging are supported out of the box,
+  with an option to extend to other backends.
 - **Configurable Logging Levels**: Supports all standard logging levels
   (e.g., DEBUG, INFO, WARNING, ERROR, CRITICAL).
 - **Optional Dependency Management**: Only install the necessary dependencies for the backends
@@ -23,6 +23,7 @@ This package requires Python 3.10+ and the standard `logging` library.
 Additional dependencies are required for certain backends:
 - **Redis support**: Install with `pip install scietex.logging[redis]` to enable Redis logging.
 - **Valkey support**: Install with `pip install scietex.logging[valkey]` to enable Valkey logging.
+- **MQTT support**: Install with `pip install scietex.logging[mqtt]` to enable MQTT logging.
 
 Installation:
 -------------
@@ -32,6 +33,7 @@ Install the base package with:
 To install optional dependencies for specific backends, use the extras syntax:
     pip install scietex.logging[redis]   # To enable Redis backend
     pip install scietex.logging[valkey]  # To enable Valkey backend
+    pip install scietex.logging[mqtt]    # To enable MQTT backend
     pip install scietex.logging[all]     # To enable all backends
 
 Example Usage:
@@ -87,6 +89,23 @@ Advanced usage with Valkey logging:
 
     asyncio.run(main())
 
+Advanced usage with MQTT logging:
+
+    import logging
+    from scietex.logging import AsyncMqttHandler
+
+    logger = logging.getLogger("MyAsyncLogger")
+    logger.setLevel(logging.DEBUG)
+    handler = AsyncMqttHandler(topic="my/log/topic")
+    logger.addHandler(handler)
+
+    async def main():
+        await handler.start_logging()
+        logger.error("This error message will be logged to MQTT!")
+        await handler.stop_logging()
+
+    asyncio.run(main())
+
 Extending the Package:
 ----------------------
 Custom backends can be implemented by subclassing `AsyncBrokerHandler` and implementing the
@@ -97,11 +116,11 @@ behaviors.
 
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 from .async_logging_handler import AsyncLoggingHandler
 from .basic_handler import AsyncBaseHandler
-from .config import LoggingConfig, RedisConfig, ValkeyConfig
+from .config import LoggingConfig, MqttConfig, RedisConfig, ValkeyConfig
 from .console_backend import ConsoleBackend
 from .formatter import ScietexFormatter
 from .message_broker_handler import AsyncBrokerHandler
@@ -112,6 +131,7 @@ __all__ = [
     "AsyncLoggingHandler",
     "ConsoleBackend",
     "LoggingConfig",
+    "MqttConfig",
     "RedisConfig",
     "ScietexFormatter",
     "ValkeyConfig",
@@ -132,4 +152,11 @@ try:
     __all__ += ["AsyncValkeyHandler"]
 except ImportError as exc:
     if exc.name != "glide":
+        raise
+try:
+    from .mqtt_handler import AsyncMqttHandler
+
+    __all__ += ["AsyncMqttHandler"]
+except ImportError as exc:
+    if exc.name != "aiomqtt":
         raise
