@@ -34,7 +34,7 @@ jobs:
         image: eclipse-mosquitto:2
         # Set health checks to wait until mosquitto has started
         options: >-
-          --health-cmd "mosquitto_sub -h localhost -p 1883 -t 'health' -W 1 -C 1"
+          --health-cmd "mosquitto_pub -h localhost -p 1883 -t 'health' -m 'ok'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
