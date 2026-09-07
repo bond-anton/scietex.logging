@@ -7,9 +7,20 @@ additively through the 1.x line (client injection, MQTT backend, file sinks,
 `JsonFormatter`) without breaking the surface. Anything that **breaks** the
 existing API is routed through a **2.0** release.
 
-## 2.0 — Loop-independent (thread-safe) `emit`
+## 1.x — Loop-independent (thread-safe) `emit`
 
 **Status:** Proposed (design only; not yet implemented).
+
+This is a **behavior change, not an API break**: `emit(self, record)` keeps its
+stdlib `logging.Handler` signature, and no constructor, `__all__` entry, or
+`start_logging()`/`stop_logging()` contract changes. Today off-loop `emit`
+drops the record and reports it through the error channel (AR-102); the design
+makes off-loop `emit` work instead of dropping — strictly more permissive, a
+fix of a documented limitation rather than a contract break. It is therefore a
+candidate for a **1.x** minor release (e.g. 1.7.0), documented as a behavior
+change in the changelog — not gated behind the 2.0 breaking release. The only
+reason to batch it into 2.0 would be to treat the off-loop drop-and-report as a
+guaranteed contract, but it is documented as a limitation, not a feature.
 
 ### Problem
 
