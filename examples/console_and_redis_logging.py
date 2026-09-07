@@ -17,7 +17,7 @@ async def main():
 
     # Set up asynchronous console logging handler
     console_handler = AsyncBaseHandler(
-        service_name="CombinedService", worker_id=1, stdout_enable=True
+        service_name="CombinedService", instance_id="1", stdout_enable=True
     )
     logger.addHandler(console_handler)
 
@@ -25,7 +25,7 @@ async def main():
     redis_handler = AsyncRedisHandler(
         stream_name="combined_log_stream",
         service_name="CombinedService",
-        worker_id=2,
+        instance_id="2",
         redis_config={"host": "localhost", "port": 6379},
         stdout_enable=True,
     )

@@ -39,7 +39,7 @@ async def main():
     logger = logging.getLogger("PureLogger")
     logger.setLevel(logging.DEBUG)
 
-    handler = FileLikeHandler(service_name="PureService", worker_id=1)
+    handler = FileLikeHandler(service_name="PureService", instance_id="1")
     logger.addHandler(handler)
 
     await handler.start_logging()

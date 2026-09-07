@@ -297,7 +297,7 @@ Each example follows this pattern:
 
 Modify examples to explore features:
 
-- Change service name and worker ID
+- Change service name and instance ID
 - Adjust log levels
 - Configure custom formatters (`custom_formatter.py`)
 - Add an `error_handler` callback and tune `queue_maxsize`

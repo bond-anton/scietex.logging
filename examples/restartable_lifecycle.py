@@ -11,7 +11,7 @@ async def main():
     logger = logging.getLogger("LifecycleLogger")
     logger.setLevel(logging.DEBUG)
 
-    handler = AsyncBaseHandler(service_name="LifecycleService", worker_id=1)
+    handler = AsyncBaseHandler(service_name="LifecycleService", instance_id="1")
     logger.addHandler(handler)
 
     # Cycle 1: start, log, stop with a custom drain timeout.

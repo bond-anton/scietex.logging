@@ -18,7 +18,7 @@ async def main():
     redis_handler = AsyncRedisHandler(
         stream_name="example_log_stream",
         service_name="RedisService",
-        worker_id=2,
+        instance_id="2",
         redis_config={"host": "localhost", "port": 6379},
     )
     logger.addHandler(redis_handler)

@@ -23,7 +23,7 @@ scietex.logging/
 
 | Module | Responsibility |
 |---|---|
-| `__init__.py` | Public API. Re-exports `AsyncBaseHandler`, `AsyncBrokerHandler`, `AsyncLoggingHandler`, `AsyncFileHandler`, `AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`, `AsyncWatchedFileHandler`, `ConsoleBackend`, `FileBackend`, `JsonFormatter`, `ScietexFormatter`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler`; defines `__version__ = "1.7.0"`. |
+| `__init__.py` | Public API. Re-exports `AsyncBaseHandler`, `AsyncBrokerHandler`, `AsyncLoggingHandler`, `AsyncFileHandler`, `AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`, `AsyncWatchedFileHandler`, `ConsoleBackend`, `FileBackend`, `JsonFormatter`, `ScietexFormatter`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler`; defines `__version__ = "1.8.0"`. |
 | `_executor.py` | `_WriteExecutor` — private single-thread executor helper offloading blocking write I/O off the event loop (lazy-create / run / `shutdown(wait=True)`). |
 | `async_logging_handler.py` | `AsyncLoggingHandler` — pure shared async machinery (queues/events/workers, `register_backend`, `start_logging`/`emit`/`stop_logging`, error channel); no sink of its own. |
 | `console_backend.py` | `ConsoleBackend` — the console (stdout) sink as a peer backend (queue + worker + drain hook). |
@@ -32,7 +32,7 @@ scietex.logging/
 | `file_handler.py` | `AsyncFileHandler` — concrete subclass of `AsyncBaseHandler` that registers the `"file"` backend; plus rotation variants `AsyncRotatingFileHandler` / `AsyncTimedRotatingFileHandler` / `AsyncWatchedFileHandler` subclassing it. |
 | `formatter.py` | `ScietexFormatter` (`logging.Formatter` subclass) + `level_abbreviation` helper. |
 | `json_formatter.py` | `JsonFormatter` (`logging.Formatter` subclass) emitting single-line NDJSON. |
-| `config.py` | Typed config objects (`LoggingConfig`, `RedisConfig`, `ValkeyConfig`, `MqttConfig`) + `validate_queue_maxsize` / `optional_dependency_error` helpers. Stdlib-only leaf module. |
+| `config.py` | Typed config objects (`LoggingConfig`, `RedisConfig`, `ValkeyConfig`, `MqttConfig`) + `validate_queue_maxsize` / `optional_dependency_error` / `resolve_instance_id` helpers. Stdlib-only leaf module. |
 | `message_broker_handler.py` | `AsyncBrokerHandler` — abstract broker backend base (registers queue + worker; connect/disconnect/send_message contract). |
 | `redis_handler.py` | `AsyncRedisHandler` — Redis stream backend via `redis.asyncio`. |
 | `valkey_handler.py` | `AsyncValkeyHandler` — Valkey stream backend via `valkey-glide`. |

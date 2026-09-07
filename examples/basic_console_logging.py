@@ -15,7 +15,7 @@ async def main():
     logger.setLevel(logging.DEBUG)
 
     # Set up asynchronous logging handler with console output
-    async_handler = AsyncBaseHandler(service_name="MyService", worker_id=1, stdout_enable=True)
+    async_handler = AsyncBaseHandler(service_name="MyService", instance_id="1", stdout_enable=True)
     logger.addHandler(async_handler)
 
     # Start the asynchronous logging tasks

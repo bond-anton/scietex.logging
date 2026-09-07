@@ -11,18 +11,18 @@ async def main():
     logger = logging.getLogger("AllBackendsLogger")
     logger.setLevel(logging.DEBUG)
 
-    console_handler = AsyncBaseHandler(service_name="AllService", worker_id=1)
+    console_handler = AsyncBaseHandler(service_name="AllService", instance_id="1")
     redis_handler = AsyncRedisHandler(
         stream_name="all_backends_stream",
         service_name="AllService",
-        worker_id=2,
+        instance_id="2",
         redis_config={"host": "localhost", "port": 6379, "db": 0},
         stdout_enable=False,
     )
     valkey_handler = AsyncValkeyHandler(
         stream_name="all_backends_stream",
         service_name="AllService",
-        worker_id=3,
+        instance_id="3",
         valkey_config={"addresses": [("localhost", 6379)]},
         stdout_enable=False,
     )

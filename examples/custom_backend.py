@@ -34,7 +34,7 @@ async def main():
     handler = InMemoryHandler(
         queue_name="memory",
         service_name="MemoryService",
-        worker_id=1,
+        instance_id="1",
         stdout_enable=False,
     )
     logger.addHandler(handler)

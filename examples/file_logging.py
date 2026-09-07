@@ -15,7 +15,7 @@ async def main():
     plain_handler = AsyncFileHandler(
         "plain.log",
         service_name="FileService",
-        worker_id=1,
+        instance_id="1",
         stdout_enable=False,
     )
 
@@ -23,7 +23,7 @@ async def main():
     json_handler = AsyncFileHandler(
         "json.log",
         service_name="FileService",
-        worker_id=2,
+        instance_id="2",
         formatter=JsonFormatter(),
         stdout_enable=False,
     )

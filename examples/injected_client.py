@@ -33,7 +33,7 @@ async def main():
     handler = AsyncValkeyHandler(
         stream_name=stream_name,
         service_name="InjectedService",
-        worker_id=1,
+        instance_id="1",
         client=valkey_client,
     )
     logger.addHandler(handler)

@@ -21,7 +21,7 @@ async def main():
     # records and routes them to error_handler instead of blocking the producer.
     handler = AsyncBaseHandler(
         service_name="OverflowService",
-        worker_id=1,
+        instance_id="1",
         queue_maxsize=2,
         error_handler=on_error,
     )

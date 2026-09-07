@@ -14,7 +14,7 @@ async def main():
     valkey_handler = AsyncValkeyHandler(
         stream_name="example_log_stream",
         service_name="ValkeyService",
-        worker_id=3,
+        instance_id="3",
     )
     logger.addHandler(valkey_handler)
 

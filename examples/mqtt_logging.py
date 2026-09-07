@@ -18,7 +18,7 @@ async def main():
     mqtt_handler = AsyncMqttHandler(
         topic="example/log/topic",
         service_name="MqttService",
-        worker_id=4,
+        instance_id="4",
         mqtt_config={"host": "localhost", "port": 1883},
     )
     logger.addHandler(mqtt_handler)
