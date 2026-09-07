@@ -23,7 +23,8 @@ scietex.logging/
 
 | Module | Responsibility |
 |---|---|
-| `__init__.py` | Public API. Re-exports `AsyncBaseHandler`, `AsyncBrokerHandler`, `AsyncLoggingHandler`, `AsyncFileHandler`, `AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`, `AsyncWatchedFileHandler`, `ConsoleBackend`, `FileBackend`, `JsonFormatter`, `ScietexFormatter`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler`; defines `__version__ = "1.5.0"`. |
+| `__init__.py` | Public API. Re-exports `AsyncBaseHandler`, `AsyncBrokerHandler`, `AsyncLoggingHandler`, `AsyncFileHandler`, `AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`, `AsyncWatchedFileHandler`, `ConsoleBackend`, `FileBackend`, `JsonFormatter`, `ScietexFormatter`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler`; defines `__version__ = "1.6.0"`. |
+| `_executor.py` | `_WriteExecutor` — private single-thread executor helper offloading blocking write I/O off the event loop (lazy-create / run / `shutdown(wait=True)`). |
 | `async_logging_handler.py` | `AsyncLoggingHandler` — pure shared async machinery (queues/events/workers, `register_backend`, `start_logging`/`emit`/`stop_logging`, error channel); no sink of its own. |
 | `console_backend.py` | `ConsoleBackend` — the console (stdout) sink as a peer backend (queue + worker + drain hook). |
 | `file_backend.py` | `FileBackend` — the file sink as a peer backend (queue + worker + drain hook), cloned from `ConsoleBackend` but writing to a `stream_provider()`-supplied file object. |
@@ -44,11 +45,12 @@ scietex.logging/
 formatter.py            (no intra-package imports)
 json_formatter.py       (no intra-package imports)
 config.py               (no intra-package imports)
+_executor.py            (no intra-package imports)
 async_logging_handler.py → formatter.py, config.py
-console_backend.py      → async_logging_handler.py
-file_backend.py         → async_logging_handler.py, config.py
+console_backend.py      → async_logging_handler.py, _executor.py
+file_backend.py         → async_logging_handler.py, config.py, _executor.py
 basic_handler.py        → async_logging_handler.py, console_backend.py, config.py
-file_handler.py         → basic_handler.py, file_backend.py, async_logging_handler.py
+file_handler.py         → basic_handler.py, file_backend.py, async_logging_handler.py, _executor.py
 message_broker_handler.py → basic_handler.py
 redis_handler.py        → message_broker_handler.py, config.py
 valkey_handler.py       → message_broker_handler.py, config.py

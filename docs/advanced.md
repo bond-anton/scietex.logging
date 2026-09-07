@@ -112,6 +112,14 @@ await handler.stop_logging(timeout=10.0)  # 10 second timeout
 `stop_logging(timeout)`, idempotent stop, and the `RuntimeError` raised by a
 double start.
 
+Since 1.6.0 the Console and File backends write on a background single-thread
+executor, and their teardown uses a `shutdown(wait=True)` contract: even if
+`stop_logging(timeout)` returns a `TIMEOUT` from the queue drain, it still waits
+for any in-flight `write` to finish before closing the stream — guaranteeing
+**no write-after-close**. This is a deliberate correctness-over-latency choice
+(the wait is not bounded by the timeout, because bounding it would reintroduce
+the write-after-close race). See `docs/configuration.md`.
+
 ## Error Handling
 
 Delivery failures (queue full, connection errors, broker send errors) are reported through
@@ -146,6 +154,11 @@ For high-throughput logging:
    queue is full, records are dropped and reported through the error channel, so
    a larger bound buffers more before drops begin.
 2. Use multiple workers (if implementing custom handler)
+
+Since 1.6.0 the blocking `write`/`flush` (and rollover/reopen) of the Console
+and File backends runs on a dedicated single-thread executor per backend, so a
+slow sink no longer stalls the event loop — formatting stays on the loop, only
+the blocking I/O moves off it.
 
 ### Resource Management
 

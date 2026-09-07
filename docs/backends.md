@@ -198,6 +198,27 @@ handler = AsyncFileHandler("app.jsonl", formatter=JsonFormatter())
   handler never closes — the caller owns its lifetime and recovery. Mutually
   exclusive with `filename` (passing both raises `ValueError`).
 
+### Async write offload and shutdown guarantee
+
+File writes are **non-blocking to the event loop**: each record is formatted on
+the event-loop thread, then the blocking `write`/`flush` (and, for the rotation
+variants, rollover/reopen) is offloaded to a dedicated single-thread executor
+per handler. A slow sink (network filesystem, slow disk) therefore stalls only
+that executor thread, never the loop.
+
+On shutdown, `stop_logging()` guarantees **no write-after-close**: the worker's
+teardown submits the stream close to the *same* single-thread executor — so it
+is serialized strictly after any in-flight write — then calls
+`shutdown(wait=True)`. `stop_logging()` may return a `TIMEOUT` from the queue
+drain, but it still waits for the in-flight write to finish before closing the
+stream. This is a deliberate correctness-over-latency choice (see
+`docs/configuration.md`).
+
+One consequence of the offload: an injected `file=` object's `write`/`flush` now
+run on a non-loop background thread. The handler still never closes an injected
+file-like (the caller owns its lifetime), but the file-like must tolerate
+cross-thread writes.
+
 ### Rotation variants
 
 - `AsyncRotatingFileHandler(filename, maxBytes=..., backupCount=...)` — rolls

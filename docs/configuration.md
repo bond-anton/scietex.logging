@@ -243,6 +243,38 @@ mutually exclusive (passing both raises `ValueError`).
 `emit()` must be called from the asyncio event-loop thread. An off-loop `emit()`
 drops the record and reports it through the error channel (never raises).
 
+### Async write offload (Console and File backends)
+
+Since 1.6.0, the Console and File backends offload their **blocking I/O** off
+the event loop. Each backend worker formats the record on the event-loop thread,
+then submits the `write`/`flush` (and, for the rotation variants,
+rollover/reopen) to a dedicated **single-thread executor** created fresh per
+worker run. Formatting stays on the loop (the shared `LogRecord` must not be
+mutated off-loop); only the blocking write moves off it. A slow sink — a piped
+stdout, a network filesystem, a slow disk — therefore stalls only that executor
+thread, never the loop.
+
+Shutdown uses a **`shutdown(wait=True)` teardown contract**:
+
+- On worker teardown (normal stop or cancellation), the file-owning worker's
+  outer `finally` submits its stream close to the **same** single-thread
+  executor — serialized strictly after any in-flight write — and then calls
+  `shutdown(wait=True)`.
+- `shutdown(wait=True)` blocks until the in-flight write completes, which
+  guarantees **no write-after-close** even when a write outlives the stop
+  timeout.
+- This is a deliberate **correctness-over-latency** choice: `stop_logging()` may
+  return `TIMEOUT` from the queue drain, but it still waits for the in-flight
+  write before closing the stream. It is *not* bounded with a timeout, because
+  that would reintroduce the write-after-close race.
+- The executor is **worker-local** (fresh per start/stop cycle), so handlers
+  remain restartable across `start_logging()`/`stop_logging()` cycles.
+
+One consequence of the offload: an injected `file=` object's `write`/`flush` now
+run on a non-loop background thread. The handler still never closes an injected
+file-like (the caller owns its lifetime), but the file-like must tolerate
+cross-thread writes.
+
 ## Custom Formatters
 
 You can use Python's standard `logging.Formatter` with custom formats:

@@ -19,6 +19,7 @@ This file provides guidance for OpenCode agents working on the `scietex.logging`
 scietex.logging/
 ├── src/scietex/logging/
 │   ├── __init__.py              # Public API exports
+│   ├── _executor.py             # _WriteExecutor (single-thread executor helper)
 │   ├── async_logging_handler.py # AsyncLoggingHandler machinery base
 │   ├── basic_handler.py         # AsyncBaseHandler (base class with console backend)
 │   ├── config.py                # LoggingConfig, RedisConfig, ValkeyConfig, MqttConfig
@@ -137,6 +138,7 @@ logging.Handler (standard library)
 3. **Worker Pattern**: Each backend has its own queue and worker coroutine
 4. **Graceful Shutdown**: `stop_logging()` waits for queues to drain with configurable timeout (default 5s)
 5. **Client Injection**: Broker handlers accept an optional `client=` argument to use an externally-managed connection. When injected, the handler never calls `close()` on it — the caller owns the client's lifetime and recovery (`_owns_client`/`_injected_client`; `_connect()`/`_disconnect()` wrappers delegate to the abstract methods only when the handler owns the client).
+6. **Async Write Offload**: Console and File backends format on the event-loop thread and run blocking `write`/`flush` (and rollover/reopen) on a per-backend single-thread executor (`_executor.py`'s `_WriteExecutor`). On teardown the file-owning worker submits its stream close to the *same* executor (serialized after any in-flight write) then `shutdown(wait=True)`, guaranteeing no write-after-close; the executor is worker-local, so handlers stay restartable.
 
 ### ScietexFormatter
 
@@ -200,6 +202,7 @@ uv run ruff check .
 - **Async context required**: All worker methods are async and must be called within an asyncio event loop
 - **Backends share the same formatter**: All handlers use the configured formatter
 - **Error handling**: Queue operations catch `QueueFull`, `InvalidStateError`, and other exceptions to prevent crashes
+- **Async write offload**: Since 1.6.0, an injected `file=` object's `write`/`flush` runs on a non-loop thread (the single-thread write executor), so an injected file-like must tolerate cross-thread writes. The handler still never closes an injected file-like.
 
 ## Known Issues & Gotchas
 

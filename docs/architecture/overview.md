@@ -92,10 +92,16 @@ per-backend asyncio.Queue              [async boundary]
    │
    ▼
 per-backend worker coroutine           [consumer, async]
-   ├─ ConsoleBackend worker → ScietexFormatter.format → sys.stdout
-   ├─ FileBackend worker → formatter.format → file handle (plain or JSON)
+   ├─ ConsoleBackend worker → ScietexFormatter.format → single-thread executor → sys.stdout
+   ├─ FileBackend worker → formatter.format → single-thread executor → file handle (plain or JSON)
    └─ broker worker  → build dict → send_message → Redis/Valkey stream / MQTT topic
 ```
+
+Formatting runs on the event-loop thread; the blocking `write`/`flush` (and, for
+the rotation variants, rollover/reopen) of the Console and File workers is
+offloaded to a per-backend single-thread executor so a slow sink never stalls
+the loop. On teardown the file-owning workers submit their stream close to the
+same executor and call `shutdown(wait=True)` (no write-after-close).
 
 Key relationships:
 
@@ -133,10 +139,16 @@ The `examples/` directory contains runnable scripts demonstrating this
 
 - **Per-handler worker coroutines.** Each handler owns one or more worker
   coroutines, each draining one `asyncio.Queue`:
-  - `ConsoleBackend._worker` (console queue) — `console_backend.py:86`.
+  - `ConsoleBackend._worker` (console queue) — `console_backend.py:113`.
   - `AsyncBrokerHandler._worker` (broker queue) — `message_broker_handler.py:139`.
   Workers loop while `logging_running_event` is set **or** their queue is
   non-empty, using a 1-second `asyncio.wait_for` timeout on `queue.get()`.
+- **Blocking-write offload.** The Console and File workers format on the loop
+  thread, then submit the blocking `write`/`flush` (and rollover/reopen) to a
+  worker-local single-thread `_WriteExecutor` (`_executor.py`) and await it. On
+  teardown the file-owning workers submit their stream close to the same
+  executor and `shutdown(wait=True)`, so `stop_logging` waits for any in-flight
+  write — no write-after-close.
 - **Synchronous queue puts.** `emit()` calls `queue.put_nowait(record)` on each
   registered backend queue synchronously, so it never blocks on I/O. A failed
   put is reported through the error channel, not swallowed.

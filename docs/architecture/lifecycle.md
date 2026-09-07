@@ -77,11 +77,14 @@ semantics below).
 - **Consume:** each worker loops `while running_event.is_set() or not
   queue.empty()`, doing `await asyncio.wait_for(queue.get(), 1)`. A 1-second
   timeout on `get()` lets the loop re-check the running event even when idle.
-- **Console worker** (`ConsoleBackend._worker`) formats and writes to stdout.
+- **Console worker** (`ConsoleBackend._worker`) formats on the loop thread and
+  offloads the blocking `sys.stdout` write+flush to a single-thread executor.
 - **File worker** (`AsyncFileHandler._worker`) lazily opens the file handle on
-  first write, formats each record (plain via `ScietexFormatter` or JSON via
-  `JsonFormatter`), and writes synchronously; rotation variants check rollover
-  per record.
+  first write, formats each record on the loop thread (plain via
+  `ScietexFormatter` or JSON via `JsonFormatter`), and offloads the blocking
+  write+flush (and, for the rotation variants, rollover/reopen) to a
+  single-thread executor; rotation variants check rollover per record on the
+  executor thread.
 - **Broker worker** builds a dict and calls `send_message` (network I/O).
 - **Connection stays open** for the worker's lifetime (opened in `connect` at
   worker start, closed in `disconnect` at worker exit).
@@ -114,6 +117,30 @@ semantics below).
    (`async_logging_handler.py:387-395`). Undelivered records are **dropped, not
    replayed**, so the next `start_logging` begins from an actually-empty queue
    (AR-020). `stop_logging` does **not** call `self.close()`.
+
+### Write-executor teardown contract (`shutdown(wait=True)`)
+
+The Console and File workers each own a **worker-local** `_WriteExecutor`
+(single `ThreadPoolExecutor(max_workers=1)`), created at the top of the worker
+coroutine and never stored on the handler. On teardown — normal exit or
+cancellation — the worker's outer `finally`:
+
+- for the file-owning handler workers (`AsyncFileHandler` and its rotation
+  variants), submits `_close_stream` to the **same** single-thread executor, so
+  it is queued strictly after any in-flight write, then calls
+  `shutdown(wait=True)`;
+- for the console/file peer backends (which own no stream to close), just calls
+  `shutdown(wait=True)`.
+
+`shutdown(wait=True)` blocks until the in-flight write completes, which
+guarantees **no write-after-close** even when a write outlives the stop timeout.
+This is a deliberate **correctness-over-latency** choice: `stop_logging()` may
+return a `TIMEOUT` from the drain, but the cancelled worker's `finally` still
+waits for the in-flight write before closing the stream. It is deliberately
+**not** bounded with a timeout — adding one would reintroduce the
+write-after-close race. Because the executor is worker-local and shut down
+(`wait=True`) at the end of every run, no executor thread survives between
+start/stop cycles and handlers stay restartable.
 
 ## Restartable lifecycle
 
@@ -151,7 +178,8 @@ moved across loops. To log on a different loop, construct a fresh handler.
 | `asyncio.Queue`s | backend `__init__` (console/broker) | handler instance | drained in `stop_logging`; not explicitly closed |
 | worker factories | backend `__init__` | handler instance | invoked in `start_logging`; tasks gathered in `stop_logging` |
 | client connection (`client`) | `connect()` (worker start) | handler instance | `disconnect()` (worker exit) |
-| file handle (`_stream`) | worker first write (lazy open) | handler instance | worker `finally` (close + flush) |
+| file handle (`_stream`) | worker first write (lazy open) | handler instance | worker `finally` — `_close_stream` submitted to the write executor, then `shutdown(wait=True)` |
+| write executor (`_WriteExecutor`) | worker run (lazy, first write) | worker-local (not the handler) | worker `finally` — `shutdown(wait=True)` |
 | formatter | `__init__` | handler instance | — |
 
 The `client connection` row above holds only for a **self-managed** client (one
@@ -159,6 +187,14 @@ built by the handler's own `connect()`). An **injected** client is owned by the
 caller, not the handler, and is never closed by `disconnect()`. Likewise, an
 **injected** `file`-like object is owned by the caller and never closed by the
 file worker.
+
+The `write executor` row is deliberately **worker-local**, not an attribute:
+each worker run creates a fresh executor and shuts it down (`wait=True`) in its
+own `finally`, so no thread survives between start/stop cycles and the handler
+stays restartable. The `file handle` is closed via `_close_stream` **on that
+same executor** (serialized strictly after any in-flight write) — never on the
+loop thread — so a worker cancelled mid-write closes the stream only after the
+write completes (no write-after-close).
 
 **Ownership model.** All async resources are instance-scoped and owned by the
 handler. There is no global state and no shared resource across handler

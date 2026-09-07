@@ -195,6 +195,43 @@ hook is registered here); `FileBackend` (its drain hook is registered here);
 
 ---
 
+## 3a. Write executor helper — `_executor.py`
+
+**Purpose.** A tiny private helper encapsulating the lazy-create / run /
+`shutdown(wait=True)` lifecycle of a single-thread executor, so the blocking
+write I/O of the Console and File workers can be offloaded off the event loop
+without duplicating the lifecycle across all five workers.
+
+**Class.** `_WriteExecutor` — `_executor.py:26` (private; not exported in
+`__all__`).
+
+**Public interface.**
+- `async run(fn: Callable[[], T]) -> T` — `_executor.py:37`. Runs `fn` on the
+  single worker thread (a lazily-created `ThreadPoolExecutor(max_workers=1)`)
+  via `loop.run_in_executor` and awaits its completion. `fn` performs the
+  blocking I/O for one record (write/flush, or the full rollover+reopen+write
+  sequence); formatting must happen on the loop *before* calling this.
+- `async shutdown()` — `_executor.py:48`. Waits for any in-flight work, then
+  releases the worker thread via `executor.shutdown(wait=True)`. A no-op when
+  the executor was never created. After it returns, no write or close is still
+  running, so the handler can restart with a fresh executor.
+
+**Why single-threaded + `wait=True`.** The single worker thread serializes every
+write and the final close in FIFO order, so a close submitted after an in-flight
+write cannot overtake it — this is what prevents a write-after-close race during
+shutdown. `shutdown(wait=True)` blocks until the in-flight write completes
+(correctness over latency), and the executor is a worker-local (created per
+worker run, never stored on the handler) so no thread survives between
+start/stop cycles and handlers stay restartable.
+
+**Depends on.** stdlib `asyncio`, `concurrent.futures`. No intra-package
+imports.
+
+**Depended on by.** `console_backend` (ConsoleBackend._worker),
+`file_backend` (FileBackend._worker), `file_handler` (the four handler workers).
+
+---
+
 ## 4. Console backend — `console_backend.py`
 
 **Purpose.** The console (stdout) sink as a **peer backend**. Owns its queue,
@@ -209,10 +246,15 @@ its worker coroutine, and its shutdown-status reporting.
   the handler's current formatter, read at work time so the console never holds
   a stale copy (AR-030); `error_handler` is an optional callback invoked with
   `(record, exc)` when a record cannot be written (AR-021).
-- `async _worker()` — `console_backend.py:102`. Loops while the running event is
+- `async _worker()` — `console_backend.py:113`. Loops while the running event is
   set or the queue is non-empty, formatting records and writing them to stdout.
-  Format/write failures are routed through `_report_error` (the configured
-  `error_handler` or the module logger), with `task_done()` in a `finally`.
+  Each record is formatted on the event-loop thread, then the blocking
+  `sys.stdout` write+flush is offloaded to a `_WriteExecutor` (single-thread,
+  worker-local) so a slow stdout never stalls the loop; the worker's outer
+  `finally` calls `executor.shutdown()` (`wait=True`), releasing the worker
+  thread after any in-flight write. Format/write failures are routed through
+  `_report_error` (the configured `error_handler` or the module logger), with
+  `task_done()` in a `finally`.
 - `worker` (read-only `@property`) — `console_backend.py:102`. Returns the bound
   `_worker` coroutine method as a zero-arg worker factory, so `AsyncBaseHandler`
   and custom integrators register the backend's worker without reaching into a
@@ -226,7 +268,7 @@ its worker coroutine, and its shutdown-status reporting.
   after every backend has drained.
 
 **Depends on.** stdlib `asyncio`, `logging`, `sys`; `async_logging_handler`
-(`BackendDrainResult`, `DrainStatus`).
+(`BackendDrainResult`, `DrainStatus`); `_executor` (`_WriteExecutor`).
 
 **Depended on by.** `AsyncBaseHandler` (registers it as a peer backend when
 `stdout_enable=True`).
@@ -252,11 +294,15 @@ only structural difference from the console is the write target: instead of
   lazily-opened handle is always current. `error_handler` is an optional
   callback invoked with `(record, exc)` when a record cannot be written
   (AR-021).
-- `async _worker()` — `file_backend.py:121`. Loops while the running event is
+- `async _worker()` — `file_backend.py:122`. Loops while the running event is
   set or the queue is non-empty, formatting records and writing them to the
-  stream returned by `stream_provider()`. Format/write failures are routed
-  through `_report_error` (the configured `error_handler` or the module logger),
-  with `task_done()` in a `finally`.
+  stream returned by `stream_provider()`. Each record is formatted on the
+  event-loop thread, then the blocking stream write+flush is offloaded to a
+  `_WriteExecutor` (single-thread, worker-local) so a slow filesystem never
+  stalls the loop; the worker's outer `finally` calls `executor.shutdown()`
+  (`wait=True`). Format/write failures are routed through `_report_error` (the
+  configured `error_handler` or the module logger), with `task_done()` in a
+  `finally`.
 - `worker` (read-only `@property`) — `file_backend.py:112`. Returns the bound
   `_worker` coroutine method as a zero-arg worker factory, so `AsyncFileHandler`
   and custom integrators register the backend's worker without reaching into a
@@ -270,7 +316,8 @@ only structural difference from the console is the write target: instead of
   after every backend has drained.
 
 **Depends on.** stdlib `asyncio`, `logging`; `async_logging_handler`
-(`BackendDrainResult`, `DrainStatus`); `config` (`report_error`).
+(`BackendDrainResult`, `DrainStatus`); `config` (`report_error`); `_executor`
+(`_WriteExecutor`).
 
 **Depended on by.** `AsyncFileHandler` (registers it as a peer backend under the
 name `"file"`).
@@ -337,21 +384,34 @@ backend. The rotation variants subclass it and reuse the stdlib rollover logic.
   durable injected reference and never opens its own file.
 - `_close_stream()` — `file_handler.py:163`. Closes the handle the handler
   opened; a no-op for an injected file-like (the caller owns its lifetime).
-- `async _worker()` — `file_handler.py:178`. Opens the file lazily on first use,
-  loops draining the `"file"` queue and writing formatted records, and closes the
-  file in a `finally` so it is released on both normal exit and cancellation.
+- `_write_record(text, record=None)` — `file_handler.py:180`. Runs on the
+  executor thread: opens the stream lazily, writes `text`, and flushes. The
+  rotation subclasses override it to run rollover+reopen+write as one atomic
+  unit on the executor thread (passing a `copy.copy(record)` made on the loop
+  thread, because the stdlib rotator's `shouldRollover` formats — and would
+  mutate — the shared record).
+- `async _worker()` — `file_handler.py:190`. Opens the file lazily on first use,
+  loops draining the `"file"` queue, and formats each record on the event-loop
+  thread before submitting the write unit to a worker-local `_WriteExecutor`
+  (single-thread), so a slow filesystem never stalls the loop. The worker's
+  outer `finally` submits `_close_stream` to the **same** executor — serialized
+  strictly after any in-flight write — then `shutdown(wait=True)`, guaranteeing
+  no write-after-close on normal exit and cancellation.
 - `async drain(timeout) -> BackendDrainResult` — `file_handler.py:210`. Waits
   for the `"file"` queue to drain and returns a `BackendDrainResult`.
 - Rotation variants add stdlib rollover driven from the worker (the sole
   writer), never from `emit()`: `AsyncRotatingFileHandler` rolls over when the
-  file exceeds `maxBytes` (`_worker` at `file_handler.py:307`);
+  file exceeds `maxBytes` (`_worker` at `file_handler.py:359`);
   `AsyncTimedRotatingFileHandler` rolls over on a `when`/`interval` schedule
-  (`_worker` at `file_handler.py:424`); `AsyncWatchedFileHandler` reopens the
+  (`_worker` at `file_handler.py:508`); `AsyncWatchedFileHandler` reopens the
   file if it was rotated or deleted externally (`_worker` at
-  `file_handler.py:523`). Each holds a stdlib handler instance
+  `file_handler.py:630`). Each holds a stdlib handler instance
   (`RotatingFileHandler`/`TimedRotatingFileHandler`/`WatchedFileHandler`) purely
   for its `shouldRollover`/`doRollover`/`reopenIfNeeded` logic, pointing its
   `.stream` at the handler's live stream and adopting it back after a rollover.
+  Each variant runs the rollover+reopen+write as one atomic unit on its
+  executor thread, with the same close-on-executor + `shutdown(wait=True)`
+  `finally` as `AsyncFileHandler._worker`.
 
 **Key instance state.** `filename`, `mode`, `encoding`, `delay`, `errors`,
 `_owns_file` (bool), `_injected_file` (Any | None), `_stream` (Any | None),
@@ -359,8 +419,8 @@ backend. The rotation variants subclass it and reuse the stdlib rollover logic.
 `_watcher`.
 
 **Depends on.** `basic_handler.AsyncBaseHandler`; `file_backend.FileBackend`;
-`async_logging_handler` (`BackendDrainResult`, `DrainStatus`); stdlib
-`logging.handlers` (rotation logic).
+`async_logging_handler` (`BackendDrainResult`, `DrainStatus`); `_executor`
+(`_WriteExecutor`); stdlib `logging.handlers` (rotation logic).
 
 **Depended on by.** `__init__.py` (re-export); host apps using file logging;
 tests.

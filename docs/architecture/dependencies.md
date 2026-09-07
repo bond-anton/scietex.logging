@@ -10,20 +10,21 @@ formatter.py ──────────────┐
    ▲                       │ (imports ScietexFormatter)
 json_formatter.py ─────────┤
    ▲                       │ (imports JsonFormatter)
+_executor.py               │ (no intra-package imports; provides _WriteExecutor)
    │                       │
 async_logging_handler.py ──┘
    ▲
    │ (imports AsyncLoggingHandler)
 console_backend.py ───────────────┐
-   ▲                             │ (imports ConsoleBackend)
+   ▲                             │ (imports ConsoleBackend, _WriteExecutor)
    │ (imports ConsoleBackend)    │
 file_backend.py ─────────────────┤
-   ▲                             │ (imports FileBackend)
+   ▲                             │ (imports FileBackend, _WriteExecutor)
    │ (imports FileBackend)       │
 basic_handler.py ────────────────┘
    ▲
    │ (extends AsyncBaseHandler)
-file_handler.py  (extends AsyncBaseHandler; registers "file" backend)
+file_handler.py  (extends AsyncBaseHandler; registers "file" backend; imports _WriteExecutor)
    ▲
    │ (extends AsyncBrokerHandler)
 message_broker_handler.py
@@ -37,10 +38,10 @@ message_broker_handler.py
 __init__.py  (public API)
 ```
 
-Direction is strictly **one-way, top-down**: `formatter` / `json_formatter` →
-`async_logging_handler` → `console_backend` / `file_backend` / `basic_handler`
-/ `file_handler` → `message_broker_handler` → concrete backends → `__init__`.
-There are **no circular dependencies** within the package.
+Direction is strictly **one-way, top-down**: `formatter` / `json_formatter` /
+`_executor` → `async_logging_handler` → `console_backend` / `file_backend` /
+`basic_handler` / `file_handler` → `message_broker_handler` → concrete backends
+→ `__init__`. There are **no circular dependencies** within the package.
 
 ## Core → infrastructure dependencies
 
@@ -76,13 +77,16 @@ stdlib-only peers, so they carry no optional dependency.
 
 - `async_logging_handler.py` → `formatter.py` (constructs `ScietexFormatter`).
 - `console_backend.py` → `async_logging_handler.py` (imports `BackendDrainResult`,
-  `DrainStatus` for shutdown-status reporting).
+  `DrainStatus` for shutdown-status reporting) and `_executor.py` (imports
+  `_WriteExecutor` to offload the blocking stdout write).
 - `file_backend.py` → `async_logging_handler.py` (imports `BackendDrainResult`,
-  `DrainStatus` for shutdown-status reporting).
+  `DrainStatus` for shutdown-status reporting) and `_executor.py` (imports
+  `_WriteExecutor` to offload the blocking stream write).
 - `basic_handler.py` → `async_logging_handler.py` (inheritance) and
   `console_backend.py` (registers the console backend).
-- `file_handler.py` → `basic_handler.py` (inheritance) and `file_backend.py`
-  (registers the `"file"` backend).
+- `file_handler.py` → `basic_handler.py` (inheritance), `file_backend.py`
+  (registers the `"file"` backend), and `_executor.py` (imports `_WriteExecutor`
+  for the worker's write unit and close-on-executor teardown).
 - `message_broker_handler.py` → `basic_handler.py` (inheritance + reuse of
   queues/events/workers).
 - `redis_handler.py`, `valkey_handler.py`, `mqtt_handler.py` →
@@ -124,7 +128,7 @@ None detected. The import graph is acyclic and strictly layered.
 
 | Module | Third-party dep | Optional? |
 |---|---|---|
-| `async_logging_handler.py`, `basic_handler.py`, `console_backend.py`, `file_backend.py`, `file_handler.py`, `formatter.py`, `json_formatter.py`, `message_broker_handler.py` | none | — |
+| `_executor.py`, `async_logging_handler.py`, `basic_handler.py`, `console_backend.py`, `file_backend.py`, `file_handler.py`, `formatter.py`, `json_formatter.py`, `message_broker_handler.py` | none | — |
 | `redis_handler.py` | `redis>=5.0.0` | yes (`[redis]`) |
 | `valkey_handler.py` | `valkey-glide~=2.5.0` | yes (`[valkey]`) |
 | `mqtt_handler.py` | `aiomqtt~=2.5.0` | yes (`[mqtt]`) |

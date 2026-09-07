@@ -305,18 +305,21 @@ the client.
 **Location.** `file_backend.py` (`FileBackend._worker`) and `file_handler.py`
 (`AsyncFileHandler._worker`).
 
-**What it appears to do.** The file worker writes each formatted record to the
-file handle with a **synchronous** `write()` + `flush()` call, mirroring the
-console worker's synchronous `sys.stdout.write`. No `asyncio.to_thread` or
-async file library is used.
+**What it appears to do.** Historically the file worker wrote each formatted
+record to the file handle with a **synchronous** `write()` + `flush()` call,
+mirroring the console worker's synchronous `sys.stdout.write`. No
+`asyncio.to_thread` or async file library was used.
 
-**Why significant.** For a local file this is fast and consistent with the
-console sink, but a slow filesystem (NFS, network-mounted volume, or a
-high-latency disk) would block the event loop for the duration of each write,
-stalling every other coroutine on the loop. This is a deliberate, documented
-trade-off (see `docs/ROADMAP.md` "2.0 — Async redesign of Console and File
-backends"), flagged for a future async redesign that would offload the write
-(e.g. `asyncio.to_thread`) without adding a dependency.
+**Why significant.** **Resolved in 1.6.0.** A slow filesystem (NFS,
+network-mounted volume, or a high-latency disk) used to block the event loop for
+the duration of each write, stalling every other coroutine on the loop. The
+async redesign offloaded the blocking `write`/`flush` (and, for the rotation
+variants, rollover/reopen) to a per-backend single-thread `_WriteExecutor`
+(`_executor.py`): the worker formats on the loop thread and awaits the write on
+the executor thread, so a slow sink stalls only that executor, never the loop.
+Teardown submits the stream close to the *same* executor and calls
+`shutdown(wait=True)`, guaranteeing no write-after-close. See
+`docs/ROADMAP.md` "1.x — Async redesign of Console and File backends".
 
-**Related.** `docs/ROADMAP.md`; `console_backend.py` (same synchronous-write
-pattern); `file_backend.py`, `file_handler.py`.
+**Related.** `docs/ROADMAP.md`; `console_backend.py` (same executor offload);
+`file_backend.py`, `file_handler.py`, `_executor.py`.

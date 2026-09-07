@@ -1,6 +1,6 @@
 # Roadmap
 
-Planned direction for `scietex.logging`. Current stable release: **1.5.0**.
+Planned direction for `scietex.logging`. Current stable release: **1.6.0**.
 
 The 1.x public API (`__all__` surface and constructor signatures) has grown
 additively through the 1.x line (client injection, MQTT backend, file sinks,
@@ -128,23 +128,25 @@ the loop-independent `emit` work above.
 
 ## 1.x — Async redesign of Console and File backends
 
-**Status:** Proposed (design only; not yet implemented).
+**Status:** Implemented in 1.6.0.
 
-The Console and File backends perform **synchronous, blocking I/O inside their
-worker coroutines**: `ConsoleBackend._worker` calls `sys.stdout.write` +
-`flush`, and `FileBackend._worker` / `AsyncFileHandler._worker` call
-`stream.write` + `flush` directly. Under heavy log volume or a slow sink (a
-piped stdout, a network filesystem, a slow disk), this blocks the event loop
+The Console and File backends previously performed **synchronous, blocking I/O
+inside their worker coroutines**: `ConsoleBackend._worker` called
+`sys.stdout.write` + `flush`, and `FileBackend._worker` / `AsyncFileHandler._worker`
+called `stream.write` + `flush` directly. Under heavy log volume or a slow sink
+(a piped stdout, a network filesystem, a slow disk), this blocked the event loop
 thread for the duration of each write, stalling every other coroutine on the
 loop.
 
-A redesign should move the blocking write off the loop thread — e.g. via
-`asyncio.to_thread` or a dedicated writer thread/executor — so the worker
-coroutine awaits the write instead of blocking the loop.
+In 1.6.0 the blocking write/flush/rollover/reopen now runs on a **dedicated
+single-thread executor per backend/handler** (`src/scietex/logging/_executor.py`),
+so the worker coroutine awaits the write instead of blocking the loop.
+Formatting stays on the event-loop thread; only the blocking I/O moves off it.
+On teardown the file-owning workers submit their stream close to the same
+executor and call `shutdown(wait=True)`, guaranteeing **no write-after-close**
+even when a write outlives the stop timeout — a deliberate
+correctness-over-latency trade-off (see `docs/configuration.md`).
 
 This is a **behavior change, not an API break**: no public signature, `__all__`
-surface, constructor, or method contract changes. It is therefore a candidate
-for a **1.x** minor release (e.g. 1.6.0), documented as a behavior change in the
-changelog — not gated behind the 2.0 breaking release. The only reason to batch
-it into 2.0 would be to land all semantic churn in one release alongside the
-genuinely-breaking items above.
+surface, constructor, or method contract changed. It shipped as a 1.x minor
+release (1.6.0) and is documented as a behavior change in the changelog.
