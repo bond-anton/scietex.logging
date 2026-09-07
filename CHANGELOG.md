@@ -5,6 +5,30 @@ All notable changes to `scietex.logging` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-09-07
+
+### Changed
+
+- **Async redesign of Console and File backends**: the blocking `write`/`flush`
+  (and, for the rotation variants, rollover/reopen) that the Console and File
+  worker coroutines performed directly on the event-loop thread now run on a
+  dedicated single-thread executor per backend/handler, so a slow sink (piped
+  stdout, a network filesystem, a slow disk) no longer stalls the event loop.
+  Formatting still happens on the event-loop thread; only the blocking I/O moves
+  off it. This is a behavior change, not an API break: no public signature,
+  `__all__` surface, constructor, or method contract changes.
+- **Injected `file=` objects now receive writes off the loop thread**: when an
+  externally-managed file-like is injected via `file=`, its `write`/`flush` are
+  now called from a background worker thread rather than the event-loop thread.
+  The handler still never closes an injected file-like (the caller owns its
+  lifetime). Code that injects a file-like whose `write`/`flush` are not
+  thread-safe should account for this.
+- **`stop_logging` waits for in-flight writes**: on shutdown the file-owning
+  workers submit their stream close to the same single-thread executor
+  (`shutdown(wait=True)`), so the handler waits for any in-flight `write` to
+  complete before closing the stream — no write-after-close — even when the
+  write outlives the stop timeout.
+
 ## [1.5.0] - 2026-09-07
 
 ### Features
