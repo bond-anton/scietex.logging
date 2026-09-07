@@ -9,7 +9,7 @@ register their own queues and workers on top of it.
 
 import asyncio
 import logging
-import sys
+import queue
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from enum import Enum
@@ -70,8 +70,9 @@ class AsyncLoggingHandler(logging.Handler):
     is dropped rather than replayed on the next cycle, so each start begins from
     an actually-empty queue.
 
-    Each backend queue is bounded by `queue_maxsize` (default 10000). Under
-    sustained overload, `emit` drops records for any full backend queue and
+    Each backend queue is bounded by `queue_maxsize` (default 10000), and a
+    thread-safe stdlib `queue.Queue` ingress of the same bound fronts them all.
+    Under sustained overload, `emit` drops records when the ingress is full and
     reports the drop through the error channel rather than buffering unboundedly
     or blocking the calling thread.
 
@@ -95,7 +96,16 @@ class AsyncLoggingHandler(logging.Handler):
         formatter (logging.Formatter): Formatter used to render records; the
             default ``ScietexFormatter`` unless a custom one was injected.
         _loop (asyncio.AbstractEventLoop | None): Event loop captured at
-            `start_logging`; `emit()` is only valid on that loop's thread.
+            `start_logging` and used only by the bridge's ``call_soon_threadsafe``
+            wakeup; `emit()` itself is thread-safe and never uses it directly.
+        _ingress (queue.Queue[logging.LogRecord] | None): Thread-safe stdlib queue
+            fronting every backend queue; `emit()` writes here from any thread.
+            Created in `start_logging`, released in `stop_logging`.
+        _ingress_event (asyncio.Event | None): Wakeup event the bridge waits on;
+            set via ``loop.call_soon_threadsafe`` whenever `emit()` enqueues.
+        _bridge_task (asyncio.Task | None): The bridge task that moves records
+            from `_ingress` into the per-backend queues; tracked separately from
+            `log_workers_tasks` so worker teardown never reaps it early.
         _drain_hooks (list[DrainHook]): Backend drain hooks in registration order,
             each invoked by `stop_logging` and returning its own `BackendDrainResult`.
         _status_reporters (list[StatusReporter]): Post-drain observers invoked by
@@ -112,7 +122,7 @@ class AsyncLoggingHandler(logging.Handler):
             Starts all worker tasks to process log records asynchronously.
 
         emit(record):
-            Queues a log record for each backend if logging is active.
+            Queues a log record for each backend if logging is active (thread-safe).
 
         stop_logging():
             Stops logging by clearing the events and draining every backend.
@@ -190,6 +200,9 @@ class AsyncLoggingHandler(logging.Handler):
 
         self.log_workers_tasks: list[asyncio.Task[None]] = []
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._ingress: queue.Queue[logging.LogRecord] | None = None
+        self._ingress_event: asyncio.Event | None = None
+        self._bridge_task: asyncio.Task[None] | None = None
         self._closed = False
 
     @property
@@ -311,6 +324,14 @@ class AsyncLoggingHandler(logging.Handler):
         if self.logging_running_event.is_set():
             raise RuntimeError("AsyncLoggingHandler.start_logging() called while already running")
         self._loop = asyncio.get_running_loop()
+        # Create the thread-safe ingress, its wakeup event, and the bridge task
+        # BEFORE raising the accept event so emit() never observes a raised
+        # accept event against a not-yet-created ingress. The bridge is tracked
+        # separately from log_workers_tasks so the worker gather/cancel logic in
+        # stop_logging never reaps it early.
+        self._ingress = queue.Queue(maxsize=self.config.queue_maxsize)
+        self._ingress_event = asyncio.Event()
+        self._bridge_task = asyncio.create_task(self._bridge_loop())
         self.logging_accept_event.set()  # Set the event to indicate logs are accepted
         self.logging_running_event.set()  # Set the event to indicate logging is active
         self.log_workers_tasks = [
@@ -321,12 +342,12 @@ class AsyncLoggingHandler(logging.Handler):
         """
         Queue a log record for each backend when logging is active.
 
-        Called by the logger to handle each log record. If the logging accept event
-        is set, queues the record in the queues. Each backend can have
-        a unique queue, allowing separate handling in different workers.
-
-        Must be called from the asyncio event-loop thread; off-loop logging drops
-        the record and reports it through the error channel (never raises).
+        Called by the logger to handle each log record. Safe to call from any
+        thread, including a thread with no running asyncio loop: the record is
+        written to a thread-safe stdlib ``queue.Queue`` ingress and a bridge
+        task on the event-loop thread re-dispatches it into the per-backend
+        ``asyncio.Queue``s. If the logging accept event is not set, the record
+        is dropped silently (never raises).
 
         Args:
             record (logging.LogRecord): The log record to be processed.
@@ -337,38 +358,77 @@ class AsyncLoggingHandler(logging.Handler):
         if not self.logging_accept_event.is_set():
             return
 
+        # The ingress is a thread-safe stdlib queue, so put_nowait is safe from
+        # any thread (including one with no running loop). It is created in
+        # start_logging and released in stop_logging; an emit that races the
+        # teardown window (passed the accept check but the ingress already None)
+        # drops the record silently — it arrived during shutdown. The loop and
+        # ingress event are created and released alongside the ingress, so a
+        # None check on all three covers the whole teardown window.
+        ingress = self._ingress
+        loop = self._loop
+        ingress_event = self._ingress_event
+        if ingress is None or loop is None or ingress_event is None:
+            return
         try:
-            current_loop = asyncio.get_running_loop()
-        except RuntimeError:
-            current_loop = None
-        if current_loop is not self._loop:
-            # Off-loop emit cannot enqueue: asyncio.Queue.put_nowait is not
-            # thread-safe and the queues are bound to the loop captured at
-            # start_logging. Raise into handleError (mirroring the stdlib's own
-            # emit/except/handleError pattern) so the record is dropped and
-            # reported through the error channel — matching the overflow policy —
-            # instead of propagating into the caller, which stdlib Handler.handle
-            # does not catch (AR-102).
-            try:
-                raise RuntimeError(
-                    "AsyncLoggingHandler.emit() must be called from the asyncio event-loop "
-                    "thread; off-loop logging is not supported"
-                )
-            except RuntimeError:
-                self.handleError(record)
+            ingress.put_nowait(record)
+        except queue.Full as exc:
+            # Overflow policy: when the ingress is full the record is dropped
+            # and reported via the error channel. emit never blocks or buffers
+            # unboundedly, so the producer stays non-blocking under overload.
+            self._report_error(record, exc)
+            return
+        except Exception as exc:
+            self._report_error(record, exc)
             return
 
-        # Put the record in each queue synchronously; failures are reported, not swallowed.
-        for queue in self.log_queues.values():
-            try:
-                queue.put_nowait(record)
-            except asyncio.QueueFull as exc:
-                # Overflow policy: when a backend queue is full the record is dropped
-                # and reported via the error channel. emit never blocks or buffers
-                # unboundedly, so the producer stays non-blocking under overload.
-                self._report_error(record, exc)
-            except Exception as exc:
-                self._report_error(record, exc)
+        # Wake the bridge. put_nowait above runs BEFORE this set, so the bridge
+        # can never observe the event set before the record is in the queue (no
+        # lost wakeup). call_soon_threadsafe is safe from any thread. If the
+        # loop is already closed (host forgot stop_logging before asyncio.run
+        # returned), report and drop rather than raising into the caller.
+        try:
+            loop.call_soon_threadsafe(ingress_event.set)
+        except Exception as exc:
+            self._report_error(record, exc)
+
+    async def _bridge_loop(self) -> None:
+        """
+        Move records from the thread-safe ingress into the per-backend queues.
+
+        Waits on the ingress event, then drains the ingress with ``get_nowait``
+        and re-dispatches each record into every backend ``asyncio.Queue`` via
+        ``put_nowait``. The bridge only MOVES records — it never formats or
+        mutates them; all formatting stays on the loop thread in each worker.
+        A backend queue that is full (or any other put failure) is reported via
+        the error channel and the record is dropped for that backend.
+
+        Returns:
+            None
+        """
+        # start_logging sets the ingress and its event before creating this task
+        # and stop_logging cancels the task before clearing them, so both are
+        # non-None for the task's lifetime. Local references keep them narrowed
+        # across the awaits below (an instance attribute could be mutated by
+        # another coroutine between awaits, defeating type narrowing).
+        assert self._ingress is not None and self._ingress_event is not None
+        ingress = self._ingress
+        ingress_event = self._ingress_event
+        while True:
+            await ingress_event.wait()
+            ingress_event.clear()
+            while True:
+                try:
+                    record = ingress.get_nowait()
+                except queue.Empty:
+                    break
+                for backend_queue in self.log_queues.values():
+                    try:
+                        backend_queue.put_nowait(record)
+                    except asyncio.QueueFull as exc:
+                        self._report_error(record, exc)
+                    except Exception as exc:
+                        self._report_error(record, exc)
 
     async def stop_logging(self, timeout: float = 5.0) -> None:
         """
@@ -402,6 +462,33 @@ class AsyncLoggingHandler(logging.Handler):
 
         # Stop accepting new log records
         self.logging_accept_event.clear()
+
+        # Stop the bridge and flush the ingress into the backend queues BEFORE
+        # the backend drains run. The bridge is cancelled first so it stops
+        # consuming; then the same get_nowait -> put_nowait fan-out runs inline
+        # here until the ingress is empty. This guarantees no record still in
+        # the ingress is lost when the backend drains complete and the workers
+        # stop. The bridge is transparent machinery: it produces no
+        # BackendDrainResult of its own.
+        if self._bridge_task is not None:
+            self._bridge_task.cancel()
+            try:
+                await self._bridge_task
+            except asyncio.CancelledError:
+                pass
+        if self._ingress is not None:
+            while True:
+                try:
+                    record = self._ingress.get_nowait()
+                except queue.Empty:
+                    break
+                for backend_queue in self.log_queues.values():
+                    try:
+                        backend_queue.put_nowait(record)
+                    except asyncio.QueueFull as exc:
+                        self._report_error(record, exc)
+                    except Exception as exc:
+                        self._report_error(record, exc)
 
         # Drain every backend concurrently under one shared timeout (AR-105).
         # gather schedules all drain hooks at once and preserves registration
@@ -439,21 +526,29 @@ class AsyncLoggingHandler(logging.Handler):
                 await asyncio.gather(*self.log_workers_tasks, return_exceptions=True)
         self.log_workers_tasks = []
 
-        # Release the captured loop reference now that teardown is complete
-        # (AR-113). It is kept until this point so a record still in flight during
-        # the drain window can be enqueued; the next start_logging re-captures the
-        # running loop.
-        self._loop = None
-
         # Drop any records still undelivered after the drain window and worker
         # teardown (AR-020). A stalled worker or unreachable broker can leave
         # records queued; without this they would replay on the next start, so the
         # restart would not begin from an actually-empty queue. task_done() pairs
         # with get_nowait() to keep the unfinished-task count balanced.
-        for queue in self.log_queues.values():
-            while not queue.empty():
-                queue.get_nowait()
-                queue.task_done()
+        for backend_queue in self.log_queues.values():
+            while not backend_queue.empty():
+                backend_queue.get_nowait()
+                backend_queue.task_done()
+        # Clear any leftover ingress entries (an in-flight emit that raced the
+        # teardown) so the next start begins from an actually-empty ingress.
+        if self._ingress is not None:
+            while not self._ingress.empty():
+                self._ingress.get_nowait()
+
+        # Release the captured loop and ingress references now that teardown is
+        # complete (AR-113). They are kept until this point so a record still in
+        # flight during the drain window can be enqueued; the next start_logging
+        # re-captures the running loop and creates a fresh ingress + bridge.
+        self._loop = None
+        self._ingress = None
+        self._ingress_event = None
+        self._bridge_task = None
 
     def close(self) -> None:
         """
@@ -480,22 +575,6 @@ class AsyncLoggingHandler(logging.Handler):
         cannot be awaited from this synchronous hook, so there is nothing to do
         here.
         """
-
-    def handleError(self, record: logging.LogRecord) -> None:
-        """
-        Route a handler-level error through the configured error channel.
-
-        The stdlib ``Handler.handle`` does not catch exceptions raised by ``emit``,
-        so ``emit`` calls this explicitly when it cannot enqueue a record (the
-        off-loop case). ``sys.exc_info()`` recovers the in-flight exception (the
-        3.10-compatible form of ``sys.exception()``) and hands it to the single
-        ``_report_error`` channel, delivering the error to the configured
-        ``error_handler`` or the module logger instead of the stdlib default of
-        printing a traceback to stderr.
-        """
-        exc = sys.exc_info()[1]
-        if isinstance(exc, Exception):
-            self._report_error(record, exc)
 
     def _report_error(self, record: logging.LogRecord | None, exc: Exception) -> None:
         """Report a delivery error through the configured error channel.
