@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import threading
 
 import pytest
 
@@ -242,3 +243,41 @@ def test_worker_property_exposes_bound_worker():
     assert callable(backend.worker)
     with pytest.raises(AttributeError):
         backend.worker = None  # read-only
+
+
+@pytest.mark.asyncio
+async def test_worker_writes_off_the_event_loop_thread(capsys):
+    """The blocking stdout write runs on a worker thread, not the loop thread."""
+    running_event = asyncio.Event()
+    running_event.set()
+    backend = ConsoleBackend(lambda: FakeFormatter(), running_event)
+    loop_thread = threading.current_thread().name
+
+    # Patch sys.stdout with a recorder that captures the writing thread.
+    import sys
+
+    class ThreadRecordingStream:
+        def __init__(self):
+            self.threads = []
+            self.buf = []
+
+        def write(self, text):
+            self.threads.append(threading.current_thread().name)
+            self.buf.append(text)
+
+        def flush(self):
+            pass
+
+    recorder = ThreadRecordingStream()
+    original = sys.stdout
+    sys.stdout = recorder
+    try:
+        worker = asyncio.create_task(backend._worker())
+        await backend.queue.put(_make_record("off loop"))
+        running_event.clear()
+        await asyncio.wait_for(worker, timeout=5)
+    finally:
+        sys.stdout = original
+
+    assert "".join(recorder.buf) == "FMT:off loop\n"
+    assert recorder.threads and all(t != loop_thread for t in recorder.threads)

@@ -13,6 +13,7 @@ import sys
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from ._executor import _WriteExecutor
 from .async_logging_handler import BackendDrainResult, DrainStatus
 from .config import report_error
 
@@ -117,26 +118,44 @@ class ConsoleBackend:
         short timeout on `queue.get` lets the worker observe the running event
         being cleared without blocking forever.
 
+        Each record is formatted on the event-loop thread (the shared record
+        must not be mutated off-loop) and the blocking stdout write+flush is
+        offloaded to a single-thread executor so a slow stdout never stalls the
+        loop. The executor is a worker-local created on first write and shut
+        down in the finally, so each start/stop cycle gets a fresh executor.
+
         Returns:
             None
         """
-        while self.running_event.is_set() or not self.queue.empty():
-            try:
-                record = await asyncio.wait_for(self.queue.get(), 1)
-            except asyncio.TimeoutError:
-                continue
-            try:
-                formatter = self.formatter_provider()
-                if formatter:
-                    sys.stdout.write(formatter.format(record) + "\n")
-                    sys.stdout.flush()
-            except Exception as exc:
-                # A broken stdout or a buggy formatter must not silently kill the
-                # always-on console worker. Report the failure and keep draining
-                # so the queue is still acknowledged and shutdown completes.
-                self._report_error(record, exc)
-            finally:
-                self.queue.task_done()
+        executor = _WriteExecutor()
+        try:
+            while self.running_event.is_set() or not self.queue.empty():
+                try:
+                    record = await asyncio.wait_for(self.queue.get(), 1)
+                except asyncio.TimeoutError:
+                    continue
+                try:
+                    formatter = self.formatter_provider()
+                    if formatter:
+                        text = formatter.format(record) + "\n"
+                        await executor.run(lambda: self._write_stdout(text))
+                except Exception as exc:
+                    # A broken stdout or a buggy formatter must not silently kill
+                    # the always-on console worker. Report the failure and keep
+                    # draining so the queue is still acknowledged and shutdown
+                    # completes.
+                    self._report_error(record, exc)
+                finally:
+                    self.queue.task_done()
+        finally:
+            # The console owns no stream to close; just release the worker
+            # thread. shutdown(wait=True) waits for any in-flight write.
+            await executor.shutdown()
+
+    def _write_stdout(self, text: str) -> None:
+        """Write ``text`` to standard output and flush (runs on the executor thread)."""
+        sys.stdout.write(text)
+        sys.stdout.flush()
 
     def _report_error(self, record: logging.LogRecord | None, exc: Exception) -> None:
         """Report a console delivery error through the configured error channel.
