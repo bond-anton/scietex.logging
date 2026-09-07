@@ -207,6 +207,29 @@ uv run python examples/all_backends.py
 
 ---
 
+### Injected Client
+
+**File**: `examples/injected_client.py`
+
+Demonstrates injecting an app-owned `GlideClient` into `AsyncValkeyHandler` via
+the `client=` keyword, so the handler never builds or closes its own connection.
+
+**Usage**:
+```bash
+uv run python examples/injected_client.py
+```
+
+**Dependencies**:
+- Valkey must be running locally or configure remote connection
+
+**Key Features**:
+- App-owned `GlideClient` injected into `AsyncValkeyHandler`
+- Handler never closes the injected client
+- Host reads the stream back with the still-open client after `stop_logging`,
+  then closes it itself
+
+---
+
 ## Running Examples
 
 All examples can be run with `uv`:

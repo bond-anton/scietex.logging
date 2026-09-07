@@ -21,7 +21,10 @@ console's `report_status` as a status reporter via `register_status_reporter`.
 
 **`AsyncBrokerHandler.__init__`** (`message_broker_handler.py:41`): calls super,
 then registers `log_queues[queue_name]` and `self._worker` via
-`register_backend`. Sets `client = None`.
+`register_backend`. Sets `client = None` by default; when an external `client`
+is injected it stores it durably (`_injected_client`) and marks the handler as
+non-owning (`_owns_client = False`). Passing both `client` and `backend_config`
+raises `ValueError`.
 
 **`AsyncRedisHandler.__init__`** / **`AsyncValkeyHandler.__init__`**: call super
 with `queue_name="redis"` / `"valkey"` and `backend_config` (a typed
@@ -131,9 +134,15 @@ moved across loops. To log on a different loop, construct a fresh handler.
 | client connection (`client`) | `connect()` (worker start) | handler instance | `disconnect()` (worker exit) |
 | formatter | `__init__` | handler instance | — |
 
+The `client connection` row above holds only for a **self-managed** client (one
+built by the handler's own `connect()`). An **injected** client is owned by the
+caller, not the handler, and is never closed by `disconnect()`.
+
 **Ownership model.** All async resources are instance-scoped and owned by the
 handler. There is no global state and no shared resource across handler
-instances. The host application is responsible for calling `start_logging` /
+instances. The one exception is an **injected client**: when a caller passes
+`client=`, the caller owns its lifetime and recovery — the handler never closes
+it. The host application is responsible for calling `start_logging` /
 `stop_logging` in the correct order and within an event loop.
 
 ### Cleanup via stdlib `logging.shutdown()`

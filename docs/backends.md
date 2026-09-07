@@ -55,6 +55,9 @@ handler = AsyncRedisHandler(
   - `host`: Redis server host (default: "localhost")
   - `port`: Redis server port (default: 6379)
   - `db`: Redis database number (default: 0)
+- `client`: Inject an externally-managed `redis.Redis` client the handler never
+  closes — the caller owns its lifetime and recovery. Mutually exclusive with
+  `redis_config` (passing both raises `ValueError`).
 
 ## Valkey Logging
 
@@ -93,6 +96,9 @@ handler = AsyncValkeyHandler(stream_name="my_log_stream")
   `None`-valued fields so glide applies its own defaults. The scalar `username`
   and `password` fields are combined into a glide `ServerCredentials` and passed
   as `credentials` to `GlideClientConfiguration`.
+- `client`: Inject an externally-managed `GlideClient` the handler never closes —
+  the caller owns its lifetime and recovery. Mutually exclusive with
+  `valkey_config` (passing both raises `ValueError`).
 
 ## Backend Comparison
 

@@ -195,6 +195,31 @@ read-only `asdict` view kept for backward compatibility. The user's
 `connect()` translates the typed config into a `GlideClientConfiguration`,
 dropping `None`-valued fields so glide applies its own defaults.
 
+### Injecting an external client
+
+`AsyncBrokerHandler`, `AsyncRedisHandler`, and `AsyncValkeyHandler` accept a
+keyword-only `client=` argument that injects an already-created,
+externally-managed client, so the handler never builds or closes its own
+connection:
+
+```python
+from scietex.logging import AsyncValkeyHandler
+
+client = await GlideClient.create(...)  # app-owned, created by the host
+handler = AsyncValkeyHandler(stream_name="logs", client=client)
+```
+
+Ownership contract:
+
+- The handler **never closes** an injected client — the caller owns its lifetime
+  and recovery. `disconnect()` is a no-op for an injected client.
+- `client` and the backend config dict (`redis_config` / `valkey_config`) are
+  **mutually exclusive**: passing both raises `ValueError`.
+- When a client is injected with no config dict, the backend config is unused
+  (`connect()` never runs).
+
+See `examples/injected_client.py` for a runnable example.
+
 ### Threading Contract
 
 `emit()` must be called from the asyncio event-loop thread. An off-loop `emit()`

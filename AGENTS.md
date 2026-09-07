@@ -32,6 +32,7 @@ scietex.logging/
 │   ├── test_basic_handler.py
 │   ├── test_config.py
 │   ├── test_console_backend.py
+│   ├── test_client_injection.py
 │   ├── test_formatter.py
 │   ├── test_message_broker_handler.py
 │   ├── test_queue_bounds.py
@@ -53,6 +54,7 @@ scietex.logging/
 │   ├── custom_backend.py
 │   ├── custom_formatter.py
 │   ├── error_handler_and_queue_bounds.py
+│   ├── injected_client.py
 │   ├── pure_machinery_handler.py
 │   ├── redis_logging.py
 │   ├── restartable_lifecycle.py
@@ -111,6 +113,7 @@ logging.Handler (standard library)
    - `logging_running_event` - Signals when logging workers are active
 3. **Worker Pattern**: Each backend has its own queue and worker coroutine
 4. **Graceful Shutdown**: `stop_logging()` waits for queues to drain with configurable timeout (default 5s)
+5. **Client Injection**: Broker handlers accept an optional `client=` argument to use an externally-managed connection. When injected, the handler never calls `close()` on it — the caller owns the client's lifetime and recovery (`_owns_client`/`_injected_client`; `_connect()`/`_disconnect()` wrappers delegate to the abstract methods only when the handler owns the client).
 
 ### ScietexFormatter
 
@@ -127,6 +130,7 @@ logging.Handler (standard library)
 2. Implement `connect()`, `disconnect()`, and `send_message()` methods
 3. Add optional import in `__init__.py` with try/except ImportError
 4. Update `__all__` list in `__init__.py`
+5. (Optional) Support client injection by accepting a `client=` keyword argument and forwarding it to `super().__init__()`; the base handles ownership.
 
 ### Running Examples
 
@@ -142,6 +146,9 @@ uv run python examples/valkey_logging.py
 
 # Both console and Redis
 uv run python examples/console_and_redis_logging.py
+
+# Valkey logging with an externally-managed client (handler never closes it)
+uv run python examples/injected_client.py
 ```
 
 ### Running Tests
@@ -169,6 +176,7 @@ uv run ruff check .
 
 1. PostgreSQL support is mentioned in docs but not yet implemented (no `postgres` extra defined)
 2. The `__init__.py` imports Redis/Valkey handlers conditionally - ensure the `[redis]` or `[valkey]` extras are installed
+3. `client` and a backend config (`valkey_config`/`redis_config`/`backend_config`) are mutually exclusive — passing both raises `ValueError`. When injecting a client, omit the config dict.
 
 ## Development Commands
 

@@ -232,12 +232,15 @@ connect/disconnect/send_message contract concrete backends implement.
 **Class.** `AsyncBrokerHandler(AsyncBaseHandler, abc.ABC)` — `message_broker_handler.py:25`
 
 **Public interface.**
-- `AsyncBrokerHandler(queue_name, service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000, backend_config=None, formatter=None)`
+- `AsyncBrokerHandler(queue_name, service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000, backend_config=None, client=None, formatter=None)`
   - Registers `log_queues[queue_name]` (a bounded `asyncio.Queue(maxsize=self.queue_maxsize)`)
     and `self._worker` (a bound method used as a worker factory) via
     `register_backend`. No `**kwargs` — unknown keyword args raise `TypeError`.
     Accepts an optional `formatter=` kwarg forwarded to super (AR-024).
-  - `client` attribute (Any | None) — connection slot.
+  - `client` attribute (Any | None) — connection slot. When an external `client`
+    is injected, the handler stores it durably and never closes it — the caller
+    owns its lifetime and recovery. Passing both `client` and `backend_config`
+    raises `ValueError`.
 - `async connect()` — `message_broker_handler.py:107`. Abstract; subclass hook.
 - `async disconnect()` — `message_broker_handler.py:120`. Abstract; subclass hook.
 - `async send_message(record: dict[str, str])` — `message_broker_handler.py:132`.
@@ -288,14 +291,16 @@ apps implementing custom backends (per docs).
 
 **Public interface.**
 - `AsyncRedisHandler(stream_name, service_name=None, worker_id=None, *,
-  redis_config=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)`
+  redis_config=None, client=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)`
   — passes `queue_name="redis"` to super. Converts `redis_config` into a typed
   `RedisConfig` stored as `self.config.backend_config`; `RedisConfig` mirrors
   the full plain-option surface of `redis.Redis`, so legitimate client options
   are accepted (unknown keys raise `TypeError`). `self.client_config` is a
   read-only `asdict` view of `backend_config`, defaulting to
   `{"host": "localhost", "port": 6379, "db": 0}`. Accepts an optional
-  `formatter=` kwarg (AR-024).
+  `formatter=` kwarg (AR-024). An injected `client=` is an externally-managed
+  `redis.Redis` the handler never closes — the caller owns its lifetime and
+  recovery; passing both `client` and `redis_config` raises `ValueError`.
 - `async connect()` — `redis_handler.py:91`. Builds `redis.Redis(**cfg)` from
   `self.config.backend_config` if `client is None`, honoring the user's
   `decode_responses` value instead of forcing it, then pings to probe
@@ -324,14 +329,16 @@ the `valkey-glide` client.
 
 **Public interface.**
 - `AsyncValkeyHandler(stream_name, service_name=None, worker_id=None, *,
-  valkey_config=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)`
+  valkey_config=None, client=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)`
   — passes `queue_name="valkey"` to super. `valkey_config` is a **dict**
   (mirroring Redis's seam, AR-025) whose keys mirror
   `GlideClientConfiguration`'s scalar plain options; `addresses` is a list of
   `(host, port)` tuples defaulting to `[("localhost", 6379)]`. A typed
   `ValkeyConfig` is stored as `self.config.backend_config`; `self.client_config`
   is a read-only `asdict` view of it. Accepts an optional `formatter=` kwarg
-  (AR-024).
+  (AR-024). An injected `client=` is an externally-managed `GlideClient` the
+  handler never closes — the caller owns its lifetime and recovery; passing both
+  `client` and `valkey_config` raises `ValueError`.
 - `async connect()` — `valkey_handler.py:94`. Translates
   `self.config.backend_config` into a `GlideClientConfiguration` (`addresses`
   tuples → `NodeAddress` objects, `None`-valued fields dropped so glide applies

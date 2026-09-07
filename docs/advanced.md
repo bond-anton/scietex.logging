@@ -51,6 +51,16 @@ class AsyncPostgresHandler(AsyncBrokerHandler):
 2. **`disconnect()`**: Close connection to your backend
 3. **`send_message(record)`**: Send a formatted log record to your backend
 
+### Injecting an external client
+
+A subclass of `AsyncBrokerHandler` (or a concrete handler) can accept an
+injected `client=` keyword argument. When a client is injected, the base
+machinery never closes it — the caller owns its lifetime and recovery, and
+`disconnect()` is a no-op for the injected client. `client` and `backend_config`
+are mutually exclusive: passing both raises `ValueError`. This lets a host
+reuse an already-created, externally-managed client instead of letting the
+handler build and tear down its own connection. See `examples/injected_client.py`.
+
 A failure in `connect()` or `send_message()` must raise; the worker reports it through the
 error channel. A failed `connect()` is retried (report + short sleep + retry). A failed
 `send_message()` is not retried: the error is reported, the client is disconnected/closed

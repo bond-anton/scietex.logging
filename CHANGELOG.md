@@ -5,6 +5,13 @@ All notable changes to `scietex.logging` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-07
+
+### Features
+
+- **Optional client-injection seam**: inject an externally-managed broker client into `AsyncBrokerHandler`, `AsyncRedisHandler`, or `AsyncValkeyHandler` via the new `client=` keyword argument. When a client is injected the handler never closes it — the caller owns its lifetime and recovery. Passing both `client` and a backend config raises `ValueError`.
+- **Injected-client example**: `examples/injected_client.py` demonstrates injecting an app-owned Valkey client.
+
 ## [1.1.0] - 2026-09-06
 
 ### Features
