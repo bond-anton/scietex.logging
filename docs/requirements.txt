@@ -1,0 +1,8 @@
+# ReadTheDocs build requirements for scietex.logging.
+# The package itself is installed editable with the [all] extras so autodoc can
+# import the optional Redis/Valkey/MQTT handlers (mock-imports is broken for
+# this codebase's eager PEP 604 annotations).
+-e ..[all]
+sphinx>=7.2
+myst-parser>=3.0
+sphinx-rtd-theme>=2.0
