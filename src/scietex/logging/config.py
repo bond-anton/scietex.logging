@@ -1,7 +1,7 @@
 """Typed configuration objects and shared stdlib-only helpers for scietex.logging.
 
 This module is the neutral leaf of the package: it hosts the configuration
-dataclasses (``LoggingConfig``, ``RedisConfig``, ``ValkeyConfig``) alongside the
+dataclasses (``LoggingConfig``, ``RedisConfig``, ``ValkeyConfig``, ``MqttConfig``) alongside the
 cross-module helpers ``validate_queue_maxsize``, ``level_abbreviation``,
 ``optional_dependency_error``, and ``report_error``. It imports only the
 standard library, so formatter and broker handlers can depend on it without
@@ -33,8 +33,8 @@ class LoggingConfig:
         error_handler (Callable | None): Delivery-error callback ``(record, exc)``.
         queue_maxsize (int): Bound for every backend queue (default 10000).
         stdout_enable (bool): Whether AsyncBaseHandler registers the console backend.
-        backend_config (RedisConfig | ValkeyConfig | None): Backend-specific config,
-            or None for the console-only handlers.
+        backend_config (RedisConfig | ValkeyConfig | MqttConfig | None): Backend-specific
+            config, or None for the console-only handlers.
     """
 
     service_name: str = "Service"
@@ -42,7 +42,7 @@ class LoggingConfig:
     error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None
     queue_maxsize: int = 10000
     stdout_enable: bool = True
-    backend_config: RedisConfig | ValkeyConfig | None = None
+    backend_config: RedisConfig | ValkeyConfig | MqttConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -131,6 +131,43 @@ class ValkeyConfig:
     client_az: str | None = None
     lazy_connect: bool | None = None
     read_only: bool | None = None
+
+
+@dataclass(frozen=True)
+class MqttConfig:
+    """Connection settings for the MQTT backend.
+
+    Mirrors the scalar plain options of ``aiomqtt.Client`` so that
+    ``MqttConfig(**raw)`` never rejects a legitimate client option. ``host`` is
+    the common connection field (consistent with ``RedisConfig``) and is
+    translated to aiomqtt's ``hostname`` kwarg by ``connect()``. Object-valued
+    expert options (``will``, ``tls_context``, ``tls_params``, ``properties``,
+    ``logger``) are intentionally not modeled here.
+
+    Attributes:
+        host (str): MQTT broker host (default "localhost").
+        port (int): MQTT broker port (default 1883).
+        username (str | None): Username for authentication (default None).
+        password (str | None): Password for authentication (default None).
+        identifier (str | None): Client identifier; auto-generated if None.
+        keepalive (int | None): Keepalive interval in seconds (default None).
+        clean_session (bool | None): Whether the broker discards the session on
+            disconnect (default None -> aiomqtt default True).
+        transport (str | None): "tcp", "websockets", or "unix" (default None).
+        timeout (float | None): Default broker-communication timeout (default None).
+        tls_insecure (bool | None): Disable TLS hostname verification (default None).
+    """
+
+    host: str = "localhost"
+    port: int = 1883
+    username: str | None = None
+    password: str | None = None
+    identifier: str | None = None
+    keepalive: int | None = None
+    clean_session: bool | None = None
+    transport: str | None = None
+    timeout: float | None = None
+    tls_insecure: bool | None = None
 
 
 def validate_queue_maxsize(value: int) -> int:

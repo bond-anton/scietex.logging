@@ -7,6 +7,7 @@ import pytest
 
 from scietex.logging.config import (
     LoggingConfig,
+    MqttConfig,
     RedisConfig,
     ValkeyConfig,
     level_abbreviation,
@@ -69,7 +70,7 @@ def test_redis_config_accepts_full_client_option_surface():
 def test_backend_config_is_a_union_not_any():
     """LoggingConfig.backend_config is typed as a union of the backend configs, not Any."""
     hints = typing.get_type_hints(LoggingConfig)
-    assert hints["backend_config"] == RedisConfig | ValkeyConfig | None
+    assert hints["backend_config"] == RedisConfig | ValkeyConfig | MqttConfig | None
 
 
 def test_valkey_config_defaults():
@@ -112,6 +113,46 @@ def test_valkey_config_scalar_options_default_to_none():
     assert cfg.client_az is None
     assert cfg.lazy_connect is None
     assert cfg.read_only is None
+
+
+def test_mqtt_config_defaults():
+    cfg = MqttConfig()
+    assert cfg.host == "localhost"
+    assert cfg.port == 1883
+    assert cfg.username is None
+    assert cfg.password is None
+    assert cfg.identifier is None
+    assert cfg.keepalive is None
+    assert cfg.clean_session is None
+    assert cfg.transport is None
+    assert cfg.timeout is None
+    assert cfg.tls_insecure is None
+
+
+def test_mqtt_config_accepts_scalar_plain_options():
+    """MqttConfig mirrors aiomqtt.Client's scalar plain options."""
+    cfg = MqttConfig(
+        host="example.com",
+        port=8883,
+        username="svc",
+        password="secret",
+        identifier="my-client",
+        keepalive=60,
+        clean_session=False,
+        transport="tcp",
+        timeout=10.0,
+        tls_insecure=True,
+    )
+    assert cfg.host == "example.com"
+    assert cfg.port == 8883
+    assert cfg.username == "svc"
+    assert cfg.password == "secret"
+    assert cfg.identifier == "my-client"
+    assert cfg.keepalive == 60
+    assert cfg.clean_session is False
+    assert cfg.transport == "tcp"
+    assert cfg.timeout == 10.0
+    assert cfg.tls_insecure is True
 
 
 def test_validate_queue_maxsize_accepts_positive_int():
