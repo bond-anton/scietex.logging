@@ -1,9 +1,11 @@
 # Roadmap
 
-Planned direction for `scietex.logging`. Current stable release: **1.0.0**.
+Planned direction for `scietex.logging`. Current stable release: **1.5.0**.
 
-The 1.0 public API (`__all__` surface and constructor signatures) is treated as
-frozen. Anything that breaks it is routed through a **2.0** release.
+The 1.x public API (`__all__` surface and constructor signatures) has grown
+additively through the 1.x line (client injection, MQTT backend, file sinks,
+`JsonFormatter`) without breaking the surface. Anything that **breaks** the
+existing API is routed through a **2.0** release.
 
 ## 2.0 — Loop-independent (thread-safe) `emit`
 
@@ -87,11 +89,12 @@ the loop-independent `emit` work above.
 - **Problem:** `AsyncLoggingHandler.__init__` — the "pure machinery, no sink"
   base — accepts `stdout_enable` (console), `backend_config` (broker), and
   `formatter`, storing them on `config` without acting on them. Every subclass
-  re-declares the full parameter list (five handlers repeat the signature), so
-  adding an option means touching all of them.
+  re-declares the full parameter list (eight handlers now repeat the signature:
+  Redis, Valkey, MQTT, File, and the three rotation variants), so adding an
+  option means touching all of them.
 - **Recommendation:** a single `LoggingConfig`-accepting constructor (or
   narrower per-layer constructors) so options flow as data, not repeated kwargs.
-- **Why 2.0:** changing the constructor signature across all five handlers is a
+- **Why 2.0:** changing the constructor signature across all eight handlers is a
   public-API breaking change. Deferred past 1.0 deliberately — locking the
   current surface at 1.0 first, then reshaping it in 2.0, is the correct semver
   posture.
@@ -113,8 +116,8 @@ the loop-independent `emit` work above.
 
 - **Problem:** `queue_name="console"` collides with the console backend under
   the default `stdout_enable=True`, raising `ValueError` at construction
-  (AR-109). `"console"`/`"redis"`/`"valkey"` are de-facto reserved but not
-  namespaced.
+  (AR-109). `"console"`/`"redis"`/`"valkey"`/`"mqtt"`/`"file"` are de-facto
+  reserved but not namespaced.
 - **Options:** namespace the console backend (e.g. `"_console"`) so user
   `queue_name` values can never collide, or keep the loud `ValueError` and
   document the reserved names (the 1.0 choice).
@@ -123,7 +126,7 @@ the loop-independent `emit` work above.
 
 ---
 
-## 2.0 — Async redesign of Console and File backends
+## 1.x — Async redesign of Console and File backends
 
 **Status:** Proposed (design only; not yet implemented).
 
@@ -135,8 +138,13 @@ piped stdout, a network filesystem, a slow disk), this blocks the event loop
 thread for the duration of each write, stalling every other coroutine on the
 loop.
 
-A 2.0 redesign should move the blocking write off the loop thread — e.g. via
+A redesign should move the blocking write off the loop thread — e.g. via
 `asyncio.to_thread` or a dedicated writer thread/executor — so the worker
-coroutine awaits the write instead of blocking the loop. This is a behavior
-change (write latency and ordering semantics shift), so it is deferred to 2.0
-rather than patched into the 1.x line.
+coroutine awaits the write instead of blocking the loop.
+
+This is a **behavior change, not an API break**: no public signature, `__all__`
+surface, constructor, or method contract changes. It is therefore a candidate
+for a **1.x** minor release (e.g. 1.6.0), documented as a behavior change in the
+changelog — not gated behind the 2.0 breaking release. The only reason to batch
+it into 2.0 would be to land all semantic churn in one release alongside the
+genuinely-breaking items above.
