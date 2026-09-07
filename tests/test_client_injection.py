@@ -279,3 +279,30 @@ def test_redis_client_only_no_error():
     assert handler._owns_client is False
     assert handler.client is client
     assert handler.config.backend_config is None
+
+
+def test_mqtt_client_and_config_raise():
+    """AsyncMqttHandler rejects both client and mqtt_config."""
+    mqtt_mod = pytest.importorskip("scietex.logging.mqtt_handler")
+    client = object()
+    with pytest.raises(ValueError):
+        mqtt_mod.AsyncMqttHandler(
+            topic="s",
+            stdout_enable=False,
+            client=client,
+            mqtt_config={"host": "localhost"},
+        )
+
+
+def test_mqtt_client_only_no_error():
+    """AsyncMqttHandler accepts client alone (config unused, no spurious raise)."""
+    mqtt_mod = pytest.importorskip("scietex.logging.mqtt_handler")
+    client = object()
+    handler = mqtt_mod.AsyncMqttHandler(
+        topic="s",
+        stdout_enable=False,
+        client=client,
+    )
+    assert handler._owns_client is False
+    assert handler.client is client
+    assert handler.config.backend_config is None
