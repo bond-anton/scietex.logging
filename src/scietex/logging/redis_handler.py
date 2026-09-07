@@ -41,6 +41,7 @@ class AsyncRedisHandler(AsyncBrokerHandler):
         stream_name: str,
         service_name: str | None = None,
         worker_id: int | None = None,
+        instance_id: str | None = None,
         *,
         redis_config: dict | None = None,
         client: redis.Redis | None = None,
@@ -55,7 +56,10 @@ class AsyncRedisHandler(AsyncBrokerHandler):
         Args:
             stream_name (str): The Redis stream name to which log records are sent.
             service_name (str, optional): Service name for log identification. Defaults to None.
-            worker_id (int, optional): Identifier for the logging worker instance. Defaults to None.
+            worker_id (int, optional): Deprecated identifier for the logging worker instance.
+                Use ``instance_id`` instead; this parameter is removed in v2.0. Defaults to None.
+            instance_id (str, optional): Identifier for the logging instance.
+                Defaults to "1". Mutually exclusive with ``worker_id``. Defaults to None.
             redis_config (dict, optional): Configuration dictionary for Redis connection.
                 Defaults to {"host": "localhost", "port": 6379, "db": 0}. Keys are
                 converted into a typed ``RedisConfig`` stored as
@@ -73,10 +77,10 @@ class AsyncRedisHandler(AsyncBrokerHandler):
                 Defaults to 10000.
             formatter (logging.Formatter | None): Formatter used to render records
                 for the console (stdout) sink only. Broker payloads are built from
-                the handler's ``service_name``/``worker_id`` config and the record
+                the handler's ``service_name``/``instance_id`` config and the record
                 directly, so they are invariant under this formatter. Defaults to
                 None, in which case a default ``ScietexFormatter`` is constructed
-                from ``service_name`` and ``worker_id``.
+                from ``service_name`` and ``instance_id``.
 
         Attributes:
             stream_name (str): The Redis stream name where log entries are sent.
@@ -99,6 +103,7 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             queue_name="redis",
             service_name=service_name,
             worker_id=worker_id,
+            instance_id=instance_id,
             error_handler=error_handler,
             stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,

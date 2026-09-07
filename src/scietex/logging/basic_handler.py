@@ -34,6 +34,7 @@ class AsyncBaseHandler(AsyncLoggingHandler):
         self,
         service_name: str | None = None,
         worker_id: int | None = None,
+        instance_id: str | None = None,
         *,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         stdout_enable: bool = True,
@@ -47,7 +48,10 @@ class AsyncBaseHandler(AsyncLoggingHandler):
         Args:
             service_name (str, optional): Name of the service for log identification.
                 Defaults to "Service".
-            worker_id (int, optional): Identifier for the worker instance. Defaults to 1.
+            worker_id (int, optional): Deprecated identifier for the worker instance.
+                Use ``instance_id`` instead; this parameter is removed in v2.0.
+            instance_id (str, optional): Identifier for the logging instance.
+                Defaults to "1". Mutually exclusive with ``worker_id``.
             error_handler (callable, optional): Callback invoked with
                 ``(record, exc)`` when a log record cannot be delivered. Defaults to
                 None, in which case errors are reported via the ``scietex.logging``
@@ -59,7 +63,7 @@ class AsyncBaseHandler(AsyncLoggingHandler):
                 config forwarded by broker subclasses. Defaults to None.
             formatter (logging.Formatter | None): Formatter used to render records.
                 Defaults to None, in which case a default ``ScietexFormatter`` is
-                constructed from ``service_name`` and ``worker_id``.
+                constructed from ``service_name`` and ``instance_id``.
 
         Attributes:
             stdout_enable (bool): Flag to enable console logging (defaults to True).
@@ -67,10 +71,12 @@ class AsyncBaseHandler(AsyncLoggingHandler):
 
         Raises:
             TypeError: If an unknown keyword argument is passed.
+            ValueError: If both ``worker_id`` and ``instance_id`` are provided.
         """
         super().__init__(
             service_name=service_name,
             worker_id=worker_id,
+            instance_id=instance_id,
             error_handler=error_handler,
             queue_maxsize=queue_maxsize,
             stdout_enable=stdout_enable,

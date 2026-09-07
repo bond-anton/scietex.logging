@@ -45,6 +45,7 @@ class AsyncMqttHandler(AsyncBrokerHandler):
         topic: str,
         service_name: str | None = None,
         worker_id: int | None = None,
+        instance_id: str | None = None,
         *,
         mqtt_config: dict | None = None,
         qos: int = 0,
@@ -61,7 +62,10 @@ class AsyncMqttHandler(AsyncBrokerHandler):
         Args:
             topic (str): The MQTT topic to which log records are published.
             service_name (str, optional): Service name for log identification. Defaults to None.
-            worker_id (int, optional): Identifier for the logging worker instance. Defaults to None.
+            worker_id (int, optional): Deprecated identifier for the logging worker instance.
+                Use ``instance_id`` instead; this parameter is removed in v2.0. Defaults to None.
+            instance_id (str, optional): Identifier for the logging instance.
+                Defaults to "1". Mutually exclusive with ``worker_id``. Defaults to None.
             mqtt_config (dict, optional): Configuration dictionary for the MQTT connection.
                 Defaults to {"host": "localhost", "port": 1883}. Keys are converted into a
                 typed ``MqttConfig`` stored as ``self.config.backend_config``, which is the
@@ -86,10 +90,10 @@ class AsyncMqttHandler(AsyncBrokerHandler):
                 Defaults to 10000.
             formatter (logging.Formatter | None): Formatter used to render records
                 for the console (stdout) sink only. Broker payloads are built from
-                the handler's ``service_name``/``worker_id`` config and the record
+                the handler's ``service_name``/``instance_id`` config and the record
                 directly, so they are invariant under this formatter. Defaults to
                 None, in which case a default ``ScietexFormatter`` is constructed
-                from ``service_name`` and ``worker_id``.
+                from ``service_name`` and ``instance_id``.
 
         Attributes:
             topic (str): The MQTT topic to which log entries are published.
@@ -110,6 +114,7 @@ class AsyncMqttHandler(AsyncBrokerHandler):
             queue_name="mqtt",
             service_name=service_name,
             worker_id=worker_id,
+            instance_id=instance_id,
             error_handler=error_handler,
             stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,

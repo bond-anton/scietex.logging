@@ -41,6 +41,7 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
         stream_name: str,
         service_name: str | None = None,
         worker_id: int | None = None,
+        instance_id: str | None = None,
         *,
         valkey_config: dict | None = None,
         client: GlideClient | None = None,
@@ -55,7 +56,10 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
         Args:
             stream_name (str): The Valkey stream name to which log records are sent.
             service_name (str, optional): Service name for log identification. Defaults to None.
-            worker_id (int, optional): Identifier for the logging worker instance. Defaults to None.
+            worker_id (int, optional): Deprecated identifier for the logging worker instance.
+                Use ``instance_id`` instead; this parameter is removed in v2.0. Defaults to None.
+            instance_id (str, optional): Identifier for the logging instance.
+                Defaults to "1". Mutually exclusive with ``worker_id``. Defaults to None.
             valkey_config (dict, optional): Configuration dictionary for the Valkey connection.
                 Keys mirror ``GlideClientConfiguration``'s scalar plain options; ``addresses``
                 is a list of ``(host, port)`` tuples and defaults to ``[("localhost", 6379)]``.
@@ -75,10 +79,10 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
                 Defaults to 10000.
             formatter (logging.Formatter | None): Formatter used to render records
                 for the console (stdout) sink only. Broker payloads are built from
-                the handler's ``service_name``/``worker_id`` config and the record
+                the handler's ``service_name``/``instance_id`` config and the record
                 directly, so they are invariant under this formatter. Defaults to
                 None, in which case a default ``ScietexFormatter`` is constructed
-                from ``service_name`` and ``worker_id``.
+                from ``service_name`` and ``instance_id``.
 
         Attributes:
             stream_name (str): The Valkey stream name where log entries are sent.
@@ -99,6 +103,7 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
             queue_name="valkey",
             service_name=service_name,
             worker_id=worker_id,
+            instance_id=instance_id,
             error_handler=error_handler,
             stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,

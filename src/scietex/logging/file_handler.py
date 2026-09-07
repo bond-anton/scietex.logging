@@ -31,7 +31,7 @@ class AsyncFileHandler(AsyncBaseHandler):
     Registers a ``"file"`` backend that formats queued records and writes them
     to a file. The constructor mirrors the standard-library ``logging.FileHandler``
     signature (``filename``, ``mode``, ``encoding``, ``delay``, ``errors``) plus
-    the scietex options (``service_name``, ``worker_id``, ``error_handler``,
+    the scietex options (``service_name``, ``instance_id``, ``error_handler``,
     ``stdout_enable``, ``queue_maxsize``, ``formatter``).
 
     The file handle is opened lazily by the worker (respecting ``delay``) and
@@ -59,6 +59,7 @@ class AsyncFileHandler(AsyncBaseHandler):
         filename: str | None = None,
         service_name: str | None = None,
         worker_id: int | None = None,
+        instance_id: str | None = None,
         *,
         mode: str = "a",
         encoding: str | None = None,
@@ -77,7 +78,10 @@ class AsyncFileHandler(AsyncBaseHandler):
             filename (str, optional): Path to the log file. Mutually exclusive
                 with ``file``; omit it when injecting ``file=``.
             service_name (str, optional): Name of the service for log identification.
-            worker_id (int, optional): Identifier for the worker instance.
+            worker_id (int, optional): Deprecated identifier for the worker instance.
+                Use ``instance_id`` instead; this parameter is removed in v2.0.
+            instance_id (str, optional): Identifier for the logging instance.
+                Defaults to "1". Mutually exclusive with ``worker_id``.
             mode (str): File open mode (default "a").
             encoding (str, optional): File encoding (default None -> locale default).
             delay (bool): If True, defer opening the file until the first write
@@ -93,7 +97,7 @@ class AsyncFileHandler(AsyncBaseHandler):
                 hold. Defaults to 10000.
             formatter (logging.Formatter | None): Formatter used to render records.
                 Defaults to None, in which case a default ``ScietexFormatter`` is
-                constructed from ``service_name`` and ``worker_id``.
+                constructed from ``service_name`` and ``instance_id``.
 
         Raises:
             TypeError: If an unknown keyword argument is passed.
@@ -102,6 +106,7 @@ class AsyncFileHandler(AsyncBaseHandler):
         super().__init__(
             service_name=service_name,
             worker_id=worker_id,
+            instance_id=instance_id,
             error_handler=error_handler,
             stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
@@ -265,6 +270,7 @@ class AsyncRotatingFileHandler(AsyncFileHandler):
         filename: str,
         service_name: str | None = None,
         worker_id: int | None = None,
+        instance_id: str | None = None,
         *,
         mode: str = "a",
         maxBytes: int = 0,
@@ -284,7 +290,10 @@ class AsyncRotatingFileHandler(AsyncFileHandler):
         Args:
             filename (str): Path to the log file.
             service_name (str, optional): Name of the service for log identification.
-            worker_id (int, optional): Identifier for the worker instance.
+            worker_id (int, optional): Deprecated identifier for the worker instance.
+                Use ``instance_id`` instead; this parameter is removed in v2.0.
+            instance_id (str, optional): Identifier for the logging instance.
+                Defaults to "1". Mutually exclusive with ``worker_id``.
             mode (str): File open mode (default "a").
             maxBytes (int): Roll over when the file exceeds this many bytes.
                 0 disables size-based rotation (default).
@@ -302,6 +311,7 @@ class AsyncRotatingFileHandler(AsyncFileHandler):
             filename,
             service_name=service_name,
             worker_id=worker_id,
+            instance_id=instance_id,
             mode=mode,
             encoding=encoding,
             delay=delay,
@@ -408,6 +418,7 @@ class AsyncTimedRotatingFileHandler(AsyncFileHandler):
         filename: str,
         service_name: str | None = None,
         worker_id: int | None = None,
+        instance_id: str | None = None,
         *,
         when: str = "h",
         interval: int = 1,
@@ -429,7 +440,10 @@ class AsyncTimedRotatingFileHandler(AsyncFileHandler):
         Args:
             filename (str): Path to the log file.
             service_name (str, optional): Name of the service for log identification.
-            worker_id (int, optional): Identifier for the worker instance.
+            worker_id (int, optional): Deprecated identifier for the worker instance.
+                Use ``instance_id`` instead; this parameter is removed in v2.0.
+            instance_id (str, optional): Identifier for the logging instance.
+                Defaults to "1". Mutually exclusive with ``worker_id``.
             when (str): Rollover interval type: 'S', 'M', 'H', 'D', 'W0'-'W6',
                 or 'midnight' (default 'h').
             interval (int): Number of ``when`` units between rollovers (default 1).
@@ -449,6 +463,7 @@ class AsyncTimedRotatingFileHandler(AsyncFileHandler):
             filename,
             service_name=service_name,
             worker_id=worker_id,
+            instance_id=instance_id,
             mode="a",
             encoding=encoding,
             delay=delay,
@@ -557,6 +572,7 @@ class AsyncWatchedFileHandler(AsyncFileHandler):
         filename: str,
         service_name: str | None = None,
         worker_id: int | None = None,
+        instance_id: str | None = None,
         *,
         mode: str = "a",
         encoding: str | None = None,
@@ -574,7 +590,10 @@ class AsyncWatchedFileHandler(AsyncFileHandler):
         Args:
             filename (str): Path to the log file.
             service_name (str, optional): Name of the service for log identification.
-            worker_id (int, optional): Identifier for the worker instance.
+            worker_id (int, optional): Deprecated identifier for the worker instance.
+                Use ``instance_id`` instead; this parameter is removed in v2.0.
+            instance_id (str, optional): Identifier for the logging instance.
+                Defaults to "1". Mutually exclusive with ``worker_id``.
             mode (str): File open mode (default "a").
             encoding (str, optional): File encoding.
             delay (bool): If True, defer opening the file until the first write.
@@ -589,6 +608,7 @@ class AsyncWatchedFileHandler(AsyncFileHandler):
             filename,
             service_name=service_name,
             worker_id=worker_id,
+            instance_id=instance_id,
             mode=mode,
             encoding=encoding,
             delay=delay,

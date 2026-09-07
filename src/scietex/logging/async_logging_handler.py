@@ -21,6 +21,7 @@ from .config import (
     RedisConfig,
     ValkeyConfig,
     report_error,
+    resolve_instance_id,
     validate_queue_maxsize,
 )
 from .formatter import ScietexFormatter
@@ -132,6 +133,7 @@ class AsyncLoggingHandler(logging.Handler):
         self,
         service_name: str | None = None,
         worker_id: int | None = None,
+        instance_id: str | None = None,
         *,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         queue_maxsize: int = 10000,
@@ -150,7 +152,11 @@ class AsyncLoggingHandler(logging.Handler):
         Args:
             service_name (str, optional): Name of the service for log identification.
                 Defaults to "Service".
-            worker_id (int, optional): Identifier for the worker instance. Defaults to 1.
+            worker_id (int, optional): Deprecated identifier for the worker instance.
+                Use ``instance_id`` instead; this parameter is removed in v2.0.
+            instance_id (str, optional): Identifier for the logging instance
+                (a process, container, replica, or deployment unit). Defaults to
+                "1". Mutually exclusive with ``worker_id``.
             error_handler (callable, optional): Callback invoked with
                 ``(record, exc)`` when a log record cannot be delivered. Defaults to
                 None, in which case errors are reported via the ``scietex.logging``
@@ -165,19 +171,20 @@ class AsyncLoggingHandler(logging.Handler):
                 config attached by broker subclasses. Defaults to None.
             formatter (logging.Formatter | None): Formatter used to render records.
                 Defaults to None, in which case a default ``ScietexFormatter`` is
-                constructed from ``service_name`` and ``worker_id``.
+                constructed from ``service_name`` and ``instance_id``.
 
         Raises:
             TypeError: If an unknown keyword argument is passed.
+            ValueError: If both ``worker_id`` and ``instance_id`` are provided.
         """
         super().__init__()
-        if worker_id is None:
-            worker_id = 1
         if service_name is None:
             service_name = "Service"
+        resolved_instance_id = resolve_instance_id(worker_id, instance_id)
         self.config = LoggingConfig(
             service_name=service_name,
-            worker_id=worker_id,
+            instance_id=resolved_instance_id,
+            worker_id=worker_id if worker_id is not None else 1,
             error_handler=error_handler,
             queue_maxsize=validate_queue_maxsize(queue_maxsize),
             stdout_enable=stdout_enable,
@@ -187,7 +194,7 @@ class AsyncLoggingHandler(logging.Handler):
             formatter
             if formatter is not None
             else ScietexFormatter(
-                service_name=self.config.service_name, worker_id=self.config.worker_id
+                service_name=self.config.service_name, instance_id=self.config.instance_id
             )
         )
         self.logging_accept_event = asyncio.Event()  # Indicates if logging accepting events
@@ -219,14 +226,14 @@ class AsyncLoggingHandler(logging.Handler):
 
     @property
     def worker_name(self) -> str:
-        """Read-only handler identity ``service_name:worker_id`` derived from config.
+        """Read-only handler identity ``service_name:instance_id`` derived from config.
 
         The single owner of handler identity is ``config``; the default
         ``ScietexFormatter`` is built from the same fields and the broker worker
         reads this property, so console and broker output cannot diverge (AR-107).
         A user-injected formatter keeps its own ``worker_name``.
         """
-        return f"{self.config.service_name}:{self.config.worker_id}"
+        return f"{self.config.service_name}:{self.config.instance_id}"
 
     def register_backend(
         self,

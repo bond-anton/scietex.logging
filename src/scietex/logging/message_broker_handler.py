@@ -60,6 +60,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         queue_name: str,
         service_name: str | None = None,
         worker_id: int | None = None,
+        instance_id: str | None = None,
         *,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         stdout_enable: bool = True,
@@ -74,7 +75,10 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         Args:
             queue_name (str): The name of the queue from which log records are read.
             service_name (str, optional): Service name for log identification. Defaults to None.
-            worker_id (int, optional): Identifier for the logging worker instance. Defaults to None.
+            worker_id (int, optional): Deprecated identifier for the logging worker instance.
+                Use ``instance_id`` instead; this parameter is removed in v2.0. Defaults to None.
+            instance_id (str, optional): Identifier for the logging instance.
+                Defaults to "1". Mutually exclusive with ``worker_id``. Defaults to None.
             error_handler (callable, optional): Callback invoked with ``(record, exc)``
                 when a log record cannot be delivered. Defaults to None, in which case
                 errors are reported via the ``scietex.logging`` module logger.
@@ -90,7 +94,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
                 and disconnects on its own.
             formatter (logging.Formatter | None): Formatter used to render records.
                 Defaults to None, in which case a default ``ScietexFormatter`` is
-                constructed from ``service_name`` and ``worker_id``.
+                constructed from ``service_name`` and ``instance_id``.
 
         Attributes:
             queue_name (str): The name of the queue for the handler.
@@ -103,6 +107,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         super().__init__(
             service_name=service_name,
             worker_id=worker_id,
+            instance_id=instance_id,
             error_handler=error_handler,
             stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,

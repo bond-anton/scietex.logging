@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 # Imported from the shared stdlib-only leaf (AR-026); also re-exported here for
 # backward compatibility with callers that import it from the formatter module.
-from .config import level_abbreviation
+from .config import level_abbreviation, resolve_instance_id
 
 
 class ScietexFormatter(logging.Formatter):
@@ -16,11 +16,12 @@ class ScietexFormatter(logging.Formatter):
     Custom logging formatter for Scietex services.
 
     This formatter enriches log records with additional information such as
-    the worker identifier, formats log levels into 3-letter abbreviations,
+    the instance identifier, formats log levels into 3-letter abbreviations,
     and outputs timestamps in ISO format with UTC timezone by default.
 
     Attributes:
-        worker_name (str): A formatted string that includes the service name and worker ID.
+        worker_name (str): A formatted string that includes the service name and
+            instance id.
 
     Methods:
         formatTime:
@@ -33,6 +34,7 @@ class ScietexFormatter(logging.Formatter):
         self,
         service_name: str,
         worker_id: int | None = None,
+        instance_id: str | None = None,
         fmt: str | None = None,
         datefmt: str | None = None,
     ) -> None:
@@ -41,17 +43,19 @@ class ScietexFormatter(logging.Formatter):
 
         Args:
             service_name (str): The name of the service using this formatter.
-            worker_id (int, optional): The worker ID. Defaults to 1 if not specified.
+            worker_id (int, optional): Deprecated identifier for the worker instance.
+                Use ``instance_id`` instead; this parameter is removed in v2.0.
+            instance_id (str, optional): Identifier for the logging instance.
+                Defaults to "1". Mutually exclusive with ``worker_id``.
             fmt (str, optional): The log message format string. Defaults to
                 "%(asctime)s - %(levelname)s - [%(worker_name)s] - %(message)s".
             datefmt (str, optional): The date format string. Defaults to None.
         """
-        if worker_id is None:
-            worker_id = 1
+        resolved_instance_id = resolve_instance_id(worker_id, instance_id)
         if fmt is None:
             fmt = "%(asctime)s - %(levelname)s - [%(worker_name)s] - %(message)s"
         super().__init__(fmt, datefmt)
-        self.worker_name: str = f"{service_name}:{worker_id}"
+        self.worker_name: str = f"{service_name}:{resolved_instance_id}"
 
     def formatTime(self, record, datefmt=None):
         """
