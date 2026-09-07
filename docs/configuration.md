@@ -150,12 +150,15 @@ handlers, the broker queue.
 handler = AsyncBaseHandler(queue_maxsize=5000)
 ```
 
-The overflow policy is **drop + report**. When a backend queue is full at emit
-time, `emit` drops the record and routes an `asyncio.QueueFull` to the error
+The overflow policy is **drop + report**. When the shared ingress is full at
+emit time, `emit` drops the record and routes a `queue.Full` to the error
 channel (`error_handler` callback, or the `scietex.logging` module logger when
-none is configured). `emit` never blocks and never buffers unboundedly, so the
-producer stays non-blocking under sustained overload. Under such overload,
-records are dropped and reported rather than buffered without limit.
+none is configured). When a backend queue is full when the bridge re-dispatches,
+the bridge reports an `asyncio.QueueFull` instead. `emit` never blocks and never
+buffers unboundedly, so the producer stays non-blocking under sustained
+overload. Under such overload, records are dropped and reported rather than
+buffered without limit. Worst-case buffering is `(1+N) × queue_maxsize` (the
+shared ingress plus the N backend queues).
 `examples/error_handler_and_queue_bounds.py` demonstrates this drop-and-report
 behavior with a small `queue_maxsize`.
 
@@ -240,8 +243,12 @@ mutually exclusive (passing both raises `ValueError`).
 
 ### Threading Contract
 
-`emit()` must be called from the asyncio event-loop thread. An off-loop `emit()`
-drops the record and reports it through the error channel (never raises).
+`emit()` is **thread-safe** and may be called from any thread, including a
+thread with no running asyncio loop. It writes the record to a bounded,
+thread-safe stdlib `queue.Queue` ingress; a bridge task on the event-loop
+thread re-dispatches it into the per-backend queues, so an off-loop `emit()`
+**delivers** the record instead of dropping it. `emit()` never raises (a
+dropped record is reported through the error channel instead).
 
 ### Async write offload (Console and File backends)
 
@@ -336,13 +343,13 @@ Consequences to be aware of:
 
 ### Formatters must not mutate the record
 
-The same `LogRecord` is fanned out to every backend queue at emit time. The
-shipped `ScietexFormatter` copies the record before formatting, so it never
-mutates the shared record. A **custom formatter must do the same**: if it
-mutates the record in place (e.g. `record.custom_field = ...`), the mutation
-leaks to the broker worker and to any other backend that later reads the same
-record. Copy the record first (`import copy; record = copy.copy(record)`) or
-avoid mutating it.
+The same `LogRecord` is fanned out to every backend queue by the bridge task on
+the event-loop thread. The shipped `ScietexFormatter` copies the record before
+formatting, so it never mutates the shared record. A **custom formatter must do
+the same**: if it mutates the record in place (e.g. `record.custom_field = ...`),
+the mutation leaks to the broker worker and to any other backend that later
+reads the same record. Copy the record first (`import copy; record =
+copy.copy(record)`) or avoid mutating it.
 
 ## Complete Example
 

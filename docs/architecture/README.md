@@ -41,7 +41,7 @@ The package is small: ~3000 lines of source across 14 modules under
 
 ## Key Facts (quick reference)
 
-- **Package**: `scietex.logging`, version `1.6.0` (`src/scietex/logging/__init__.py:138`)
+- **Package**: `scietex.logging`, version `1.7.0` (`src/scietex/logging/__init__.py:138`)
 - **Python**: `>=3.10` (`pyproject.toml`)
 - **Build**: setuptools, `src/` layout; package data ships `py.typed`
 - **Runtime deps**: none (base); `redis>=5.0.0` (`[redis]`), `valkey-glide~=2.5.0` (`[valkey]`), `aiomqtt~=2.5.0` (`[mqtt]`)

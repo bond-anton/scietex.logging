@@ -52,10 +52,17 @@ registered (not yet invoked); no client connection. The handler is inert until
 
 ## Startup (`start_logging`)
 
-`AsyncLoggingHandler.start_logging` (`async_logging_handler.py:234`):
-1. `logging_accept_event.set()` — `emit` may now enqueue.
-2. `logging_running_event.set()` — workers may run.
-3. `log_workers_tasks = [asyncio.create_task(factory()) for factory in
+`AsyncLoggingHandler.start_logging` (`async_logging_handler.py:303`):
+1. `_loop = asyncio.get_running_loop()` — capture the loop for the bridge's
+   `call_soon_threadsafe` wakeup.
+2. Create the thread-safe `_ingress` (`queue.Queue(maxsize=queue_maxsize)`), its
+   `_ingress_event`, and the `_bridge_task` (`asyncio.create_task(
+   _bridge_loop())`) — all **before** the accept event is raised, so `emit`
+   never observes a raised accept event against a not-yet-created ingress. The
+   bridge is tracked separately from `log_workers_tasks`.
+3. `logging_accept_event.set()` — `emit` may now enqueue (into the ingress).
+4. `logging_running_event.set()` — workers may run.
+5. `log_workers_tasks = [asyncio.create_task(factory()) for factory in
    log_worker_factories]` — each worker factory is invoked to produce a fresh
    coroutine, which becomes a scheduled task.
 
@@ -72,8 +79,8 @@ semantics below).
 
 ## Normal operation
 
-- **Produce:** host logs → `emit(record)` → `queue.put_nowait(record)` on each
-  registered backend queue.
+- **Produce:** host logs → `emit(record)` (thread-safe) → `_ingress.put_nowait`
+  → bridge task → `queue.put_nowait(record)` on each registered backend queue.
 - **Consume:** each worker loops `while running_event.is_set() or not
   queue.empty()`, doing `await asyncio.wait_for(queue.get(), 1)`. A 1-second
   timeout on `get()` lets the loop re-check the running event even when idle.
@@ -91,10 +98,14 @@ semantics below).
 
 ## Shutdown (`stop_logging`)
 
-`AsyncLoggingHandler.stop_logging(timeout=5.0)` (`async_logging_handler.py:301`)
+`AsyncLoggingHandler.stop_logging(timeout=5.0)` (`async_logging_handler.py:433`)
 — see data-flow.md Flow 4 for the full sequence. Summary:
 1. Stop accepting new records (`accept_event.clear()`).
-2. Drain every registered backend **concurrently** under one shared timeout while
+2. Stop the bridge and flush the ingress into the backend queues **before** the
+   drains run: the bridge is cancelled, then the `get_nowait` → `put_nowait`
+   fan-out runs inline until the ingress is empty, so no record still in the
+   ingress is lost.
+3. Drain every registered backend **concurrently** under one shared timeout while
    the workers are still running: `stop_logging` schedules every `drain(timeout)`
    hook via `asyncio.gather`, which preserves registration order in the collected
    results. After all drains conclude, invoke each registered status reporter
@@ -102,21 +113,22 @@ semantics below).
    reporter and enqueues synthetic records describing how every backend fared.
    The coordinator owns result collection, so no backend depends on drain
    registration order.
-3. Signal workers to stop (`running_event.clear()`).
-4. Gather worker tasks, bounded by the same `timeout` used for the drains
+4. Signal workers to stop (`running_event.clear()`).
+5. Gather worker tasks, bounded by the same `timeout` used for the drains
    (`asyncio.wait_for`). A worker blocked inside `connect()`/`send_message()`
    cannot observe the running-event clear until the call returns, so on
    `asyncio.TimeoutError` `stop_logging` cancels the straggler tasks and
    re-gathers with `return_exceptions=True` rather than hanging graceful
    shutdown on an unreachable broker. Broker workers run `disconnect()` in a
    `finally`, so the client is released on both normal exit and cancellation.
-5. Reset `log_workers_tasks = []` so a later stop does not re-gather finished
+6. Reset `log_workers_tasks = []` so a later stop does not re-gather finished
    tasks.
-6. Clear any records still queued after the drain window and worker teardown:
-   each backend queue is drained via `get_nowait()` + `task_done()`
-   (`async_logging_handler.py:387-395`). Undelivered records are **dropped, not
-   replayed**, so the next `start_logging` begins from an actually-empty queue
-   (AR-020). `stop_logging` does **not** call `self.close()`.
+7. Clear any records still queued after the drain window and worker teardown:
+   each backend queue is drained via `get_nowait()` + `task_done()`, and any
+   leftover ingress entry is cleared (`async_logging_handler.py:534-542`).
+   Undelivered records are **dropped, not replayed**, so the next
+   `start_logging` begins from an actually-empty queue (AR-020). `stop_logging`
+   does **not** call `self.close()`.
 
 ### Write-executor teardown contract (`shutdown(wait=True)`)
 
@@ -148,7 +160,7 @@ A handler is **restartable**: `start_logging()` and `stop_logging()` may be
 called repeatedly on the same event loop, giving multiple start/stop cycles.
 Because workers are stored as *factories* (zero-argument callables returning a
 fresh coroutine), each `start_logging` schedules fresh tasks. Any record still
-queued when `stop_logging` finishes is dropped (see Shutdown step 6), so each
+queued when `stop_logging` finishes is dropped (see Shutdown step 7), so each
 start begins from an actually-empty queue rather than re-scheduling consumed
 coroutines or replaying undelivered records.
 
@@ -162,7 +174,7 @@ coroutines or replaying undelivered records.
 | `stop_logging()` | after `close()` | still runs (not blocked by `_closed`) |
 | `close()` | any | marks closed, clears accept event; workers continue until `await stop_logging()` |
 | `emit(record)` | between stop and next start | silent no-op (records dropped by design; accept event unset) |
-| `emit(record)` | off event-loop thread | drop + report via error channel (never raises) |
+| `emit(record)` | off event-loop thread | delivered (thread-safe; the bridge moves it to the backend queues) |
 | restart | same event loop | supported |
 | restart | different event loop | unsupported — events/queues are loop-bound; reconstruct the handler |
 
@@ -175,6 +187,9 @@ moved across loops. To log on a different loop, construct a fresh handler.
 | Resource | Created | Owned by | Released |
 |---|---|---|---|
 | `asyncio.Event`s | `__init__` | handler instance | cleared in `stop_logging` |
+| `_ingress` (thread-safe `queue.Queue`) | `start_logging` | handler instance | flushed + cleared in `stop_logging` |
+| `_ingress_event` (`asyncio.Event`) | `start_logging` | handler instance | cleared in `stop_logging` |
+| `_bridge_task` (`asyncio.Task`) | `start_logging` | handler instance | cancelled + awaited in `stop_logging` |
 | `asyncio.Queue`s | backend `__init__` (console/broker) | handler instance | drained in `stop_logging`; not explicitly closed |
 | worker factories | backend `__init__` | handler instance | invoked in `start_logging`; tasks gathered in `stop_logging` |
 | client connection (`client`) | `connect()` (worker start) | handler instance | `disconnect()` (worker exit) |
@@ -225,6 +240,11 @@ reconcile the two contracts:
 - **Worker tasks** (`log_workers_tasks`) are the long-lived background
   consumers, one per backend queue. Created in `start_logging`, terminated in
   `stop_logging`.
+- **Bridge task** (`_bridge_task`) is a single background task that moves
+  records from the thread-safe `_ingress` into the per-backend queues. Created
+  in `start_logging`, cancelled in `stop_logging` (before the ingress flush).
+  It is tracked **separately** from `log_workers_tasks` so worker teardown never
+  reaps it early.
 
 ## Notable lifecycle observations (facts, not judgments)
 
@@ -243,6 +263,7 @@ reconcile the two contracts:
 - Backend queues are **bounded** by `queue_maxsize` (default 10000) and are
   reused across restart cycles (they are created in `__init__`, not per start).
   A queue that is still full when logging restarts drops new records by policy:
-  `emit` reports each `asyncio.QueueFull` through the error channel rather than
-  blocking. Restart does not change this contract — a full queue always drops +
-  reports, never blocks.
+  `emit` reports a `queue.Full` when the ingress is full, and the bridge reports
+  an `asyncio.QueueFull` when a backend queue is full, rather than blocking.
+  Restart does not change this contract — a full queue always drops + reports,
+  never blocks.

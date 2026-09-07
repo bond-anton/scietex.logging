@@ -77,19 +77,22 @@ boundary that makes the lifecycle restartable.
 
 ---
 
-## 4. `emit` — synchronous puts with error reporting
+## 4. `emit` — thread-safe ingress write + bridge fan-out
 
-**Location.** `AsyncLoggingHandler.emit`, `async_logging_handler.py:259-299`.
+**Location.** `AsyncLoggingHandler.emit`, `async_logging_handler.py:341-393`;
+`_bridge_loop`, `async_logging_handler.py:395-431`.
 
-**What it appears to do.** For each registered queue, calls
-`queue.put_nowait(record)` synchronously. A failed put is reported through the
-error channel (`_report_error`), not swallowed.
+**What it appears to do.** Writes the record to the shared thread-safe
+`queue.Queue` ingress via `put_nowait`, then wakes the bridge with
+`loop.call_soon_threadsafe(_ingress_event.set)`. A full ingress is reported
+through the error channel (`_report_error`), not swallowed. The bridge task then
+drains the ingress and fans each record into every backend queue.
 
-**Why significant.** `emit` is the hot path for every log record. It must be
-called from the event-loop thread; an off-loop `emit()` drops the record and
-reports it through the error channel (never raises). The
-error-handling policy routes failures to the configured `error_handler` or the
-`scieetex.logging` module logger.
+**Why significant.** `emit` is the hot path for every log record and is now
+**thread-safe**: it can be called from any thread, including a thread with no
+running loop, and the record is delivered by the bridge instead of dropped.
+The error-handling policy routes failures to the configured `error_handler` or
+the `scieetex.logging` module logger.
 
 **Related.** `data-flow.md`; `tests/test_basic_handler.py`.
 
@@ -97,24 +100,28 @@ error-handling policy routes failures to the configured `error_handler` or the
 
 ## 5. Bounded queues with drop + report overflow
 
-**Location.** `asyncio.Queue(maxsize=...)` construction in `console_backend.py:77`
-and `message_broker_handler.py:81`; the explicit `except asyncio.QueueFull`
-branch in `emit` (`async_logging_handler.py:242`).
+**Location.** `queue.Queue(maxsize=queue_maxsize)` ingress construction in
+`async_logging_handler.py:332`; `asyncio.Queue(maxsize=...)` construction in
+`console_backend.py:77` and `message_broker_handler.py:81`; the `except
+queue.Full` branch in `emit` (`async_logging_handler.py:375`) and the `except
+asyncio.QueueFull` branch in the bridge (`async_logging_handler.py:428`).
 
 **What it appears to do.** Every backend queue is bounded by `queue_maxsize`
 (default 10000), set on `AsyncLoggingHandler`/`AsyncBaseHandler` and stored as
 `self.queue_maxsize`. `ConsoleBackend` builds `asyncio.Queue(maxsize=maxsize)`;
 `AsyncBrokerHandler` builds `asyncio.Queue(maxsize=self.queue_maxsize)`.
 
-**Why significant.** The overflow policy is **drop + report**: when a backend
-queue is full at emit time, `emit` drops the record and routes an
-`asyncio.QueueFull` to the error channel (`_report_error` → `error_handler`
-callback or module logger). `emit` never blocks, so the producer stays
+**Why significant.** The overflow policy is **drop + report**: when the shared
+ingress is full at emit time, `emit` drops the record and routes a `queue.Full`
+to the error channel (`_report_error` → `error_handler` callback or module
+logger); when a backend queue is full when the bridge re-dispatches, the bridge
+reports an `asyncio.QueueFull`. `emit` never blocks, so the producer stays
 non-blocking under sustained overload. This resolves the earlier unbounded
 buffering concern: under overload, records now drop + report instead of growing
-memory without bound. `ConsoleBackend.drain` uses `put_nowait` for its synthetic
-shutdown-status records, dropping them if the console queue is full so shutdown
-never deadlocks on a bounded queue.
+memory without bound. Worst-case buffering is `(1+N) × queue_maxsize` (the
+shared ingress plus the N backend queues). `ConsoleBackend.drain` uses
+`put_nowait` for its synthetic shutdown-status records, dropping them if the
+console queue is full so shutdown never deadlocks on a bounded queue.
 
 **Related.** `emit` (hotspot 4); `data-flow.md` cross-cutting notes.
 

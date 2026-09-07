@@ -95,10 +95,12 @@ enabled.
 
 ### Threading Contract
 
-`emit()` must be called from the asyncio event-loop thread. The handler captures the event
-loop in `start_logging()`; an off-loop `emit()` (from a different thread, or with no running
-loop) drops the record and reports it through the error channel instead of raising.
-Off-loop logging is not supported.
+`emit()` is **thread-safe** and may be called from any thread, including a
+thread with no running asyncio loop. The handler captures the event loop in
+`start_logging()` for its bridge task; `emit()` itself writes the record to a
+bounded, thread-safe stdlib `queue.Queue` ingress, and a bridge task on the
+loop thread re-dispatches it into the per-backend queues. An off-loop `emit()`
+therefore **delivers** the record instead of dropping it.
 
 ### Timeout on Shutdown
 

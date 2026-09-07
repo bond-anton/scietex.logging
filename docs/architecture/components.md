@@ -100,7 +100,7 @@ of `logging.Handler`. Owns formatter construction, the accept/running events,
 per-backend queues/workers, the error channel, and the generic
 `register_backend` / `start_logging` / `emit` / `stop_logging` lifecycle.
 
-**Class.** `AsyncLoggingHandler(logging.Handler)` — `async_logging_handler.py:51`
+**Class.** `AsyncLoggingHandler(logging.Handler)` — `async_logging_handler.py:57`
 
 **Public interface.**
 - `AsyncLoggingHandler(service_name=None, worker_id=None, *, error_handler=None, queue_maxsize=10000, stdout_enable=True, backend_config=None, formatter=None)`
@@ -112,58 +112,67 @@ per-backend queues/workers, the error channel, and the generic
     `TypeError`. `LoggingConfig` is the single runtime source of truth; the
     flat `queue_maxsize`/`error_handler` attributes are read-only `@property`
     aliases over `self.config`.
-- `worker_name` (read-only `@property`) — `async_logging_handler.py:202`.
+- `worker_name` (read-only `@property`) — `async_logging_handler.py:221`.
   Handler identity `f"{config.service_name}:{config.worker_id}"`. `config` is
   the single owner of handler identity; the default `ScietexFormatter` and the
   broker worker both derive from it, so console and broker output cannot diverge
   (AR-107). A user-injected formatter keeps its own `worker_name`.
 - `register_backend(name, queue, worker, drain=None)` —
-  `async_logging_handler.py:200`. Registers a backend's queue, worker
+  `async_logging_handler.py:231`. Registers a backend's queue, worker
   **factory** (zero-argument callable returning a fresh coroutine), and a
   `drain(timeout) -> BackendDrainResult` hook. When `drain` is omitted, a
   generic `queue.join()` drain is registered instead, so a drain-less backend
   still flushes and reports a status result at stop rather than being silently
   dropped (AR-110). Raises `ValueError` if `name` is already registered
   (AR-028).
-- `register_status_reporter(reporter)` — `async_logging_handler.py:238`.
+- `register_status_reporter(reporter)` — `async_logging_handler.py:288`.
   Registers a post-drain observer invoked with the collected
   `BackendDrainResult`s after every backend has drained.
-- `async start_logging()` — `async_logging_handler.py:253`. Sets both events,
-  invokes each worker factory and spawns worker tasks. Raises `RuntimeError` if
-  already running.
-- `emit(record)` — `async_logging_handler.py:278`. Synchronous; called by the
-  logging framework. No-op if `logging_accept_event` not set. For each
-  registered queue, calls `queue.put_nowait(record)`; a failed put is reported
-  through the error channel.
-- `async stop_logging(timeout=5.0)` — `async_logging_handler.py:338`. Clears
-  the accept event, drains every registered backend **concurrently** through
-  its `drain` hook under one shared timeout (collecting each returned
-  `BackendDrainResult` in registration order), invokes each registered status
-  reporter with the collected results, clears the running event, gathers worker
-  tasks, resets `log_workers_tasks`, and clears any records still queued after
-  the drain window and worker teardown (`get_nowait()` + `task_done()`,
-  `async_logging_handler.py:415-420`) so undelivered records are dropped, not
-  replayed (AR-020). Idempotent (no-op when not running); does **not** call
-  `close()`. The handler may be restarted via `start_logging` on the same loop.
-- `close()` — `async_logging_handler.py:422`. Stdlib `logging.shutdown()` hook.
+- `async start_logging()` — `async_logging_handler.py:303`. Captures the
+  running loop, creates the thread-safe `_ingress`, its `_ingress_event`, and
+  the `_bridge_task` (a `_bridge_loop` task, tracked separately from
+  `log_workers_tasks`), then sets both events and invokes each worker factory
+  and spawns worker tasks. Raises `RuntimeError` if already running.
+- `emit(record)` — `async_logging_handler.py:341`. Synchronous and
+  **thread-safe**; called by the logging framework. No-op if
+  `logging_accept_event` not set (or during the teardown window). Writes the
+  record to the shared `_ingress` via `put_nowait` (a `queue.Full` is reported
+  through the error channel), then wakes the bridge via
+  `loop.call_soon_threadsafe(_ingress_event.set)`.
+- `_bridge_loop()` — `async_logging_handler.py:395`. Private coroutine (the
+  bridge task). Waits on the ingress event, then drains `_ingress` and
+  re-dispatches each record into every backend queue via `put_nowait`. It only
+  MOVES records — never formats or mutates them. A full backend queue (or any
+  put failure) is reported through the error channel.
+- `async stop_logging(timeout=5.0)` — `async_logging_handler.py:433`. Clears
+  the accept event, cancels the bridge and flushes the ingress into the backend
+  queues **before** the drains run, drains every registered backend
+  **concurrently** through its `drain` hook under one shared timeout (collecting
+  each returned `BackendDrainResult` in registration order), invokes each
+  registered status reporter with the collected results, clears the running
+  event, gathers worker tasks, resets `log_workers_tasks`, and clears any
+  records still queued after the drain window and worker teardown (`get_nowait()`
+  + `task_done()`, `async_logging_handler.py:534-542`) plus any leftover ingress
+  entry, so undelivered records are dropped, not replayed (AR-020). Idempotent
+  (no-op when not running); does **not** call `close()`. The handler may be
+  restarted via `start_logging` on the same loop.
+- `close()` — `async_logging_handler.py:553`. Stdlib `logging.shutdown()` hook.
   Marks the handler closed (a later `start_logging()` raises `RuntimeError`) and
   clears the accept event. Does **not** stop workers or close a broker client —
   graceful teardown still requires `await stop_logging()`. `close()` is a
   separate terminal operation for `logging.shutdown()`: it does not call
   `stop_logging()`, and `stop_logging()` does not call `close()`.
-- `flush()` — `async_logging_handler.py:438`. Documented no-op; records are
+- `flush()` — `async_logging_handler.py:569`. Documented no-op; records are
   flushed by the async workers during `stop_logging()`, which cannot be awaited
   from this synchronous hook.
-- `handleError(record)` — `async_logging_handler.py:448`. Routes a handler-level
-  error (e.g. off-loop `emit`) through the single `_report_error` channel via
-  `sys.exc_info()[1]`, delivering it to the configured `error_handler` or the
-  module logger instead of the stdlib stderr traceback.
 
 **Key instance state.** `formatter` (ScietexFormatter),
 `logging_accept_event`, `logging_running_event` (asyncio.Events),
 `log_queues: dict[str, asyncio.Queue]`,
 `log_worker_factories: list[Callable[[], Coroutine]]`,
-`log_workers_tasks`, `_drain_hooks`, `_status_reporters`, `error_handler`,
+`log_workers_tasks`, `_ingress` (thread-safe `queue.Queue`),
+`_ingress_event` (asyncio.Event), `_bridge_task` (asyncio.Task),
+`_drain_hooks`, `_status_reporters`, `error_handler`,
 `config` (LoggingConfig).
 
 **Configuration.** Typed config objects live in `config.py`:
@@ -187,7 +196,7 @@ matching the stdlib `FileHandler` signature, so no `FileConfig` dataclass
 exists.
 
 **Depends on.** `formatter.ScietexFormatter`; `config` (`LoggingConfig`,
-`validate_queue_maxsize`); stdlib `asyncio`, `logging`.
+`validate_queue_maxsize`); stdlib `asyncio`, `logging`, `queue`.
 
 **Depended on by.** `AsyncBaseHandler` (extends); `ConsoleBackend` (its drain
 hook is registered here); `FileBackend` (its drain hook is registered here);

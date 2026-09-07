@@ -23,7 +23,7 @@ scietex.logging/
 
 | Module | Responsibility |
 |---|---|
-| `__init__.py` | Public API. Re-exports `AsyncBaseHandler`, `AsyncBrokerHandler`, `AsyncLoggingHandler`, `AsyncFileHandler`, `AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`, `AsyncWatchedFileHandler`, `ConsoleBackend`, `FileBackend`, `JsonFormatter`, `ScietexFormatter`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler`; defines `__version__ = "1.6.0"`. |
+| `__init__.py` | Public API. Re-exports `AsyncBaseHandler`, `AsyncBrokerHandler`, `AsyncLoggingHandler`, `AsyncFileHandler`, `AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`, `AsyncWatchedFileHandler`, `ConsoleBackend`, `FileBackend`, `JsonFormatter`, `ScietexFormatter`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler`; defines `__version__ = "1.7.0"`. |
 | `_executor.py` | `_WriteExecutor` — private single-thread executor helper offloading blocking write I/O off the event loop (lazy-create / run / `shutdown(wait=True)`). |
 | `async_logging_handler.py` | `AsyncLoggingHandler` — pure shared async machinery (queues/events/workers, `register_backend`, `start_logging`/`emit`/`stop_logging`, error channel); no sink of its own. |
 | `console_backend.py` | `ConsoleBackend` — the console (stdout) sink as a peer backend (queue + worker + drain hook). |

@@ -1,6 +1,6 @@
 # Roadmap
 
-Planned direction for `scietex.logging`. Current stable release: **1.6.0**.
+Planned direction for `scietex.logging`. Current stable release: **1.7.0**.
 
 The 1.x public API (`__all__` surface and constructor signatures) has grown
 additively through the 1.x line (client injection, MQTT backend, file sinks,
@@ -9,30 +9,35 @@ existing API is routed through a **2.0** release.
 
 ## 1.x — Loop-independent (thread-safe) `emit`
 
-**Status:** Proposed (design only; not yet implemented).
+**Status:** Implemented in 1.7.0.
+
+`emit()` is now thread-safe: it writes each record to a shared stdlib
+`queue.Queue` ingress (bounded by `queue_maxsize`) and a bridge asyncio task on
+the event-loop thread re-dispatches records into the per-backend
+`asyncio.Queue`s. Off-loop `emit` — from a worker thread or a thread with no
+running loop — now **delivers** the record instead of dropping it and reporting
+it through the error channel (AR-102 resolved).
 
 This is a **behavior change, not an API break**: `emit(self, record)` keeps its
 stdlib `logging.Handler` signature, and no constructor, `__all__` entry, or
-`start_logging()`/`stop_logging()` contract changes. Today off-loop `emit`
-drops the record and reports it through the error channel (AR-102); the design
-makes off-loop `emit` work instead of dropping — strictly more permissive, a
-fix of a documented limitation rather than a contract break. It is therefore a
-candidate for a **1.x** minor release (e.g. 1.7.0), documented as a behavior
-change in the changelog — not gated behind the 2.0 breaking release. The only
-reason to batch it into 2.0 would be to treat the off-loop drop-and-report as a
-guaranteed contract, but it is documented as a limitation, not a feature.
+`start_logging()`/`stop_logging()` contract changed. Off-loop `emit` was
+previously dropped-and-reported as a documented limitation; it now delivers,
+which is strictly more permissive — a fix of that limitation rather than a
+contract break. It therefore shipped as a **1.x** minor release (1.7.0),
+documented as a behavior change in the changelog.
 
-### Problem
+### Problem (resolved in 1.7.0)
 
-`emit()` is bound to the event-loop thread. It enqueues directly into
+`emit()` was bound to the event-loop thread. It enqueued directly into
 per-backend `asyncio.Queue` objects that the workers consume on the loop thread,
-and `asyncio.Queue.put_nowait` is not thread-safe. `emit()` therefore compares
+and `asyncio.Queue.put_nowait` is not thread-safe. `emit()` therefore compared
 `asyncio.get_running_loop()` against the loop captured at `start_logging()` and,
 when called off-loop (e.g. from a worker thread or thread-pool executor — common
-in asyncio applications), drops the record and reports it through the error
-channel (AR-102). The logger is loop-agnostic (it binds to whatever loop is
-running at `start_logging`) but not thread-safe: `emit` must run on that loop's
-thread.
+in asyncio applications), dropped the record and reported it through the error
+channel (AR-102). The logger was loop-agnostic (it binds to whatever loop is
+running at `start_logging`) but not thread-safe: `emit` had to run on that
+loop's thread. In 1.7.0 the off-loop guard was replaced by a thread-safe
+ingress + bridge task, so `emit` is now safe from any thread.
 
 ### Goal
 

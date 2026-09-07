@@ -85,8 +85,11 @@ standard `logging` framework:
 host app logger
    │  logger.info(...)  →  logging framework calls handler.emit(record)
    ▼
-AsyncLoggingHandler.emit(record)       [producer, synchronous, non-blocking]
-   │  for each registered backend queue: queue.put_nowait(record)
+AsyncLoggingHandler.emit(record)       [producer, synchronous, non-blocking, thread-safe]
+   │  ingress.put_nowait(record) → loop.call_soon_threadsafe(ingress_event.set)
+   ▼
+thread-safe queue.Queue ingress        [bounded by queue_maxsize; async boundary]
+   │  bridge task drains it and fans out
    ▼
 per-backend asyncio.Queue              [async boundary]
    │
@@ -149,19 +152,22 @@ The `examples/` directory contains runnable scripts demonstrating this
   teardown the file-owning workers submit their stream close to the same
   executor and `shutdown(wait=True)`, so `stop_logging` waits for any in-flight
   write — no write-after-close.
-- **Synchronous queue puts.** `emit()` calls `queue.put_nowait(record)` on each
-  registered backend queue synchronously, so it never blocks on I/O. A failed
-  put is reported through the error channel, not swallowed.
+- **Thread-safe ingress write.** `emit()` writes the record to the shared
+  thread-safe `queue.Queue` ingress (`put_nowait`) synchronously, so it never
+  blocks on I/O, then wakes the bridge via `call_soon_threadsafe`. A full
+  ingress is reported through the error channel, not swallowed. The bridge task
+  then fans the record out to every backend queue.
 - **Event-driven gating.** `logging_accept_event` gates `emit()`; 
   `logging_running_event` gates worker loops. Both are set in
   `start_logging()` and cleared in `stop_logging()`.
-- **Graceful shutdown.** `stop_logging()` clears the accept event, then drains
-  every registered backend **concurrently** through its per-backend
-  `drain(timeout)` hook under one shared timeout (AR-105), collecting each
-  returned `BackendDrainResult` in registration order, invokes each registered
-  status reporter with the collected results, and gathers worker tasks. It does
-  not call `close()`; the handler may be restarted via `start_logging` on the
-  same loop.
+- **Graceful shutdown.** `stop_logging()` clears the accept event, cancels the
+  bridge and flushes the ingress into the backend queues, then drains every
+  registered backend **concurrently** through its per-backend `drain(timeout)`
+  hook under one shared timeout (AR-105), collecting each returned
+  `BackendDrainResult` in registration order, invokes each registered status
+  reporter with the collected results, and gathers worker tasks. It does not
+  call `close()`; the handler may be restarted via `start_logging` on the same
+  loop.
 
 ## Notable runtime characteristics
 
