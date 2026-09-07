@@ -5,6 +5,23 @@ All notable changes to `scietex.logging` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-09-07
+
+### Added
+
+- **`instance_id` parameter**: every handler constructor and `ScietexFormatter`
+  now accept `instance_id: str | None = None` as the canonical identity field,
+  rendered into `worker_name` as `service_name:instance_id`. It defaults to
+  `"1"` when neither `instance_id` nor `worker_id` is supplied.
+
+### Deprecated
+
+- **`worker_id`**: the numeric `worker_id` parameter is deprecated in favor of
+  `instance_id`. Passing `worker_id` emits a `DeprecationWarning` and its value
+  is stringified into `instance_id`. Supplying both `worker_id` and
+  `instance_id` raises `ValueError` (they are aliases for the same identity
+  concept). `worker_id` is removed in v2.0.
+
 ## [1.7.0] - 2026-09-07
 
 ### Changed
