@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import queue
 
 import pytest
 
@@ -51,7 +52,7 @@ class FakeBrokerHandler(AsyncBrokerHandler):
 
 @pytest.mark.asyncio
 async def test_overflow_drops_record_and_reports_via_error_channel():
-    """A full backend queue drops the record and reports it through the error handler."""
+    """A full ingress drops the record and reports it through the error handler."""
     errors = []
     handler = FakeBrokerHandler(
         queue_name="broker",
@@ -59,22 +60,24 @@ async def test_overflow_drops_record_and_reports_via_error_channel():
         queue_maxsize=1,
         error_handler=lambda record, exc: errors.append(exc),
     )
-    # Emit without starting the worker so the bounded queue fills and overflows.
-    handler._loop = asyncio.get_running_loop()
-    handler.logging_accept_event.set()
+    await handler.start_logging()
 
+    # Two back-to-back emits with no await between them: the bridge (an asyncio
+    # task) never runs, so the maxsize=1 ingress fills and the second emit
+    # overflows. The first record is still in the ingress, not yet in the backend.
     handler.emit(_make_record("accepted"))
     handler.emit(_make_record("dropped"))
 
-    # The first record fills the queue; the second is dropped, not buffered.
-    assert handler.log_queues["broker"].qsize() == 1
+    assert handler._ingress.qsize() == 1
+    assert handler.log_queues["broker"].empty()
     assert len(errors) == 1
-    assert isinstance(errors[0], asyncio.QueueFull)
+    assert isinstance(errors[0], queue.Full)
+    await handler.stop_logging(timeout=0.5)
 
 
 @pytest.mark.asyncio
 async def test_overflow_reported_exception_is_exactly_queue_full():
-    """The overflow surfaces as asyncio.QueueFull, not a generic wrapped exception."""
+    """The overflow surfaces as queue.Full, not a generic wrapped exception."""
     errors = []
     handler = FakeBrokerHandler(
         queue_name="broker",
@@ -82,14 +85,14 @@ async def test_overflow_reported_exception_is_exactly_queue_full():
         queue_maxsize=1,
         error_handler=lambda record, exc: errors.append(exc),
     )
-    handler._loop = asyncio.get_running_loop()
-    handler.logging_accept_event.set()
+    await handler.start_logging()
 
     handler.emit(_make_record("accepted"))
     handler.emit(_make_record("dropped"))
 
     assert len(errors) == 1
-    assert type(errors[0]) is asyncio.QueueFull
+    assert type(errors[0]) is queue.Full
+    await handler.stop_logging(timeout=0.5)
 
 
 @pytest.mark.asyncio
@@ -107,6 +110,7 @@ async def test_bounded_queue_drains_fully_at_stop():
     await handler.stop_logging(timeout=0.5)
 
     assert handler.log_queues["broker"].empty()
+    assert handler._ingress is None  # released on stop
     assert [entry["message"] for entry in handler.sent] == ["a", "b"]
 
 
@@ -121,18 +125,19 @@ async def test_restart_after_overflow_delivers_normally():
         error_handler=lambda record, exc: errors.append(exc),
     )
 
-    # Cycle 1: worker not started, so the queue fills and overflow drops a record.
-    handler._loop = asyncio.get_running_loop()
-    handler.logging_accept_event.set()
+    # Cycle 1: overflow the ingress (back-to-back emits, bridge never runs).
+    await handler.start_logging()
     handler.emit(_make_record("accepted"))
     handler.emit(_make_record("dropped"))
-    assert handler.log_queues["broker"].qsize() == 1
+    assert handler._ingress.qsize() == 1
     assert len(errors) == 1
+    # stop flushes the ingress leftover ("accepted") into the broker queue and
+    # drains it, so the accepted record is still delivered despite the overflow.
+    await handler.stop_logging(timeout=0.5)
+    assert [entry["message"] for entry in handler.sent] == ["accepted"]
 
-    # Cycle 2: start the worker, emit, stop. The leftover record drains first,
-    # then the new record is delivered, proving the handler is still restartable.
+    # Cycle 2: start, emit, stop. The handler is still restartable and delivers.
     await handler.start_logging()
-    await _wait_for(lambda: len(handler.sent) == 1)
     handler.emit(_make_record("recovered"))
     await _wait_for(lambda: len(handler.sent) == 2)
     await handler.stop_logging(timeout=0.5)

@@ -21,6 +21,15 @@ def _make_record(message: str = "test message") -> logging.LogRecord:
     )
 
 
+async def _wait_for(predicate, timeout: float = 5.0) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not predicate():
+        if loop.time() >= deadline:
+            raise TimeoutError("condition was not met before timeout")
+        await asyncio.sleep(0.01)
+
+
 class _NoopBrokerHandler(AsyncBrokerHandler):
     """Minimal broker that connects instantly and acknowledges every record."""
 
@@ -208,41 +217,47 @@ async def test_stop_logging_drains_queues():
 
 
 @pytest.mark.asyncio
-async def test_emit_puts_records_synchronously():
-    """Test that emit puts records directly via put_nowait without scheduling tasks."""
+async def test_emit_delivers_to_backend_queue():
+    """emit writes to the ingress and the bridge delivers to the backend queue."""
     handler = AsyncBaseHandler(service_name="TestService", worker_id=1, stdout_enable=False)
     handler.log_queues["custom"] = asyncio.Queue()
-    handler._loop = asyncio.get_running_loop()
-    handler.logging_accept_event.set()
+    await handler.start_logging()
 
     record = logging.LogRecord("test", logging.INFO, "", 0, "sync message", None, None)
     handler.emit(record)
 
-    assert handler.log_queues["custom"].qsize() == 1
+    got = await asyncio.wait_for(handler.log_queues["custom"].get(), timeout=1)
+    assert got.getMessage() == "sync message"
+    await handler.stop_logging(timeout=0.5)
 
 
-def test_emit_off_loop_drops_and_reports_not_raises():
-    """Off-loop emit drops the record and reports via the error channel, never raising."""
-    errors = []
+@pytest.mark.asyncio
+async def test_emit_off_loop_delivers_not_raises():
+    """Off-loop emit delivers the record instead of dropping it (AR-102 fixed)."""
+    import threading
+
     handler = AsyncBaseHandler(
         service_name="TestService",
         worker_id=1,
         stdout_enable=False,
-        error_handler=lambda record, exc: errors.append(exc),
     )
-    handler._loop = object()  # Sentinel loop that never matches a running loop
-    handler.logging_accept_event.set()
+    handler.log_queues["custom"] = asyncio.Queue()
+    await handler.start_logging()
 
     record = logging.LogRecord("test", logging.INFO, "", 0, "msg", None, None)
-    handler.emit(record)  # must not raise
+    thread = threading.Thread(target=lambda: handler.emit(record))
+    thread.start()
+    thread.join()
 
-    assert len(errors) == 1
-    assert isinstance(errors[0], RuntimeError)
+    # The bridge moved the record into the custom backend queue.
+    got = await asyncio.wait_for(handler.log_queues["custom"].get(), timeout=1)
+    assert got.getMessage() == "msg"
+    await handler.stop_logging(timeout=0.5)
 
 
 @pytest.mark.asyncio
 async def test_error_channel_invoked_on_emit_failure(monkeypatch):
-    """Test that emit reports queue-put failures through the error handler."""
+    """A bridge put failure surfaces through the error handler after the loop yields."""
     errors = []
     handler = AsyncBaseHandler(
         service_name="TestService",
@@ -251,7 +266,8 @@ async def test_error_channel_invoked_on_emit_failure(monkeypatch):
     )
     await handler.start_logging()
 
-    # Fail only the emit put; let the shutdown status reporting enqueue cleanly.
+    # Fail only the first bridge put; later puts (e.g. shutdown status reporting)
+    # no-op so teardown stays clean.
     calls = 0
 
     def failing_put_once(item):
@@ -265,7 +281,9 @@ async def test_error_channel_invoked_on_emit_failure(monkeypatch):
     record = logging.LogRecord("test", logging.INFO, "", 0, "msg", None, None)
     handler.emit(record)
 
-    assert len(errors) == 1
+    # The bridge moves the record into the console queue on the next loop turn;
+    # the monkeypatched put_nowait fails there, so the error surfaces asynchronously.
+    await _wait_for(lambda: len(errors) == 1)
     assert isinstance(errors[0], RuntimeError)
 
     await handler.stop_logging()

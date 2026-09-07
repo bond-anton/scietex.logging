@@ -288,7 +288,9 @@ async def test_stop_clears_undelivered_records():
     await handler.start_logging()
     handler.emit(_make_record("stale-one"))
     handler.emit(_make_record("stale-two"))
-    assert queue.qsize() == 2  # the stalled worker never drains these
+    # The bridge moves records into the backend queue asynchronously; wait until
+    # both are queued (the stalled worker never drains them).
+    await _wait_for(lambda: queue.qsize() == 2)
 
     await handler.stop_logging(timeout=0.05)
 
@@ -350,21 +352,16 @@ async def test_register_backend_without_drain_gets_default_queue_join_drain():
 async def test_report_error_falls_back_to_module_logger_when_error_handler_raises(caplog):
     """A raising error_handler falls back to the module logger, not silence (AR-031)."""
 
-    async def worker() -> None:
-        pass
-
     def bad_error_handler(record, exc):
         raise RuntimeError("error handler is broken")
 
-    handler = BareHandler(error_handler=bad_error_handler)
-    handler.register_backend("b", asyncio.Queue(maxsize=1), worker)
+    handler = BareHandler(error_handler=bad_error_handler, queue_maxsize=1)
 
-    handler._loop = asyncio.get_running_loop()
-    handler.logging_accept_event.set()
-
-    handler.emit(_make_record("accepted"))  # fills the queue
+    await handler.start_logging()
+    handler.emit(_make_record("accepted"))  # fills the ingress (maxsize=1)
     with caplog.at_level(logging.ERROR):
-        handler.emit(_make_record("dropped"))  # overflow -> _report_error -> fallback
+        handler.emit(_make_record("dropped"))  # ingress full -> _report_error -> fallback
+    await handler.stop_logging(timeout=0.5)
 
     assert any(
         record.name == "scietex.logging" and "failed to deliver a log record" in record.getMessage()
@@ -373,17 +370,20 @@ async def test_report_error_falls_back_to_module_logger_when_error_handler_raise
 
 
 @pytest.mark.asyncio
-async def test_emit_off_loop_drops_and_reports_via_error_channel():
-    """Off-loop emit drops the record and reports a RuntimeError, never raising (AR-102)."""
-    errors = []
-    handler = BareHandler(error_handler=lambda record, exc: errors.append(exc))
-    handler._loop = object()  # Sentinel loop that never matches a running loop
-    handler.logging_accept_event.set()
+async def test_emit_off_loop_delivers_not_drops():
+    """Off-loop emit now delivers the record instead of dropping it (AR-102 fixed)."""
+    handler = DeliveringHandler(service_name="TestService", worker_id=1)
+    await handler.start_logging()
 
-    handler.emit(_make_record("off-loop"))  # must not raise
+    # Emit from a thread whose loop is NOT the handler's loop. The old guard
+    # dropped this; the thread-safe ingress now delivers it.
+    thread = threading.Thread(target=lambda: handler.emit(_make_record("off-loop")))
+    thread.start()
+    thread.join()
 
-    assert len(errors) == 1
-    assert isinstance(errors[0], RuntimeError)
+    await _wait_for(lambda: len(handler.delivered) == 1)
+    assert handler.delivered == ["off-loop"]
+    await handler.stop_logging(timeout=0.5)
 
 
 @pytest.mark.asyncio
