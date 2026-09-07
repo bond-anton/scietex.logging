@@ -10,7 +10,7 @@ from typing import Any
 
 from .async_logging_handler import BackendDrainResult, DrainStatus
 from .basic_handler import AsyncBaseHandler
-from .config import RedisConfig, ValkeyConfig, level_abbreviation
+from .config import MqttConfig, RedisConfig, ValkeyConfig, level_abbreviation
 
 # Connect-retry backoff (AR-022). A fixed 1s retry would spam the error channel
 # ~3600x/hour during a prolonged outage. Consecutive connect() failures sleep a
@@ -64,7 +64,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         stdout_enable: bool = True,
         queue_maxsize: int = 10000,
-        backend_config: RedisConfig | ValkeyConfig | None = None,
+        backend_config: RedisConfig | ValkeyConfig | MqttConfig | None = None,
         client: Any | None = None,
         formatter: logging.Formatter | None = None,
     ) -> None:
@@ -81,7 +81,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
             stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can hold.
                 Defaults to 10000.
-            backend_config (RedisConfig | ValkeyConfig | None): Backend-specific config
+            backend_config (RedisConfig | ValkeyConfig | MqttConfig | None): Backend-specific config
                 attached by concrete broker subclasses. Defaults to None.
             client (Any | None): An externally-managed broker client to use instead of
                 building one in ``connect()``. When provided, the handler never closes

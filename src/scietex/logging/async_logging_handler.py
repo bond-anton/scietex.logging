@@ -15,7 +15,14 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from .config import LoggingConfig, RedisConfig, ValkeyConfig, report_error, validate_queue_maxsize
+from .config import (
+    LoggingConfig,
+    MqttConfig,
+    RedisConfig,
+    ValkeyConfig,
+    report_error,
+    validate_queue_maxsize,
+)
 from .formatter import ScietexFormatter
 
 
@@ -119,7 +126,7 @@ class AsyncLoggingHandler(logging.Handler):
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         queue_maxsize: int = 10000,
         stdout_enable: bool = True,
-        backend_config: RedisConfig | ValkeyConfig | None = None,
+        backend_config: RedisConfig | ValkeyConfig | MqttConfig | None = None,
         formatter: logging.Formatter | None = None,
     ) -> None:
         """
@@ -144,7 +151,7 @@ class AsyncLoggingHandler(logging.Handler):
                 Must be a positive int; invalid values raise ``ValueError``.
             stdout_enable (bool): Whether the console backend is registered by
                 `AsyncBaseHandler`. Defaults to True.
-            backend_config (RedisConfig | ValkeyConfig | None): Backend-specific
+            backend_config (RedisConfig | ValkeyConfig | MqttConfig | None): Backend-specific
                 config attached by broker subclasses. Defaults to None.
             formatter (logging.Formatter | None): Formatter used to render records.
                 Defaults to None, in which case a default ``ScietexFormatter`` is

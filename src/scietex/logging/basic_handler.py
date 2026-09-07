@@ -9,7 +9,7 @@ import logging
 from collections.abc import Callable
 
 from .async_logging_handler import AsyncLoggingHandler
-from .config import RedisConfig, ValkeyConfig
+from .config import MqttConfig, RedisConfig, ValkeyConfig
 from .console_backend import ConsoleBackend
 
 
@@ -38,7 +38,7 @@ class AsyncBaseHandler(AsyncLoggingHandler):
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         stdout_enable: bool = True,
         queue_maxsize: int = 10000,
-        backend_config: RedisConfig | ValkeyConfig | None = None,
+        backend_config: RedisConfig | ValkeyConfig | MqttConfig | None = None,
         formatter: logging.Formatter | None = None,
     ) -> None:
         """
@@ -55,7 +55,7 @@ class AsyncBaseHandler(AsyncLoggingHandler):
             stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can
                 hold. Defaults to 10000.
-            backend_config (RedisConfig | ValkeyConfig | None): Backend-specific
+            backend_config (RedisConfig | ValkeyConfig | MqttConfig | None): Backend-specific
                 config forwarded by broker subclasses. Defaults to None.
             formatter (logging.Formatter | None): Formatter used to render records.
                 Defaults to None, in which case a default ``ScietexFormatter`` is
