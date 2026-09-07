@@ -607,13 +607,40 @@ class AsyncWatchedFileHandler(AsyncFileHandler):
             errors=errors,
         )
 
+    def _write_record(self, text: str) -> None:
+        """Reopen the file if it was rotated externally, then write ``text``.
+
+        Runs as one atomic unit on the executor thread so the sole-writer
+        invariant holds.
+        """
+        stream = self._open_stream()
+        # Point the stdlib watcher at our live stream and ask it to reopen if
+        # the file was replaced externally (logrotate). reopenIfNeeded returns
+        # None, so adopt whatever stream the watcher now holds — the original or
+        # a freshly opened handle.
+        self._watcher.stream = stream
+        self._watcher.reopenIfNeeded()
+        self._stream = self._watcher.stream
+        # Re-fetch the live stream: reopenIfNeeded may have closed the previous
+        # handle and opened a fresh one we just adopted.
+        stream = self._open_stream()
+        stream.write(text)
+        stream.flush()
+
     async def _worker(self) -> None:
         """
         Worker that writes records and reopens the file if it was rotated externally.
 
+        Each record is formatted on the event-loop thread and the blocking
+        reopen+write unit is offloaded to a single-thread executor. The file is
+        closed on the same executor thread in the finally (serialized after any
+        in-flight write), and the executor is shut down so the handler stays
+        restartable.
+
         Returns:
             None
         """
+        executor = _WriteExecutor()
         try:
             while self.logging_running_event.is_set() or not self.log_queues["file"].empty():
                 try:
@@ -621,22 +648,12 @@ class AsyncWatchedFileHandler(AsyncFileHandler):
                 except asyncio.TimeoutError:
                     continue
                 try:
-                    stream = self._open_stream()
-                    # Point the stdlib watcher at our live stream and ask it to
-                    # reopen if the file was replaced externally (logrotate).
-                    # reopenIfNeeded returns None, so adopt whatever stream the
-                    # watcher now holds — the original or a freshly opened handle.
-                    self._watcher.stream = stream
-                    self._watcher.reopenIfNeeded()
-                    self._stream = self._watcher.stream
-                    # Re-fetch the live stream: reopenIfNeeded may have closed the
-                    # previous handle and opened a fresh one we just adopted.
-                    stream = self._open_stream()
-                    stream.write(self.formatter.format(record) + "\n")
-                    stream.flush()
+                    text = self.formatter.format(record) + "\n"
+                    await executor.run(lambda: self._write_record(text))
                 except Exception as exc:
                     self._report_error(record, exc)
                 finally:
                     self.log_queues["file"].task_done()
         finally:
-            self._close_stream()
+            await executor.run(self._close_stream)
+            await executor.shutdown()

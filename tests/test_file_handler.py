@@ -511,6 +511,143 @@ async def test_watched_file_handler_writes(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_watched_file_handler_writes_off_the_loop_thread(tmp_path):
+    """AsyncWatchedFileHandler writes with the write off the loop thread."""
+    import threading
+
+    path = tmp_path / "watched.log"
+    handler = AsyncWatchedFileHandler(str(path), service_name="TestService", worker_id=1)
+    loop_thread = threading.current_thread().name
+    write_threads: list[str] = []
+
+    original_open = handler._open_stream
+
+    def recording_open():
+        inner = original_open()
+
+        class RecordingStream:
+            def write(self, text):
+                write_threads.append(threading.current_thread().name)
+                return inner.write(text)
+
+            def flush(self):
+                inner.flush()
+
+            def close(self):
+                inner.close()
+
+        return RecordingStream()
+
+    handler._open_stream = recording_open
+    await handler.start_logging()
+
+    logger = logging.getLogger("WatchedOffLoopLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("watched message")
+    await handler.stop_logging()
+
+    assert "watched message" in path.read_text()
+    assert write_threads and all(t != loop_thread for t in write_threads)
+
+
+@pytest.mark.asyncio
+async def test_watched_file_handler_reopens_replaced_file(tmp_path):
+    """An externally replaced file is detected and logging resumes to the new inode."""
+    path = tmp_path / "watched.log"
+    handler = AsyncWatchedFileHandler(
+        str(path),
+        service_name="TestService",
+        worker_id=1,
+        stdout_enable=False,
+    )
+    await handler.start_logging()
+
+    logger = logging.getLogger("WatchedReopenLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("first message")
+
+    # Wait until the first record has reached disk (the watcher has stat'd the
+    # live file and recorded its dev/ino).
+    for _ in range(200):
+        if path.exists() and "first message" in path.read_text():
+            break
+        await asyncio.sleep(0.01)
+
+    # Simulate logrotate: move the file aside and create a fresh one in its place.
+    rotated = tmp_path / "watched.log.1"
+    os.rename(path, rotated)
+    path.write_text("")
+
+    logger.info("second message")
+    await handler.stop_logging()
+
+    assert "first message" in rotated.read_text()
+    assert "second message" in path.read_text()
+    assert "second message" not in rotated.read_text()
+
+
+@pytest.mark.asyncio
+async def test_watched_handler_cancelled_no_write_after_close(tmp_path):
+    """A watched worker cancelled mid-write closes the stream only after the write."""
+    import threading
+    import time
+
+    path = tmp_path / "watched.log"
+    handler = AsyncWatchedFileHandler(
+        str(path),
+        service_name="TestService",
+        worker_id=1,
+        stdout_enable=False,
+    )
+    await handler.start_logging()
+
+    original_open = handler._open_stream
+    state = {"write_started": threading.Event(), "write_finished": threading.Event()}
+
+    class SlowStream:
+        def __init__(self, inner):
+            self.inner = inner
+            self.closed = False
+
+        def write(self, text):
+            state["write_started"].set()
+            time.sleep(0.5)  # simulate a slow disk write
+            self.inner.write(text)
+            state["write_finished"].set()
+            return len(text)
+
+        def flush(self):
+            self.inner.flush()
+
+        def close(self):
+            self.closed = True
+            self.inner.close()
+
+    def slow_open():
+        return SlowStream(original_open())
+
+    handler._open_stream = slow_open
+    logger = logging.getLogger("WatchedCancelLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("cancel me")
+
+    # Yield to the loop until the write is in flight on the executor thread.
+    while not state["write_started"].is_set():
+        await asyncio.sleep(0.01)
+
+    # stop_logging with a tiny timeout cancels the worker mid-write; its finally
+    # must close the stream only after the in-flight write completes.
+    await handler.stop_logging(timeout=0.05)
+
+    assert state["write_finished"].is_set(), "in-flight write was lost"
+    assert "cancel me" in path.read_text()
+    assert handler._stream is None  # closed cleanly
+
+
+@pytest.mark.asyncio
 async def test_file_handler_writes_off_the_event_loop_thread():
     """An injected file-like receives writes off the loop thread and is never closed."""
     import threading
