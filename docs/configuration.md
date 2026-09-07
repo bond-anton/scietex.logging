@@ -112,6 +112,7 @@ subclass must not use them as its `queue_name`:
   construction unless you pass `stdout_enable=False`.
 - `"redis"` / `"valkey"` — registered by `AsyncRedisHandler` / `AsyncValkeyHandler`.
 - `"mqtt"` — registered by `AsyncMqttHandler`.
+- `"file"` — registered by `AsyncFileHandler` and its rotation variants.
 
 Choose a distinct `queue_name` for a custom backend (e.g. `"postgres"`, `"http"`).
 
@@ -232,6 +233,11 @@ Ownership contract:
 
 See `examples/injected_client.py` for a runnable example.
 
+`AsyncFileHandler` and its rotation variants accept a keyword-only `file=`
+argument that injects an already-open, externally-managed file-like object, so
+the handler never opens or closes its own file. `file=` and `filename` are
+mutually exclusive (passing both raises `ValueError`).
+
 ### Threading Contract
 
 `emit()` must be called from the asyncio event-loop thread. An off-loop `emit()`
@@ -252,6 +258,24 @@ formatter = logging.Formatter(
 handler = AsyncBaseHandler()
 handler.setFormatter(formatter)
 ```
+
+### JSON output
+
+For structured, machine-readable output, use `JsonFormatter` — a
+`logging.Formatter` subclass that renders each record as a single-line JSON
+object with keys `timestamp` (ISO-8601 UTC), `level`, `logger`, `message`, an
+`exception` key (present only when the record carries `exc_info`), plus any
+user-added `extra` fields flattened as top-level keys:
+
+```python
+from scietex.logging import AsyncFileHandler, JsonFormatter
+
+handler = AsyncFileHandler("app.jsonl", formatter=JsonFormatter())
+```
+
+`JsonFormatter` copies the record before formatting (it never mutates the shared
+record) and degrades non-serializable extra values to their `repr` rather than
+raising.
 
 For a runnable example of customizing `ScietexFormatter` and applying it with
 `setFormatter`, see `examples/custom_formatter.py`.

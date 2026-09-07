@@ -5,7 +5,7 @@
 ## Features
 
 - **Asynchronous Logging**: Log messages are queued and handled asynchronously, reducing impact on application performance.
-- **Multiple Backends**: Supports console, Redis, Valkey, and MQTT logging out of the box.
+- **Multiple Backends**: Supports console, file, Redis, Valkey, and MQTT logging out of the box.
 - **Flexible Logging Levels**: Compatible with Python's standard logging levels (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).
 - **Optional Dependencies**: Only installs dependencies for the specific backends you need.
 
@@ -114,6 +114,28 @@ logger.addHandler(handler)
 async def main():
     await handler.start_logging()
     logger.error("This error message will be logged to MQTT!")
+    await handler.stop_logging()
+
+
+asyncio.run(main())
+```
+
+### File Logging
+
+```python
+import logging
+from scietex.logging import AsyncFileHandler, JsonFormatter
+import asyncio
+
+logger = logging.getLogger("MyAsyncLogger")
+logger.setLevel(logging.DEBUG)
+handler = AsyncFileHandler("app.jsonl", formatter=JsonFormatter())
+logger.addHandler(handler)
+
+
+async def main():
+    await handler.start_logging()
+    logger.error("This error message will be written to app.jsonl as JSON!")
     await handler.stop_logging()
 
 

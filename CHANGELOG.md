@@ -5,6 +5,24 @@ All notable changes to `scietex.logging` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-09-07
+
+### Features
+
+- **File sinks**: new `AsyncFileHandler` writes log records to a file, mirroring
+  the standard-library `logging.FileHandler` signature (`filename`, `mode`,
+  `encoding`, `delay`, `errors`) plus the scietex options. Rotation variants
+  `AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`, and
+  `AsyncWatchedFileHandler` reuse the stdlib rollover logic (driven from the
+  background worker, never from `emit`). Supports the `file=` injection seam for
+  an externally-managed, already-open file-like the handler never closes.
+- **`JsonFormatter`**: a `logging.Formatter` subclass that renders each record
+  as a single-line JSON object (`timestamp`, `level`, `logger`, `message`,
+  optional `exception`, plus flattened user `extra` fields), suitable for
+  newline-delimited JSON (NDJSON) file sinks.
+- **File example**: `examples/file_logging.py` demonstrates plain-text and JSON
+  file output.
+
 ## [1.4.0] - 2026-09-07
 
 ### Docs

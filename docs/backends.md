@@ -156,15 +156,66 @@ handler = AsyncMqttHandler(topic="my/log/topic")
   client. Mutually exclusive with `mqtt_config` (passing both raises
   `ValueError`).
 
+## File Logging
+
+File logging writes log records to a file. It requires no additional
+dependencies and is always available.
+
+### Features
+
+- No additional dependencies required
+- Plain-text output by default
+- JSON output via `JsonFormatter` (one JSON object per line)
+- Rotation variants mirroring the standard-library handlers:
+  `AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`,
+  `AsyncWatchedFileHandler`
+- `file=` injection seam for an externally-managed, already-open file-like
+
+### Usage
+
+```python
+from scietex.logging import AsyncFileHandler
+
+handler = AsyncFileHandler("app.log")
+```
+
+### JSON output
+
+```python
+from scietex.logging import AsyncFileHandler, JsonFormatter
+
+handler = AsyncFileHandler("app.jsonl", formatter=JsonFormatter())
+```
+
+### Configuration
+
+- `filename`: Path to the log file (required, unless `file=` is injected).
+- `mode`: File open mode (default: "a").
+- `encoding`: File encoding (default: None -> locale default).
+- `delay`: If True, defer opening the file until the first write (default: False).
+- `errors`: Encoding error handling scheme (default: None).
+- `file`: Inject an externally-managed, already-open file-like object the
+  handler never closes — the caller owns its lifetime and recovery. Mutually
+  exclusive with `filename` (passing both raises `ValueError`).
+
+### Rotation variants
+
+- `AsyncRotatingFileHandler(filename, maxBytes=..., backupCount=...)` — rolls
+  over when the file exceeds `maxBytes`.
+- `AsyncTimedRotatingFileHandler(filename, when=..., interval=..., backupCount=...)`
+  — rolls over on a time interval.
+- `AsyncWatchedFileHandler(filename)` — reopens the file if it was rotated or
+  deleted externally (e.g. by logrotate).
+
 ## Backend Comparison
 
-| Feature | Console | Redis | Valkey | MQTT |
-|---------|---------|-------|--------|------|
-| Dependencies | None | `redis` | `valkey-glide` | `aiomqtt` |
-| Installation | Always included | `[redis]` | `[valkey]` | `[mqtt]` |
-| Persistence | No | Yes | Yes | No |
-| Throughput | High | High | High | High |
-| Setup Complexity | Low | Medium | Medium | Medium |
+| Feature | Console | File | Redis | Valkey | MQTT |
+|---------|---------|------|-------|--------|------|
+| Dependencies | None | None | `redis` | `valkey-glide` | `aiomqtt` |
+| Installation | Always included | Always included | `[redis]` | `[valkey]` | `[mqtt]` |
+| Persistence | No | Yes | Yes | Yes | No |
+| Throughput | High | High | High | High | High |
+| Setup Complexity | Low | Low | Medium | Medium | Medium |
 
 ## Using Multiple Backends
 
@@ -172,13 +223,22 @@ You can use multiple handlers simultaneously:
 
 ```python
 import logging
-from scietex.logging import AsyncBaseHandler, AsyncRedisHandler, AsyncValkeyHandler, AsyncMqttHandler
+from scietex.logging import (
+    AsyncBaseHandler,
+    AsyncFileHandler,
+    AsyncRedisHandler,
+    AsyncValkeyHandler,
+    AsyncMqttHandler,
+)
 
 logger = logging.getLogger("MultiLogger")
 logger.setLevel(logging.DEBUG)
 
 # Console handler (always available)
 console_handler = AsyncBaseHandler()
+
+# File handler
+file_handler = AsyncFileHandler("logs.log")
 
 # Redis handler
 redis_handler = AsyncRedisHandler(stream_name="logs")
@@ -190,6 +250,7 @@ valkey_handler = AsyncValkeyHandler(stream_name="logs")
 mqtt_handler = AsyncMqttHandler(topic="logs")
 
 logger.addHandler(console_handler)
+logger.addHandler(file_handler)
 logger.addHandler(redis_handler)
 logger.addHandler(valkey_handler)
 logger.addHandler(mqtt_handler)

@@ -23,7 +23,10 @@ scietex.logging/
 │   ├── basic_handler.py         # AsyncBaseHandler (base class with console backend)
 │   ├── config.py                # LoggingConfig, RedisConfig, ValkeyConfig, MqttConfig
 │   ├── console_backend.py       # ConsoleBackend peer backend
+│   ├── file_backend.py          # FileBackend peer backend
+│   ├── file_handler.py          # AsyncFileHandler + rotation variants
 │   ├── formatter.py             # ScietexFormatter
+│   ├── json_formatter.py        # JsonFormatter (structured JSON output)
 │   ├── message_broker_handler.py # AsyncBrokerHandler (base class for broker backends)
 │   ├── mqtt_handler.py          # AsyncMqttHandler (MQTT backend)
 │   ├── redis_handler.py         # AsyncRedisHandler (Redis backend)
@@ -34,7 +37,10 @@ scietex.logging/
 │   ├── test_config.py
 │   ├── test_console_backend.py
 │   ├── test_client_injection.py
+│   ├── test_file_backend.py
+│   ├── test_file_handler.py
 │   ├── test_formatter.py
+│   ├── test_json_formatter.py
 │   ├── test_message_broker_handler.py
 │   ├── test_mqtt_handler.py
 │   ├── test_queue_bounds.py
@@ -56,6 +62,7 @@ scietex.logging/
 │   ├── custom_backend.py
 │   ├── custom_formatter.py
 │   ├── error_handler_and_queue_bounds.py
+│   ├── file_logging.py
 │   ├── injected_client.py
 │   ├── mqtt_logging.py
 │   ├── pure_machinery_handler.py
@@ -74,8 +81,13 @@ scietex.logging/
 
 - `AsyncBaseHandler` - Base handler with console logging backend (always available)
 - `AsyncBrokerHandler` - Base handler for message broker backends
+- `AsyncFileHandler` - File logging backend (always available)
 - `AsyncLoggingHandler` - Shared queue/worker machinery base for all handlers (always available)
+- `AsyncRotatingFileHandler` - Size-based rotating file backend (always available)
+- `AsyncTimedRotatingFileHandler` - Time-based rotating file backend (always available)
+- `AsyncWatchedFileHandler` - Watched file backend (always available)
 - `ConsoleBackend` - Console sink registered by `AsyncBaseHandler` (always available)
+- `JsonFormatter` - Structured JSON output formatter (always available)
 - `ScietexFormatter` - Custom formatter with worker name and 3-letter log level abbreviations
 - `AsyncRedisHandler` - Redis logging backend (optional, requires `[redis]` extra)
 - `AsyncValkeyHandler` - Valkey logging backend (optional, requires `[valkey]` extra)
@@ -106,6 +118,10 @@ scietex.logging/
 logging.Handler (standard library)
     └── AsyncLoggingHandler (src/scietex/logging/async_logging_handler.py)
         └── AsyncBaseHandler (src/scietex/logging/basic_handler.py)
+            ├── AsyncFileHandler (src/scietex/logging/file_handler.py)
+            │   ├── AsyncRotatingFileHandler
+            │   ├── AsyncTimedRotatingFileHandler
+            │   └── AsyncWatchedFileHandler
             └── AsyncBrokerHandler (src/scietex/logging/message_broker_handler.py)
                 ├── AsyncRedisHandler (src/scietex/logging/redis_handler.py)
                 ├── AsyncValkeyHandler (src/scietex/logging/valkey_handler.py)
@@ -159,6 +175,9 @@ uv run python examples/injected_client.py
 
 # MQTT logging (requires an MQTT broker running locally)
 uv run python examples/mqtt_logging.py
+
+# File logging (plain text + JSON)
+uv run python examples/file_logging.py
 ```
 
 ### Running Tests
@@ -188,6 +207,7 @@ uv run ruff check .
 2. The `__init__.py` imports Redis/Valkey/MQTT handlers conditionally - ensure the `[redis]`, `[valkey]`, or `[mqtt]` extras are installed
 3. `client` and a backend config (`valkey_config`/`redis_config`/`mqtt_config`/`backend_config`) are mutually exclusive — passing both raises `ValueError`. When injecting a client, omit the config dict.
 4. `"mqtt"` is a reserved queue name (used by `AsyncMqttHandler`); custom backends must not reuse it.
+5. `"file"` is a reserved queue name (used by `AsyncFileHandler`); custom backends must not reuse it.
 
 ## Development Commands
 

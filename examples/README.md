@@ -15,7 +15,7 @@ run. The table maps each example to the installation it needs.
 
 | Installation | Examples |
 | --- | --- |
-| Base package only | `basic_console_logging.py`, `custom_formatter.py`, `error_handler_and_queue_bounds.py`, `custom_backend.py`, `pure_machinery_handler.py`, `restartable_lifecycle.py` |
+| Base package only | `basic_console_logging.py`, `file_logging.py`, `custom_formatter.py`, `error_handler_and_queue_bounds.py`, `custom_backend.py`, `pure_machinery_handler.py`, `restartable_lifecycle.py` |
 | `scietex.logging[redis]` | `redis_logging.py`, `console_and_redis_logging.py`, `all_backends.py` |
 | `scietex.logging[valkey]` | `valkey_logging.py`, `injected_client.py`, `all_backends.py` |
 | `scietex.logging[mqtt]` | `mqtt_logging.py` |
@@ -29,6 +29,7 @@ run. The table maps each example to the installation it needs.
 | [redis_logging.py](./redis_logging.py) | Log to a Redis stream with `AsyncRedisHandler` | Redis |
 | [valkey_logging.py](./valkey_logging.py) | Log to a Valkey stream with `AsyncValkeyHandler` | Valkey |
 | [mqtt_logging.py](./mqtt_logging.py) | Log to an MQTT topic with `AsyncMqttHandler` | MQTT broker |
+| [file_logging.py](./file_logging.py) | Write plain-text and JSON lines to files with `AsyncFileHandler` + `JsonFormatter` | No |
 | [injected_client.py](./injected_client.py) | Inject an externally-managed Valkey client the handler never closes | Valkey |
 | [console_and_redis_logging.py](./console_and_redis_logging.py) | Console and Redis handlers on one logger | Redis |
 | [custom_formatter.py](./custom_formatter.py) | Customize `ScietexFormatter` and apply it with `setFormatter` | No |

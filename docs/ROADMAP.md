@@ -120,3 +120,23 @@ the loop-independent `emit` work above.
   document the reserved names (the 1.0 choice).
 - **Why 2.0:** namespacing changes the public `log_queues["console"]` key and
   the console drain-result name — breaking for any code that reads them.
+
+---
+
+## 2.0 — Async redesign of Console and File backends
+
+**Status:** Proposed (design only; not yet implemented).
+
+The Console and File backends perform **synchronous, blocking I/O inside their
+worker coroutines**: `ConsoleBackend._worker` calls `sys.stdout.write` +
+`flush`, and `FileBackend._worker` / `AsyncFileHandler._worker` call
+`stream.write` + `flush` directly. Under heavy log volume or a slow sink (a
+piped stdout, a network filesystem, a slow disk), this blocks the event loop
+thread for the duration of each write, stalling every other coroutine on the
+loop.
+
+A 2.0 redesign should move the blocking write off the loop thread — e.g. via
+`asyncio.to_thread` or a dedicated writer thread/executor — so the worker
+coroutine awaits the write instead of blocking the loop. This is a behavior
+change (write latency and ordering semantics shift), so it is deferred to 2.0
+rather than patched into the 1.x line.

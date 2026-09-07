@@ -88,6 +88,25 @@ uv run python examples/mqtt_logging.py
 
 ---
 
+### File Logging
+
+**File**: `examples/file_logging.py`
+
+Demonstrates writing log records to plain-text and JSON files using
+`AsyncFileHandler` and `JsonFormatter`.
+
+**Usage**:
+```bash
+uv run python examples/file_logging.py
+```
+
+**Key Features**:
+- Plain-text file output
+- JSON output via `JsonFormatter` (one JSON object per line)
+- `stdout_enable=False` for file-only handlers
+
+---
+
 ### Console and Redis Logging
 
 **File**: `examples/console_and_redis_logging.py`
