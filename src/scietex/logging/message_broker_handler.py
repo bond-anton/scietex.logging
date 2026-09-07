@@ -32,9 +32,17 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
 
     Subclasses must implement `connect()`, `disconnect()`, and `send_message()`.
 
+    An externally-managed client may be injected via the ``client`` keyword
+    argument; when one is provided the handler never calls ``close()`` on it —
+    the caller owns its lifetime and recovery.
+
     Attributes:
         queue_name (str): The name of the queue for the handler.
         client (Any | None): The client for sending logs to broker, or None if not connected.
+        _owns_client (bool): True when the handler built its own client and must
+            close it; False when an external client was injected.
+        _injected_client (Any | None): The externally-managed client, when one was
+            injected; otherwise None.
 
     Methods:
         connect():
@@ -57,6 +65,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         stdout_enable: bool = True,
         queue_maxsize: int = 10000,
         backend_config: RedisConfig | ValkeyConfig | None = None,
+        client: Any | None = None,
         formatter: logging.Formatter | None = None,
     ) -> None:
         """
@@ -74,6 +83,11 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
                 Defaults to 10000.
             backend_config (RedisConfig | ValkeyConfig | None): Backend-specific config
                 attached by concrete broker subclasses. Defaults to None.
+            client (Any | None): An externally-managed broker client to use instead of
+                building one in ``connect()``. When provided, the handler never closes
+                it — the caller owns its lifetime and recovery. Mutually exclusive with
+                ``backend_config``. Defaults to None, in which case the handler connects
+                and disconnects on its own.
             formatter (logging.Formatter | None): Formatter used to render records.
                 Defaults to None, in which case a default ``ScietexFormatter`` is
                 constructed from ``service_name`` and ``worker_id``.
@@ -84,6 +98,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
 
         Raises:
             TypeError: If an unknown keyword argument is passed.
+            ValueError: If both ``client`` and ``backend_config`` are provided.
         """
         super().__init__(
             service_name=service_name,
@@ -94,8 +109,17 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
             backend_config=backend_config,
             formatter=formatter,
         )
+        if client is not None and backend_config is not None:
+            raise ValueError(
+                "client and backend_config are mutually exclusive: pass an injected "
+                "client OR a backend config for the handler to build its own, not both."
+            )
         self.queue_name: str = queue_name
         self.client: Any | None = None
+        self._owns_client: bool = client is None
+        self._injected_client: Any | None = client
+        if client is not None:
+            self.client = client
         self.register_backend(
             self.queue_name,
             asyncio.Queue(maxsize=self.config.queue_maxsize),
@@ -150,6 +174,30 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         """
         ...
 
+    async def _connect(self) -> None:
+        """Establish the broker client, honoring injected-client ownership.
+
+        When a client was injected (``_owns_client`` is False), the handler never
+        builds its own connection: it restores the durable injected reference
+        (cleared by the worker's teardown) and returns. Otherwise it delegates to
+        the subclass ``connect()``.
+        """
+        if not self._owns_client:
+            self.client = self._injected_client
+            return
+        await self.connect()
+
+    async def _disconnect(self) -> None:
+        """Tear down the broker client, honoring injected-client ownership.
+
+        When a client was injected, the handler never closes a connection it does
+        not own — the host owns the client's lifetime and recovery — so this is a
+        no-op. Otherwise it delegates to the subclass ``disconnect()``.
+        """
+        if not self._owns_client:
+            return
+        await self.disconnect()
+
     async def _worker(self) -> None:
         """
         Asynchronous worker to handle logging to Message broker.
@@ -168,7 +216,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
             ):
                 if self.client is None:
                     try:
-                        await self.connect()
+                        await self._connect()
                     except Exception as exc:
                         self._report_error(None, exc)
                         await asyncio.sleep(
@@ -209,7 +257,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
                     # _report_error, not from withholding task_done().
                     self._report_error(record, exc)
                     try:
-                        await self.disconnect()
+                        await self._disconnect()
                     except Exception:
                         # disconnect() itself failed (e.g. the transport is already
                         # gone); drop the stale reference so connect() re-runs.
@@ -222,7 +270,7 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
             # queue.get()). Clearing the reference unconditionally keeps the teardown
             # idempotent even when disconnect() raises on a half-closed transport.
             try:
-                await self.disconnect()
+                await self._disconnect()
             except Exception as exc:
                 self._report_error(None, exc)
             self.client = None

@@ -43,6 +43,7 @@ class AsyncRedisHandler(AsyncBrokerHandler):
         worker_id: int | None = None,
         *,
         redis_config: dict | None = None,
+        client: redis.Redis | None = None,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         stdout_enable: bool = True,
         queue_maxsize: int = 10000,
@@ -59,7 +60,11 @@ class AsyncRedisHandler(AsyncBrokerHandler):
                 Defaults to {"host": "localhost", "port": 6379, "db": 0}. Keys are
                 converted into a typed ``RedisConfig`` stored as
                 ``self.config.backend_config``, which is the single source passed to
-                ``redis.Redis`` by ``connect()``.
+                ``redis.Redis`` by ``connect()``. Mutually exclusive with ``client``.
+            client (redis.Redis | None): An externally-managed Redis client to use
+                instead of building one in ``connect()``. When provided, the handler
+                never closes it — the caller owns its lifetime and recovery. Mutually
+                exclusive with ``redis_config``. Defaults to None.
             error_handler (callable, optional): Callback invoked with ``(record, exc)``
                 when a log record cannot be delivered. Defaults to None, in which case
                 errors are reported via the ``scietex.logging`` module logger.
@@ -79,8 +84,17 @@ class AsyncRedisHandler(AsyncBrokerHandler):
 
         Raises:
             TypeError: If an unknown keyword argument is passed.
+            ValueError: If both ``client`` and ``redis_config`` are provided.
         """
-        raw = redis_config or {"host": "localhost", "port": 6379, "db": 0}
+        # When a client is injected, connect() is never called so the config is
+        # unused; pass None unless the caller explicitly supplied a config dict, in
+        # which case it flows through so the base raises on the contradiction.
+        if client is not None:
+            backend_cfg = RedisConfig(**redis_config) if redis_config is not None else None
+        else:
+            backend_cfg = RedisConfig(
+                **(redis_config or {"host": "localhost", "port": 6379, "db": 0})
+            )
         super().__init__(
             queue_name="redis",
             service_name=service_name,
@@ -88,7 +102,8 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             error_handler=error_handler,
             stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
-            backend_config=RedisConfig(**raw),
+            backend_config=backend_cfg,
+            client=client,
             formatter=formatter,
         )
         self.stream_name = stream_name

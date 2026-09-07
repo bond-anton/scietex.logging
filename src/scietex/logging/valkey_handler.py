@@ -43,6 +43,7 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
         worker_id: int | None = None,
         *,
         valkey_config: dict | None = None,
+        client: GlideClient | None = None,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         stdout_enable: bool = True,
         queue_maxsize: int = 10000,
@@ -61,7 +62,11 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
                 The dict is converted into a typed ``ValkeyConfig`` stored as
                 ``self.config.backend_config``, which ``connect()`` translates into a
                 ``GlideClientConfiguration``; keys left ``None`` let glide apply its own
-                defaults. Defaults to ``{}``.
+                defaults. Defaults to ``{}``. Mutually exclusive with ``client``.
+            client (Any | None): An externally-managed Valkey client to use instead of
+                building one in ``connect()``. When provided, the handler never closes
+                it — the caller owns its lifetime and recovery. Mutually exclusive with
+                ``valkey_config``. Defaults to None.
             error_handler (callable, optional): Callback invoked with ``(record, exc)``
                 when a log record cannot be delivered. Defaults to None, in which case
                 errors are reported via the ``scietex.logging`` module logger.
@@ -81,8 +86,15 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
 
         Raises:
             TypeError: If an unknown keyword argument is passed.
+            ValueError: If both ``client`` and ``valkey_config`` are provided.
         """
-        client_config = valkey_config if valkey_config is not None else {}
+        # When a client is injected, connect() is never called so the config is
+        # unused; pass None unless the caller explicitly supplied a config dict, in
+        # which case it flows through so the base raises on the contradiction.
+        if client is not None:
+            backend_cfg = ValkeyConfig(**valkey_config) if valkey_config is not None else None
+        else:
+            backend_cfg = ValkeyConfig(**(valkey_config or {}))
         super().__init__(
             queue_name="valkey",
             service_name=service_name,
@@ -90,7 +102,8 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
             error_handler=error_handler,
             stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
-            backend_config=ValkeyConfig(**client_config),
+            backend_config=backend_cfg,
+            client=client,
             formatter=formatter,
         )
         self.stream_name = stream_name
