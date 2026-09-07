@@ -1,11 +1,11 @@
 # scietex.logging
 
-**scietex.logging** is an asynchronous logging package designed for high-performance applications that require non-blocking logging. It uses `asyncio` to manage log message queues and provides multiple backends, such as console, Redis, Valkey, and MQTT logging, allowing for easy extension to other logging targets.
+**scietex.logging** is an asynchronous logging package designed for high-performance applications that require non-blocking logging. It uses `asyncio` to manage log message queues and provides multiple backends, such as console, file, Redis, Valkey, and MQTT logging, allowing for easy extension to other logging targets.
 
 ## Features
 
 - **Asynchronous Logging**: Log messages are queued and handled asynchronously, reducing impact on application performance.
-- **Multiple Backends**: Supports console, Redis, Valkey, and MQTT logging out of the box.
+- **Multiple Backends**: Supports console, file, Redis, Valkey, and MQTT logging out of the box.
 - **Flexible Logging Levels**: Compatible with Python's standard logging levels (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).
 - **Optional Dependencies**: Only installs dependencies for the specific backends you need.
 
@@ -140,6 +140,37 @@ async def main():
 asyncio.run(main())
 ```
 
+### File Logging
+This example demonstrates logging to a file, including structured JSON output.
+
+```python
+import logging
+from scietex.logging import AsyncFileHandler, JsonFormatter
+import asyncio
+
+# Set up logger and file handler
+logger = logging.getLogger("MyAsyncLogger")
+logger.setLevel(logging.DEBUG)
+handler = AsyncFileHandler("app.log")
+logger.addHandler(handler)
+
+# JSON output (optional): swap the default formatter for JsonFormatter
+# handler.setFormatter(JsonFormatter())
+
+
+async def main():
+    await handler.start_logging()
+    logger.error("This error message will be logged to a file!")
+    await handler.stop_logging()
+
+
+asyncio.run(main())
+```
+
+File logging needs no extra dependency. Rotation variants
+(`AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`,
+`AsyncWatchedFileHandler`) mirror the stdlib classes of the same name.
+
 ## Configuration
 
 scietex.logging is designed to allow easy configuration of additional backends and custom logging formats:
@@ -160,7 +191,7 @@ record directly, so they are invariant under `setFormatter`. See
 
 ## Extending scietex.logging
 
-To add support for additional logging backends, subclass `AsyncBrokerHandler` and implement `connect()`, `disconnect()`, and `send_message()` methods. `AsyncLoggingHandler` is the pure-machinery base that owns the queue/worker infrastructure but no sink of its own; `AsyncBaseHandler` builds on it and registers the console as a peer backend (enabled by default via `stdout_enable`), while `AsyncBrokerHandler` is designed for message broker backends like Redis or Valkey.
+To add support for additional logging backends, subclass `AsyncBrokerHandler` and implement `connect()`, `disconnect()`, and `send_message()` methods. `AsyncLoggingHandler` is the pure-machinery base that owns the queue/worker infrastructure but no sink of its own; `AsyncBaseHandler` builds on it and registers the console as a peer backend (enabled by default via `stdout_enable`), while `AsyncBrokerHandler` is designed for message broker backends like Redis or Valkey. `AsyncFileHandler` (and its rotation variants) build on `AsyncBaseHandler` to register a file sink.
 
 ### Example: Custom Database Handler
 
