@@ -5,6 +5,14 @@ All notable changes to `scietex.logging` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-09-07
+
+### Features
+
+- **MQTT backend**: new `AsyncMqttHandler` publishes log records as JSON to an MQTT topic via `aiomqtt`. Configure with `mqtt_config` (host, port, username, password, identifier, keepalive, clean_session, transport, timeout, tls_insecure) and `qos`/`retain` publish flags. Requires the `[mqtt]` extra (`aiomqtt~=2.5.0`). Supports the `client=` injection seam (the injected client must already be connected).
+- **`MqttConfig`**: typed connection settings for the MQTT backend; the `backend_config` union now includes it.
+- **MQTT example**: `examples/mqtt_logging.py` demonstrates publishing logs to an MQTT broker.
+
 ## [1.2.0] - 2026-09-07
 
 ### Features

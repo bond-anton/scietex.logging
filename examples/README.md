@@ -18,6 +18,7 @@ run. The table maps each example to the installation it needs.
 | Base package only | `basic_console_logging.py`, `custom_formatter.py`, `error_handler_and_queue_bounds.py`, `custom_backend.py`, `pure_machinery_handler.py`, `restartable_lifecycle.py` |
 | `scietex.logging[redis]` | `redis_logging.py`, `console_and_redis_logging.py`, `all_backends.py` |
 | `scietex.logging[valkey]` | `valkey_logging.py`, `injected_client.py`, `all_backends.py` |
+| `scietex.logging[mqtt]` | `mqtt_logging.py` |
 | `scietex.logging[all]` (or `uv sync --all-extras`) | everything |
 
 ## Example Index
@@ -27,6 +28,7 @@ run. The table maps each example to the installation it needs.
 | [basic_console_logging.py](./basic_console_logging.py) | Minimal console logging with `AsyncBaseHandler` | No |
 | [redis_logging.py](./redis_logging.py) | Log to a Redis stream with `AsyncRedisHandler` | Redis |
 | [valkey_logging.py](./valkey_logging.py) | Log to a Valkey stream with `AsyncValkeyHandler` | Valkey |
+| [mqtt_logging.py](./mqtt_logging.py) | Log to an MQTT topic with `AsyncMqttHandler` | MQTT broker |
 | [injected_client.py](./injected_client.py) | Inject an externally-managed Valkey client the handler never closes | Valkey |
 | [console_and_redis_logging.py](./console_and_redis_logging.py) | Console and Redis handlers on one logger | Redis |
 | [custom_formatter.py](./custom_formatter.py) | Customize `ScietexFormatter` and apply it with `setFormatter` | No |
@@ -45,11 +47,12 @@ uv run python examples/<name>.py
 ```
 
 Replace `<name>` with the example file you want to run. The examples that need
-a server (`redis_logging.py`, `valkey_logging.py`, `injected_client.py`,
-`console_and_redis_logging.py`, `all_backends.py`) assume Redis and/or Valkey
-are running locally on the default host and port. To point at a remote host,
-edit the `redis_config` dict (Redis) or the `valkey_config`
-`GlideClientConfiguration` (Valkey) inside the script before running.
+a server (`redis_logging.py`, `valkey_logging.py`, `mqtt_logging.py`,
+`injected_client.py`, `console_and_redis_logging.py`, `all_backends.py`) assume
+Redis, Valkey, and/or an MQTT broker are running locally on the default host and
+port. To point at a remote host, edit the `redis_config` dict (Redis), the
+`valkey_config` `GlideClientConfiguration` (Valkey), or the `mqtt_config` dict
+(MQTT) inside the script before running.
 
 ## Lifecycle
 

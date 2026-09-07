@@ -26,11 +26,13 @@ is injected it stores it durably (`_injected_client`) and marks the handler as
 non-owning (`_owns_client = False`). Passing both `client` and `backend_config`
 raises `ValueError`.
 
-**`AsyncRedisHandler.__init__`** / **`AsyncValkeyHandler.__init__`**: call super
-with `queue_name="redis"` / `"valkey"` and `backend_config` (a typed
-`RedisConfig` / `ValkeyConfig`), then store `stream_name`. `client_config` is a
-derived read-only `asdict` view of `backend_config`, not a stored raw dict. No
-connection is opened at construction.
+**`AsyncRedisHandler.__init__`** / **`AsyncValkeyHandler.__init__`** /
+**`AsyncMqttHandler.__init__`**: call super with `queue_name="redis"` /
+`"valkey"` / `"mqtt"` and `backend_config` (a typed `RedisConfig` /
+`ValkeyConfig` / `MqttConfig`), then store `stream_name` (Redis/Valkey) or
+`topic` (MQTT). `client_config` is a derived read-only `asdict` view of
+`backend_config`, not a stored raw dict. No connection is opened at
+construction.
 
 **State after construction.** Events unset; queues empty; worker factories
 registered (not yet invoked); no client connection. The handler is inert until
@@ -47,7 +49,8 @@ registered (not yet invoked); no client connection. The handler is inert until
 
 For broker handlers, the broker worker begins by calling `connect()`
 (`message_broker_handler.py:92`), which lazily opens the client connection
-(Redis `redis.Redis(...)`; Valkey `GlideClient.create(...)`). The console
+(Redis `redis.Redis(...)`; Valkey `GlideClient.create(...)`; MQTT
+`aiomqtt.Client(...)` entered via its async context manager). The console
 worker needs no connection.
 
 **Ownership note.** `start_logging` does not create new workers; it invokes the

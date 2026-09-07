@@ -22,7 +22,8 @@ message_broker_handler.py
    ▲
    │ (extends AsyncBrokerHandler)
    ├── redis_handler.py
-   └── valkey_handler.py
+   ├── valkey_handler.py
+   └── mqtt_handler.py
    ▲
    │ (guarded imports)
 __init__.py  (public API)
@@ -47,14 +48,15 @@ never on any concrete backend or third-party client.
   registers the console backend when `stdout_enable` is set.
 - **Broker abstraction** (`AsyncBrokerHandler`) → `AsyncBaseHandler`; stdlib
   `asyncio`, `datetime`. No third-party runtime deps.
-- **Concrete backends** (`AsyncRedisHandler`, `AsyncValkeyHandler`) → broker
-  abstraction + their respective third-party clients (`redis`, `glide`).
-- **Public API** (`__init__.py`) → all modules, but the two concrete-backend
+- **Concrete backends** (`AsyncRedisHandler`, `AsyncValkeyHandler`,
+  `AsyncMqttHandler`) → broker abstraction + their respective third-party
+  clients (`redis`, `glide`, `aiomqtt`).
+- **Public API** (`__init__.py`) → all modules, but the three concrete-backend
   imports are guarded so the core never hard-depends on optional clients.
 
 This is the intended **core → infrastructure** boundary: the async core is
-backend-agnostic; third-party infrastructure (Redis/Valkey clients) is confined
-to the leaf backend modules.
+backend-agnostic; third-party infrastructure (Redis/Valkey/MQTT clients) is
+confined to the leaf backend modules.
 
 ## Cross-module dependencies
 
@@ -65,8 +67,8 @@ to the leaf backend modules.
   `console_backend.py` (registers the console backend).
 - `message_broker_handler.py` → `basic_handler.py` (inheritance + reuse of
   queues/events/workers).
-- `redis_handler.py`, `valkey_handler.py` → `message_broker_handler.py`
-  (inheritance + implement abstract methods).
+- `redis_handler.py`, `valkey_handler.py`, `mqtt_handler.py` →
+  `message_broker_handler.py` (inheritance + implement abstract methods).
 - `__init__.py` → all of the above (re-export).
 
 ## Circular dependencies
@@ -82,19 +84,21 @@ None detected. The import graph is acyclic and strictly layered.
 
 2. **Class hierarchy chain (compile/design time):**
    `logging.Handler` → `AsyncLoggingHandler` → `AsyncBaseHandler` →
-   `AsyncBrokerHandler` → `AsyncRedisHandler` / `AsyncValkeyHandler`, with
-   `ConsoleBackend` as a peer sink registered by `AsyncBaseHandler`. Each level
-   adds one concern: stdlib integration → async machinery (no sink) → console
-   peer registration → broker abstraction → concrete transport.
+   `AsyncBrokerHandler` → `AsyncRedisHandler` / `AsyncValkeyHandler` /
+   `AsyncMqttHandler`, with `ConsoleBackend` as a peer sink registered by
+   `AsyncBaseHandler`. Each level adds one concern: stdlib integration → async
+   machinery (no sink) → console peer registration → broker abstraction →
+   concrete transport.
 
 3. **Optional-dependency chain (packaging):**
-   `pyproject.toml` extras (`[redis]`, `[valkey]`, `[all]`) → third-party
-   clients → guarded imports in `redis_handler.py` / `valkey_handler.py` →
-   guarded re-exports in `__init__.py`. The guard chain is what keeps the base
-   install dependency-free. Each backend module raises its descriptive
-   `ImportError` via the shared `optional_dependency_error(module_name, extra)`
-   helper in `config.py`, so the two-layer guard (module-level raise +
-   package-level catch in `__init__.py`) cannot drift in message text.
+   `pyproject.toml` extras (`[redis]`, `[valkey]`, `[mqtt]`, `[all]`) →
+   third-party clients → guarded imports in `redis_handler.py` /
+   `valkey_handler.py` / `mqtt_handler.py` → guarded re-exports in
+   `__init__.py`. The guard chain is what keeps the base install
+   dependency-free. Each backend module raises its descriptive `ImportError` via
+   the shared `optional_dependency_error(module_name, extra)` helper in
+   `config.py`, so the two-layer guard (module-level raise + package-level catch
+   in `__init__.py`) cannot drift in message text.
 
 ## Third-party runtime dependencies (by module)
 
@@ -103,6 +107,7 @@ None detected. The import graph is acyclic and strictly layered.
 | `async_logging_handler.py`, `basic_handler.py`, `console_backend.py`, `formatter.py`, `message_broker_handler.py` | none | — |
 | `redis_handler.py` | `redis>=5.0.0` | yes (`[redis]`) |
 | `valkey_handler.py` | `valkey-glide~=2.5.0` | yes (`[valkey]`) |
+| `mqtt_handler.py` | `aiomqtt~=2.5.0` | yes (`[mqtt]`) |
 
 ## Dev / tooling dependencies (not runtime)
 
@@ -114,6 +119,7 @@ both pin `valkey-glide~=2.5.0` (see hotspots.md).
 
 - **Redis** server (for `AsyncRedisHandler`).
 - **Valkey** server (for `AsyncValkeyHandler`).
+- **MQTT** broker (for `AsyncMqttHandler`).
 
 These are external services the host application must provide; the package
 only opens client connections to them.

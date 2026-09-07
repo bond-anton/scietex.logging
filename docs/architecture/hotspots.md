@@ -150,22 +150,24 @@ It is also symmetric with broker backends in its error handling.
 ## 7. Duplicated connect/disconnect/send_message contract
 
 **Location.** `message_broker_handler.py` (abstract methods),
-`redis_handler.py`, `valkey_handler.py`.
+`redis_handler.py`, `valkey_handler.py`, `mqtt_handler.py`.
 
 **What it appears to do.** `AsyncBrokerHandler` is `abc.ABC`; `connect`/
-`disconnect`/`send_message` are `@abc.abstractmethod`. Redis and Valkey each
-implement them. The two concrete implementations differ in signature details
-(e.g. Valkey passes `record.items()` to `xadd`, Redis passes `record`).
+`disconnect`/`send_message` are `@abc.abstractmethod`. Redis, Valkey, and MQTT
+each implement them. The concrete implementations differ in signature details
+(e.g. Valkey passes `record.items()` to `xadd`, Redis passes `record`, MQTT
+serializes `record` to JSON and publishes it to a topic).
 
 **Why significant.** The extension contract is now enforced by the type system
 (`abc`). The Redis/Valkey `xadd` argument difference (`dict` vs `dict.items()`)
 is an **intentional, documented adapter difference**: the abstract
 `send_message` contract states `record` is a serializable `dict[str, str]` of
 `{level, message, name, time}`, and each concrete adapter translates it to the
-argument shape its client expects. No uniform client wrapper was added. Both
+argument shape its client expects. No uniform client wrapper was added. All
 concrete `send_message` implementations raise `RuntimeError` when `self.client
-is None` (`redis_handler.py:129-130`, `valkey_handler.py:136-137`) rather than
-silently no-oping, so an unconnected send surfaces as a failure (AR-034).
+is None` (`redis_handler.py:129-130`, `valkey_handler.py:136-137`,
+`mqtt_handler.py`) rather than silently no-oping, so an unconnected send
+surfaces as a failure (AR-034).
 
 **Related.** `components.md`; `docs/advanced.md` (custom backend examples).
 
@@ -208,22 +210,26 @@ version range that end users install.
 
 ---
 
-## 10. CI asymmetry: Redis provisioned, Valkey not
+## 10. CI asymmetry: Redis and MQTT provisioned, Valkey not
 
 **Location.** `.github/workflows/python-package.yml` (Redis service container,
-lines 17-30).
+lines 17-30; MQTT service container, lines 32-43).
 
-**What it appears to do.** CI runs the full pytest suite with a Redis service
-but no Valkey service.
+**What it appears to do.** CI runs the full pytest suite with Redis and MQTT
+service containers but no Valkey service.
 
 **Why significant.** **Resolved.** The Valkey end-to-end test in
 `tests/test_valkey_handler.py` now carries a connectivity-probe skip guard
 (`@pytest.mark.skipif` via a `_valkey_server_reachable()` socket probe), so it
 skips cleanly when no Valkey server is reachable instead of failing. Valkey is
 still not provisioned in CI — the skip-guard approach was chosen over CI
-provisioning.
+provisioning. Redis and MQTT, by contrast, are provisioned as service
+containers (`redis:7` and `eclipse-mosquitto:2`), so their end-to-end tests run
+in CI; the MQTT test also carries a socket-probe skip guard so it degrades
+gracefully for local runs without a broker.
 
-**Related.** `tests/test_valkey_handler.py`, `tests/test_redis_handler.py`.
+**Related.** `tests/test_valkey_handler.py`, `tests/test_redis_handler.py`,
+`tests/test_mqtt_handler.py`.
 
 ---
 

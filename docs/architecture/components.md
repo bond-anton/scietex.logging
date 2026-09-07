@@ -13,15 +13,16 @@ the version. Guards optional backend imports so the base package loads without
 extras.
 
 **Public interface.** `__all__ = ["AsyncBaseHandler", "AsyncBrokerHandler",
-"AsyncLoggingHandler", "ConsoleBackend", "LoggingConfig", "RedisConfig",
-"ScietexFormatter", "ValkeyConfig"]`, extended with `"AsyncRedisHandler"` and
-`"AsyncValkeyHandler"` when their modules import successfully. `__version__`.
-The config types (`LoggingConfig`, `RedisConfig`, `ValkeyConfig`) are exported
+"AsyncLoggingHandler", "ConsoleBackend", "LoggingConfig", "MqttConfig",
+"RedisConfig", "ScietexFormatter", "ValkeyConfig"]`, extended with
+`"AsyncRedisHandler"`, `"AsyncValkeyHandler"`, and `"AsyncMqttHandler"` when
+their modules import successfully. `__version__`. The config types
+(`LoggingConfig`, `RedisConfig`, `ValkeyConfig`, `MqttConfig`) are exported
 alongside the handler classes and `ConsoleBackend` (AR-035).
 
 **Depends on.** `async_logging_handler`, `basic_handler`, `console_backend`,
 `formatter`, `message_broker_handler`, `redis_handler` (guarded),
-`valkey_handler` (guarded).
+`valkey_handler` (guarded), `mqtt_handler` (guarded).
 
 **Depended on by.** Host applications (`from scietex.logging import ...`);
 tests import both from the package root and from submodules.
@@ -131,9 +132,9 @@ per-backend queues/workers, the error channel, and the generic
 `config` (LoggingConfig).
 
 **Configuration.** Typed config objects live in `config.py`:
-`LoggingConfig` (shared machinery options), `RedisConfig`, `ValkeyConfig`
-(backend-specific, stored as `config.backend_config`), and the cross-module
-stdlib-only helpers `validate_queue_maxsize` and `report_error`. The
+`LoggingConfig` (shared machinery options), `RedisConfig`, `ValkeyConfig`,
+`MqttConfig` (backend-specific, stored as `config.backend_config`), and the
+cross-module stdlib-only helpers `validate_queue_maxsize` and `report_error`. The
 `scietex.logging` module logger used by `report_error` also lives in `config.py`
 (AR-108), so the handler machinery and the console backend share one
 error-routing policy. Every handler builds its `self.config` from its
@@ -141,10 +142,10 @@ explicit constructor keyword args; none accept `**kwargs`. `LoggingConfig` is
 the single runtime source of truth: handlers read `self.config.*` at work time,
 and the flat `queue_maxsize`/`stdout_enable`/`error_handler` attributes are
 read-only `@property` aliases over it. `backend_config` is typed
-`RedisConfig | ValkeyConfig | None`. `RedisConfig` mirrors the full plain-option
-surface of `redis.Redis` (host/port/db plus username/password/socket/ssl/
-encoding/retry/health-check/client-name/protocol fields), so `RedisConfig(**raw)`
-never rejects a legitimate client option.
+`RedisConfig | ValkeyConfig | MqttConfig | None`. `RedisConfig` mirrors the full
+plain-option surface of `redis.Redis` (host/port/db plus username/password/
+socket/ssl/encoding/retry/health-check/client-name/protocol fields), so
+`RedisConfig(**raw)` never rejects a legitimate client option.
 
 **Depends on.** `formatter.ScietexFormatter`; `config` (`LoggingConfig`,
 `validate_queue_maxsize`); stdlib `asyncio`, `logging`.
@@ -261,9 +262,9 @@ connect/disconnect/send_message contract concrete backends implement.
 Because `AsyncBrokerHandler` extends `AsyncBaseHandler`, every broker backend
 **inherits the console sink by default** (`stdout_enable=True`); pass
 `stdout_enable=False` for a broker-only handler. The queue names `"console"`,
-`"redis"`, and `"valkey"` are reserved by the built-in backends, so a custom
-`queue_name` must avoid them (a collision raises `ValueError` at construction,
-AR-028).
+`"redis"`, `"valkey"`, and `"mqtt"` are reserved by the built-in backends, so a
+custom `queue_name` must avoid them (a collision raises `ValueError` at
+construction, AR-028).
 
 **Log-entry dict shape** (built in `_worker`, `message_broker_handler.py:192-199`):
 `{"level": level_abbreviation(record.levelno), "message": record.getMessage(),
@@ -278,8 +279,8 @@ deterministic and invariant under `setFormatter`.
 **Depends on.** `basic_handler.AsyncBaseHandler`; `config` (`level_abbreviation`);
 stdlib `asyncio`, `datetime`.
 
-**Depended on by.** `AsyncRedisHandler`, `AsyncValkeyHandler` (extend); host
-apps implementing custom backends (per docs).
+**Depended on by.** `AsyncRedisHandler`, `AsyncValkeyHandler`,
+`AsyncMqttHandler` (extend); host apps implementing custom backends (per docs).
 
 ---
 
@@ -359,7 +360,44 @@ the `valkey-glide` client.
 
 ---
 
-## 9. Supporting / non-runtime components
+## 9. MQTT backend — `mqtt_handler.py`
+
+**Purpose.** Concrete broker backend publishing log records as JSON payloads to
+an MQTT topic via the `aiomqtt` client.
+
+**Class.** `AsyncMqttHandler(AsyncBrokerHandler)` — `mqtt_handler.py:19`
+
+**Public interface.**
+- `AsyncMqttHandler(topic, service_name=None, worker_id=None, *, mqtt_config=None, qos=0, retain=False, client=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)`
+  — passes `queue_name="mqtt"` to super. `mqtt_config` is a **dict** whose keys
+  mirror `aiomqtt.Client`'s scalar plain options; a typed `MqttConfig` is stored
+  as `self.config.backend_config` (defaulting to `{"host": "localhost", "port":
+  1883}`). `self.client_config` is a read-only `asdict` view of it. Accepts an
+  optional `formatter=` kwarg (AR-024). An injected `client=` is an
+  externally-managed `aiomqtt.Client` the handler never closes — the caller owns
+  its lifetime and recovery; passing both `client` and `mqtt_config` raises
+  `ValueError`. An injected MQTT client must already be connected (inside its
+  `async with` context) before `start_logging()`, because the handler never
+  enters the context on an injected client.
+- `async connect()` — `mqtt_handler.py:129`. Translates
+  `self.config.backend_config` into aiomqtt kwargs (`host` → `hostname`,
+  `None`-valued fields dropped so aiomqtt applies its own defaults) and enters
+  the client as an async context manager if `client is None`.
+- `async disconnect()` — `mqtt_handler.py:151`. `await client.__aexit__(None, None, None)`.
+- `async send_message(record)` — `mqtt_handler.py:159`. Raises `RuntimeError`
+  when `self.client is None` (AR-034); otherwise
+  `await client.publish(self.topic, json.dumps(record), qos=self.qos, retain=self.retain)`.
+  The payload is the JSON text of the standard `{level, message, name, time}`
+  dict; a subscriber must `json.loads` it.
+
+**Depends on.** `aiomqtt` (hard import, raises descriptive ImportError if
+absent); `message_broker_handler.AsyncBrokerHandler`.
+
+**Depended on by.** `__init__.py` (guarded); host apps; tests.
+
+---
+
+## 10. Supporting / non-runtime components
 
 - **Tests** (`tests/`) — depend on the package; Redis/Valkey tests also depend
   on live servers and the third-party clients directly.

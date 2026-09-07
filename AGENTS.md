@@ -21,10 +21,11 @@ scietex.logging/
 │   ├── __init__.py              # Public API exports
 │   ├── async_logging_handler.py # AsyncLoggingHandler machinery base
 │   ├── basic_handler.py         # AsyncBaseHandler (base class with console backend)
-│   ├── config.py                # LoggingConfig, RedisConfig, ValkeyConfig
+│   ├── config.py                # LoggingConfig, RedisConfig, ValkeyConfig, MqttConfig
 │   ├── console_backend.py       # ConsoleBackend peer backend
 │   ├── formatter.py             # ScietexFormatter
 │   ├── message_broker_handler.py # AsyncBrokerHandler (base class for broker backends)
+│   ├── mqtt_handler.py          # AsyncMqttHandler (MQTT backend)
 │   ├── redis_handler.py         # AsyncRedisHandler (Redis backend)
 │   └── valkey_handler.py        # AsyncValkeyHandler (Valkey backend)
 ├── tests/
@@ -35,6 +36,7 @@ scietex.logging/
 │   ├── test_client_injection.py
 │   ├── test_formatter.py
 │   ├── test_message_broker_handler.py
+│   ├── test_mqtt_handler.py
 │   ├── test_queue_bounds.py
 │   ├── test_redis_handler.py
 │   ├── test_restartable_lifecycle.py
@@ -55,6 +57,7 @@ scietex.logging/
 │   ├── custom_formatter.py
 │   ├── error_handler_and_queue_bounds.py
 │   ├── injected_client.py
+│   ├── mqtt_logging.py
 │   ├── pure_machinery_handler.py
 │   ├── redis_logging.py
 │   ├── restartable_lifecycle.py
@@ -76,19 +79,22 @@ scietex.logging/
 - `ScietexFormatter` - Custom formatter with worker name and 3-letter log level abbreviations
 - `AsyncRedisHandler` - Redis logging backend (optional, requires `[redis]` extra)
 - `AsyncValkeyHandler` - Valkey logging backend (optional, requires `[valkey]` extra)
+- `AsyncMqttHandler` - MQTT logging backend (optional, requires `[mqtt]` extra)
 
 ### Exported Configuration Types (from `__init__.py`)
 
 - `LoggingConfig` - Shared machinery options for every handler
 - `RedisConfig` - Connection settings for the Redis backend
 - `ValkeyConfig` - Connection settings for the Valkey backend
+- `MqttConfig` - Connection settings for the MQTT backend
 
 ### Installation Extras
 
 - `scietex.logging[redis]` - Install Redis support
-- `scietex.logging[valkey]` - Install Valkey support  
+- `scietex.logging[valkey]` - Install Valkey support
+- `scietex.logging[mqtt]` - Install MQTT support (aiomqtt)
 - `scietex.logging[all]` - Install all backends
-- `scietex.logging[dev]` - Development dependencies (tox, redis, valkey)
+- `scietex.logging[dev]` - Development dependencies (tox, redis, valkey, aiomqtt)
 - `scietex.logging[lint]` - Linting (ruff, ty)
 - `scietex.logging[test]` - Testing (pytest, pytest-asyncio)
 
@@ -102,7 +108,8 @@ logging.Handler (standard library)
         └── AsyncBaseHandler (src/scietex/logging/basic_handler.py)
             └── AsyncBrokerHandler (src/scietex/logging/message_broker_handler.py)
                 ├── AsyncRedisHandler (src/scietex/logging/redis_handler.py)
-                └── AsyncValkeyHandler (src/scietex/logging/valkey_handler.py)
+                ├── AsyncValkeyHandler (src/scietex/logging/valkey_handler.py)
+                └── AsyncMqttHandler (src/scietex/logging/mqtt_handler.py)
 ```
 
 ### Key Concepts
@@ -149,6 +156,9 @@ uv run python examples/console_and_redis_logging.py
 
 # Valkey logging with an externally-managed client (handler never closes it)
 uv run python examples/injected_client.py
+
+# MQTT logging (requires an MQTT broker running locally)
+uv run python examples/mqtt_logging.py
 ```
 
 ### Running Tests
@@ -175,8 +185,9 @@ uv run ruff check .
 ## Known Issues & Gotchas
 
 1. PostgreSQL support is mentioned in docs but not yet implemented (no `postgres` extra defined)
-2. The `__init__.py` imports Redis/Valkey handlers conditionally - ensure the `[redis]` or `[valkey]` extras are installed
-3. `client` and a backend config (`valkey_config`/`redis_config`/`backend_config`) are mutually exclusive — passing both raises `ValueError`. When injecting a client, omit the config dict.
+2. The `__init__.py` imports Redis/Valkey/MQTT handlers conditionally - ensure the `[redis]`, `[valkey]`, or `[mqtt]` extras are installed
+3. `client` and a backend config (`valkey_config`/`redis_config`/`mqtt_config`/`backend_config`) are mutually exclusive — passing both raises `ValueError`. When injecting a client, omit the config dict.
+4. `"mqtt"` is a reserved queue name (used by `AsyncMqttHandler`); custom backends must not reuse it.
 
 ## Development Commands
 

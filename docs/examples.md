@@ -67,6 +67,27 @@ uv run python examples/valkey_logging.py
 
 ---
 
+### MQTT Logging
+
+**File**: `examples/mqtt_logging.py`
+
+Demonstrates publishing log records to an MQTT topic using `AsyncMqttHandler`.
+
+**Usage**:
+```bash
+uv run python examples/mqtt_logging.py
+```
+
+**Dependencies**:
+- An MQTT broker must be running locally or configure remote connection
+
+**Key Features**:
+- MQTT topic publishing
+- Service and worker identification
+- Error and info logging
+
+---
+
 ### Console and Redis Logging
 
 **File**: `examples/console_and_redis_logging.py`

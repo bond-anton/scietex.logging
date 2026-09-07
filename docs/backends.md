@@ -100,15 +100,71 @@ handler = AsyncValkeyHandler(stream_name="my_log_stream")
   the caller owns its lifetime and recovery. Mutually exclusive with
   `valkey_config` (passing both raises `ValueError`).
 
+## MQTT Logging
+
+MQTT logging publishes log records as JSON payloads to an MQTT topic. Requires
+the `aiomqtt` package.
+
+### Installation
+
+```bash
+pip install scietex.logging[mqtt]
+```
+
+### Features
+
+- Publish log records to an MQTT topic as JSON
+- QoS 0/1/2 delivery guarantees (`qos`)
+- Retained-message support (`retain`)
+- Client-injection seam for externally-managed connections
+
+### Usage
+
+```python
+from scietex.logging import AsyncMqttHandler
+
+handler = AsyncMqttHandler(topic="my/log/topic")
+```
+
+### Configuration
+
+- `topic`: The MQTT topic to which log records are published (required).
+- `mqtt_config`: Dictionary with MQTT connection parameters (accepted for
+  backward compatibility). It is converted into a typed `MqttConfig` stored as
+  `self.config.backend_config`; unknown keys in the dict raise `TypeError`.
+  `MqttConfig` mirrors `aiomqtt.Client`'s scalar plain options:
+  - `host`: MQTT broker host (default: "localhost")
+  - `port`: MQTT broker port (default: 1883)
+  - `username` / `password`: Authentication credentials (default: None)
+  - `identifier`: Client identifier; auto-generated if None
+  - `keepalive`: Keepalive interval in seconds (default: None)
+  - `clean_session`: Whether the broker discards the session on disconnect
+  - `transport`: "tcp", "websockets", or "unix"
+  - `timeout`: Default broker-communication timeout
+  - `tls_insecure`: Disable TLS hostname verification
+  `connect()` translates `host` to aiomqtt's `hostname` kwarg and drops
+  `None`-valued fields so aiomqtt applies its own defaults.
+- `qos`: The MQTT QoS level (0, 1, or 2) used for publication (default: 0,
+  at-most-once fire-and-forget). QoS 1/2 trade throughput for delivery
+  guarantees.
+- `retain`: Whether published messages are retained by the broker (default:
+  False).
+- `client`: Inject an externally-managed `aiomqtt.Client` the handler never
+  closes — the caller owns its lifetime and recovery. The injected client must
+  already be connected (inside its `async with` context) before
+  `start_logging()`, because the handler never enters the context on an injected
+  client. Mutually exclusive with `mqtt_config` (passing both raises
+  `ValueError`).
+
 ## Backend Comparison
 
-| Feature | Console | Redis | Valkey |
-|---------|---------|-------|--------|
-| Dependencies | None | `redis` | `valkey-glide` |
-| Installation | Always included | `[redis]` | `[valkey]` |
-| Persistence | No | Yes | Yes |
-| Throughput | High | High | High |
-| Setup Complexity | Low | Medium | Medium |
+| Feature | Console | Redis | Valkey | MQTT |
+|---------|---------|-------|--------|------|
+| Dependencies | None | `redis` | `valkey-glide` | `aiomqtt` |
+| Installation | Always included | `[redis]` | `[valkey]` | `[mqtt]` |
+| Persistence | No | Yes | Yes | No |
+| Throughput | High | High | High | High |
+| Setup Complexity | Low | Medium | Medium | Medium |
 
 ## Using Multiple Backends
 
@@ -116,7 +172,7 @@ You can use multiple handlers simultaneously:
 
 ```python
 import logging
-from scietex.logging import AsyncBaseHandler, AsyncRedisHandler, AsyncValkeyHandler
+from scietex.logging import AsyncBaseHandler, AsyncRedisHandler, AsyncValkeyHandler, AsyncMqttHandler
 
 logger = logging.getLogger("MultiLogger")
 logger.setLevel(logging.DEBUG)
@@ -130,9 +186,13 @@ redis_handler = AsyncRedisHandler(stream_name="logs")
 # Valkey handler
 valkey_handler = AsyncValkeyHandler(stream_name="logs")
 
+# MQTT handler
+mqtt_handler = AsyncMqttHandler(topic="logs")
+
 logger.addHandler(console_handler)
 logger.addHandler(redis_handler)
 logger.addHandler(valkey_handler)
+logger.addHandler(mqtt_handler)
 ```
 
 For a runnable version that combines console, Redis, and Valkey on one logger

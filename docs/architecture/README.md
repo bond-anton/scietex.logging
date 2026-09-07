@@ -12,15 +12,16 @@ custom `logging.Handler` subclasses. Log records are queued in `asyncio.Queue`
 objects and drained by background worker coroutines, so application code never
 blocks on I/O.
 
-Three backends are supported, layered on a class hierarchy whose shared
+Four backends are supported, layered on a class hierarchy whose shared
 machinery is separated from the sinks:
 
 - **Console** (stdout) — always available, no extra dependency. A peer backend
   (`ConsoleBackend`) registered by `AsyncBaseHandler`.
 - **Redis** (streams) — optional, requires the `redis` package.
 - **Valkey** (streams) — optional, requires the `valkey-glide` package.
+- **MQTT** (topic) — optional, requires the `aiomqtt` package.
 
-The package is small: ~1320 lines of source across 9 modules under
+The package is small: ~1400 lines of source across 10 modules under
 `src/scietex/logging/`.
 
 ## Document Index
@@ -37,17 +38,18 @@ The package is small: ~1320 lines of source across 9 modules under
 
 ## Key Facts (quick reference)
 
-- **Package**: `scietex.logging`, version `1.2.0` (`src/scietex/logging/__init__.py:100`)
+- **Package**: `scietex.logging`, version `1.3.0` (`src/scietex/logging/__init__.py:119`)
 - **Python**: `>=3.10` (`pyproject.toml`)
 - **Build**: setuptools, `src/` layout; package data ships `py.typed`
-- **Runtime deps**: none (base); `redis>=5.0.0` (`[redis]`), `valkey-glide~=2.5.0` (`[valkey]`)
+- **Runtime deps**: none (base); `redis>=5.0.0` (`[redis]`), `valkey-glide~=2.5.0` (`[valkey]`), `aiomqtt~=2.5.0` (`[mqtt]`)
 - **Public API** (`__init__.py`): `AsyncBaseHandler`, `AsyncBrokerHandler`,
   `AsyncLoggingHandler`, `ConsoleBackend`, `ScietexFormatter`;
-  `AsyncRedisHandler` / `AsyncValkeyHandler` added conditionally on successful
-  import
+  `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler` added
+  conditionally on successful import
 - **Class hierarchy**: `logging.Handler` → `AsyncLoggingHandler` (pure
   machinery, no sink) → `AsyncBaseHandler` (registers `ConsoleBackend` peer) →
-  `AsyncBrokerHandler` → {`AsyncRedisHandler`, `AsyncValkeyHandler`}
+  `AsyncBrokerHandler` → {`AsyncRedisHandler`, `AsyncValkeyHandler`,
+  `AsyncMqttHandler`}
 - **Tests**: pytest + pytest-asyncio; Redis tests require a live server, and the
-  Valkey end-to-end test skips when no Valkey server is reachable
+  Valkey/MQTT end-to-end tests skip when no server is reachable
 - **Tooling**: uv (lockfile), tox (format/lint/type/py314), ruff, `ty` type checker

@@ -111,6 +111,7 @@ subclass must not use them as its `queue_name`:
   (the default). `AsyncBrokerHandler(queue_name="console")` therefore raises at
   construction unless you pass `stdout_enable=False`.
 - `"redis"` / `"valkey"` — registered by `AsyncRedisHandler` / `AsyncValkeyHandler`.
+- `"mqtt"` — registered by `AsyncMqttHandler`.
 
 Choose a distinct `queue_name` for a custom backend (e.g. `"postgres"`, `"http"`).
 
@@ -170,7 +171,7 @@ aliases over `self.config`, so there is no parallel state to drift.
   `service_name`, `worker_id`, `error_handler`, `queue_maxsize`,
   `stdout_enable`, and `backend_config` (the backend-specific config, or `None`
   for the pure-machinery/console-only handlers). `backend_config` is typed
-  `RedisConfig | ValkeyConfig | None` — a real union, not `Any`.
+  `RedisConfig | ValkeyConfig | MqttConfig | None` — a real union, not `Any`.
 - `RedisConfig` — Redis connection settings. It mirrors the full plain-option
   surface of `redis.Redis` (34 fields: `host`/`port`/`db` plus `username`,
   `password`, socket/ssl/encoding/retry/health-check/client-name/protocol
@@ -183,6 +184,14 @@ aliases over `self.config`, so there is no parallel state to drift.
   `client_az`, `lazy_connect`, `read_only`); enum- and object-valued options are
   intentionally not modeled. Stored as `self.config.backend_config` on
   `AsyncValkeyHandler`.
+- `MqttConfig` — MQTT connection settings. It mirrors `aiomqtt.Client`'s scalar
+  plain options (`host`, `port`, `username`, `password`, `identifier`,
+  `keepalive`, `clean_session`, `transport`, `timeout`, `tls_insecure`);
+  object-valued expert options (`will`, `tls_context`, `tls_params`,
+  `properties`, `logger`) are intentionally not modeled. `host` is the common
+  connection field (consistent with `RedisConfig`) and is translated to
+  aiomqtt's `hostname` kwarg by `connect()`. Stored as `self.config.backend_config`
+  on `AsyncMqttHandler`.
 
 The handler constructors **no longer accept `**kwargs`**. Unknown or typo'd
 keyword arguments now raise `TypeError` at construction time instead of being
@@ -197,10 +206,10 @@ dropping `None`-valued fields so glide applies its own defaults.
 
 ### Injecting an external client
 
-`AsyncBrokerHandler`, `AsyncRedisHandler`, and `AsyncValkeyHandler` accept a
-keyword-only `client=` argument that injects an already-created,
-externally-managed client, so the handler never builds or closes its own
-connection:
+`AsyncBrokerHandler`, `AsyncRedisHandler`, `AsyncValkeyHandler`, and
+`AsyncMqttHandler` accept a keyword-only `client=` argument that injects an
+already-created, externally-managed client, so the handler never builds or
+closes its own connection:
 
 ```python
 from scietex.logging import AsyncValkeyHandler
@@ -213,10 +222,13 @@ Ownership contract:
 
 - The handler **never closes** an injected client — the caller owns its lifetime
   and recovery. `disconnect()` is a no-op for an injected client.
-- `client` and the backend config dict (`redis_config` / `valkey_config`) are
-  **mutually exclusive**: passing both raises `ValueError`.
+- `client` and the backend config dict (`redis_config` / `valkey_config` /
+  `mqtt_config`) are **mutually exclusive**: passing both raises `ValueError`.
 - When a client is injected with no config dict, the backend config is unused
   (`connect()` never runs).
+- For MQTT, an injected client must already be connected (inside its `async
+  with` context) before `start_logging()`, because the handler never enters the
+  context on an injected client.
 
 See `examples/injected_client.py` for a runnable example.
 

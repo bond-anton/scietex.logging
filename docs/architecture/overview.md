@@ -57,6 +57,8 @@ sub-packages. Architecturally it decomposes into four cooperating layers:
      Redis stream via `redis.asyncio`.
    - `src/scietex/logging/valkey_handler.py` — `AsyncValkeyHandler` writes to
      a Valkey stream via `valkey-glide` (`GlideClient`).
+   - `src/scietex/logging/mqtt_handler.py` — `AsyncMqttHandler` publishes log
+     records as JSON payloads to an MQTT topic via `aiomqtt`.
 
 ## How the components interact
 
@@ -75,7 +77,7 @@ per-backend asyncio.Queue              [async boundary]
    ▼
 per-backend worker coroutine           [consumer, async]
    ├─ ConsoleBackend worker → ScietexFormatter.format → sys.stdout
-   └─ broker worker  → build dict → send_message → Redis/Valkey stream
+   └─ broker worker  → build dict → send_message → Redis/Valkey stream / MQTT topic
 ```
 
 Key relationships:
@@ -86,8 +88,8 @@ Key relationships:
   `ConsoleBackend` as a peer when `stdout_enable=True`.
 - `AsyncBrokerHandler` **extends** `AsyncBaseHandler` and registers its own
   broker queue + worker via `register_backend`.
-- `AsyncRedisHandler` and `AsyncValkeyHandler` **extend** `AsyncBrokerHandler`
-  and implement the three abstract methods.
+- `AsyncRedisHandler`, `AsyncValkeyHandler`, and `AsyncMqttHandler` **extend**
+  `AsyncBrokerHandler` and implement the three abstract methods.
 - `__init__.py` **depends on** all modules; it is the only place that imports
   the concrete broker handlers, and it does so defensively (try/except
   `ImportError`).
@@ -108,7 +110,7 @@ module docstring in `__init__.py`) is:
 
 The `examples/` directory contains runnable scripts demonstrating this
 (`basic_console_logging.py`, `redis_logging.py`, `valkey_logging.py`,
-`console_and_redis_logging.py`).
+`mqtt_logging.py`, `console_and_redis_logging.py`).
 
 ## Important runtime processes
 
