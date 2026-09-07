@@ -21,7 +21,7 @@ sub-packages. Architecturally it decomposes into four cooperating layers:
 2. **Formatter layer** — `src/scietex/logging/formatter.py` and
    `src/scietex/logging/json_formatter.py`
    `ScietexFormatter` (a `logging.Formatter`). Enriches records with a
-   `worker_name` (`service_name:worker_id`) and 3-letter level abbreviations;
+   `worker_name` (`service_name:instance_id`) and 3-letter level abbreviations;
    emits ISO-8601 UTC timestamps. The `level_abbreviation` helper it uses now
    lives in `config.py` (the neutral leaf) and is re-exported here for backward
    compatibility (AR-026). `JsonFormatter` (a `logging.Formatter`) renders each
@@ -127,7 +127,7 @@ The canonical usage pattern (from `docs/index.md`, `examples/*.py`, and the
 module docstring in `__init__.py`) is:
 
 1. `logger = logging.getLogger(...)`; `logger.setLevel(...)`.
-2. Construct a handler, e.g. `AsyncBaseHandler(service_name=..., worker_id=...)`
+2. Construct a handler, e.g. `AsyncBaseHandler(service_name=..., instance_id=...)`
    or `AsyncRedisHandler(stream_name=...)`.
 3. `logger.addHandler(handler)`.
 4. Inside an async context: `await handler.start_logging()`.

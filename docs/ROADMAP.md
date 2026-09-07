@@ -1,6 +1,6 @@
 # Roadmap
 
-Planned direction for `scietex.logging`. Current stable release: **1.7.0**.
+Planned direction for `scietex.logging`. Current stable release: **1.8.0**.
 
 The 1.x public API (`__all__` surface and constructor signatures) has grown
 additively through the 1.x line (client injection, MQTT backend, file sinks,
@@ -93,15 +93,13 @@ comparing against a stale loop, which the thread-safe buffer also resolves.
 
 ## 1.x — `instance_id` replaces `worker_id`
 
-**Status:** Proposed (design only; not yet implemented).
+**Status:** Implemented in 1.8.0.
 
-The handler identity is currently a numeric `worker_id: int | None = None` that
-defaults to `1` (`async_logging_handler.py:174-175`, `config.py:41`) and is
-rendered into the formatter's `worker_name` as `service_name:worker_id`
-(`async_logging_handler.py:229`, `formatter.py:54`). A numeric worker id is a
-poor fit for the actual use case — identifying a logging *instance* (a process,
-container, replica, or deployment unit) — where a string label is far more
-expressive.
+The handler identity is now a string `instance_id: str | None = None` that
+defaults to `"1"` and is rendered into the formatter's `worker_name` as
+`service_name:instance_id`. The numeric `worker_id: int | None = None` parameter
+is deprecated (a `DeprecationWarning` is emitted when it is used) and stringified
+into `instance_id`; supplying both raises `ValueError`.
 
 ### Change
 

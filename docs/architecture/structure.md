@@ -74,6 +74,7 @@ cycles.
 | `test_basic_handler.py` | `AsyncBaseHandler` init, start/stop, emit→queue, console worker stdout, pending-task drain, cleanup threshold. |
 | `test_message_broker_handler.py` | `AsyncBrokerHandler` queue/worker registration and drain behavior. |
 | `test_config.py` | `LoggingConfig` / `RedisConfig` / `ValkeyConfig` / `MqttConfig`, `validate_queue_maxsize`, `optional_dependency_error`. |
+| `test_instance_id.py` | `instance_id` parameter, deprecated `worker_id` alias, mutual exclusivity, and the default `"1"`. |
 | `test_formatter.py` | `level_abbreviation`, `ScietexFormatter.formatTime` (ISO UTC), `format` (worker name + level abbrev). |
 | `test_console_backend.py` | `ConsoleBackend` queue/worker/drain and shutdown-status reporting. |
 | `test_file_backend.py` | `FileBackend` queue/worker/drain, dynamic stream provider, and shutdown-status reporting. |

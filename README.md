@@ -186,7 +186,7 @@ handler.setFormatter(formatter)
 ```
 
 A formatter affects the **console (stdout) output only**; broker backends build
-their payloads from the handler's `service_name`/`worker_id` config and the
+their payloads from the handler's `service_name`/`instance_id` config and the
 record directly, so they are invariant under `setFormatter`. See
 [docs/configuration.md](docs/configuration.md#formatter-scope-console-output-only).
 

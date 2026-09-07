@@ -41,7 +41,7 @@ blocks on I/O.
 3. `AsyncBrokerHandler._worker` (`message_broker_handler.py:153`) gets the
    record, calls `connect()` on first entry, and builds a **dict** log entry:
    `{"level": level_abbreviation(record.levelno), "message": record.getMessage(),
-   "name": f"{self.config.service_name}:{self.config.worker_id}",
+   "name": f"{self.config.service_name}:{self.config.instance_id}",
    "time": datetime.fromtimestamp(record.created, timezone.utc).isoformat()}`.
    `level` is computed via `level_abbreviation(record.levelno)` (imported from
    `config.py`); `name` and `time` are derived from `self.config` and the record
@@ -59,7 +59,7 @@ blocks on I/O.
 **Transformations.** `LogRecord` → dict with keys `level`, `message`, `name`,
 `time`. The dict fields are computed **independently** of the formatter: `level`
 is derived from `record.levelno` via `level_abbreviation` (e.g. `"INF"`), and
-`name`/`time` from `self.config` (the `service_name:worker_id` identity) and the
+`name`/`time` from `self.config` (the `service_name:instance_id` identity) and the
 record's `created` timestamp. The broker wire format is therefore invariant
 under `setFormatter` and deterministic regardless of `stdout_enable`.
 

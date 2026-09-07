@@ -6,7 +6,7 @@ This guide covers configuring scietex.logging, including formatters, service nam
 
 The `ScietexFormatter` is the default formatter for scietex.logging. It provides:
 
-- Service name and worker ID in logs: `{service_name}:{worker_id}`
+- Service name and instance ID in logs: `{service_name}:{instance_id}`
 - 3-letter log level abbreviations: `DBG`, `INF`, `WRN`, `ERR`, `CRT`
 - ISO 8601 UTC timestamps by default
 
@@ -15,7 +15,7 @@ The `ScietexFormatter` is the default formatter for scietex.logging. It provides
 ```python
 from scietex.logging import ScietexFormatter
 
-formatter = ScietexFormatter(service_name="MyService", worker_id=1)
+formatter = ScietexFormatter(service_name="MyService", instance_id="web-1")
 ```
 
 ### Custom Format
@@ -27,7 +27,7 @@ from scietex.logging import ScietexFormatter
 
 formatter = ScietexFormatter(
     service_name="MyService",
-    worker_id=1,
+    instance_id="web-1",
     fmt="%(asctime)s - %(levelname)s - [%(worker_name)s] - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -41,18 +41,27 @@ By default, timestamps use ISO 8601 format with UTC timezone. You can customize 
 from scietex.logging import ScietexFormatter
 from datetime import datetime, timezone
 
-formatter = ScietexFormatter(service_name="MyService", worker_id=1, datefmt="%Y-%m-%d %H:%M:%S")
+formatter = ScietexFormatter(service_name="MyService", instance_id="web-1", datefmt="%Y-%m-%d %H:%M:%S")
 ```
 
 ## Handler Configuration
 
-### Service Name and Worker ID
+### Service Name and Instance ID
 
-Both `AsyncBaseHandler` and `AsyncBrokerHandler` accept `service_name` and `worker_id` parameters:
+Every handler accepts `service_name` and `instance_id` parameters. `instance_id`
+is a string identifying the logging *instance* — a process, container, replica,
+or deployment unit — and is rendered into `worker_name` as
+`{service_name}:{instance_id}`. It defaults to `"1"` when omitted.
 
 ```python
-handler = AsyncBaseHandler(service_name="MyService", worker_id=1)
+handler = AsyncBaseHandler(service_name="MyService", instance_id="web-1")
 ```
+
+The numeric `worker_id` parameter is **deprecated** in favor of `instance_id`.
+Passing `worker_id` emits a `DeprecationWarning`, and its value is stringified
+into `instance_id` (so `worker_id=2` and `instance_id="2"` are equivalent).
+`worker_id` and `instance_id` are mutually exclusive — passing both raises
+`ValueError`. `worker_id` is removed in v2.0.
 
 ### Console Logging Control
 
@@ -79,14 +88,14 @@ class MyHandler(AsyncLoggingHandler):
     def __init__(
         self,
         service_name=None,
-        worker_id=None,
+        instance_id=None,
         *,
         error_handler=None,
         queue_maxsize=10000,
     ):
         super().__init__(
             service_name=service_name,
-            worker_id=worker_id,
+            instance_id=instance_id,
             error_handler=error_handler,
             queue_maxsize=queue_maxsize,
         )
@@ -172,9 +181,11 @@ constructor keyword arguments (defined in `src/scietex/logging/config.py`).
 aliases over `self.config`, so there is no parallel state to drift.
 
 - `LoggingConfig` — shared machinery options for every handler:
-  `service_name`, `worker_id`, `error_handler`, `queue_maxsize`,
+  `service_name`, `instance_id`, `error_handler`, `queue_maxsize`,
   `stdout_enable`, and `backend_config` (the backend-specific config, or `None`
-  for the pure-machinery/console-only handlers). `backend_config` is typed
+  for the pure-machinery/console-only handlers). `instance_id` (default `"1"`)
+  is the canonical identity field; the numeric `worker_id` field is a deprecated
+  alias kept for backward compatibility. `backend_config` is typed
   `RedisConfig | ValkeyConfig | MqttConfig | None` — a real union, not `Any`.
 - `RedisConfig` — Redis connection settings. It mirrors the full plain-option
   surface of `redis.Redis` (34 fields: `host`/`port`/`db` plus `username`,
@@ -328,7 +339,7 @@ It does **not** affect broker payloads.
 
 Broker backends (`AsyncRedisHandler`, `AsyncValkeyHandler`, and any
 `AsyncBrokerHandler` subclass) build their wire record from the handler's
-`service_name`/`worker_id` config and the log record directly, producing a
+`service_name`/`instance_id` config and the log record directly, producing a
 fixed schema (`level`, `message`, `name`, `time`). That payload is **invariant**
 under `setFormatter`/`formatter=`, so the broker output is deterministic and
 independent of any formatter you install.
@@ -362,7 +373,7 @@ logger.setLevel(logging.DEBUG)
 
 formatter = ScietexFormatter(
     service_name="MyService",
-    worker_id=1,
+    instance_id="web-1",
     fmt="%(asctime)s - %(levelname)s - [%(worker_name)s] - %(message)s",
 )
 

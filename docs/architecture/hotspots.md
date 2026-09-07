@@ -263,7 +263,7 @@ multiple queues, and each backend's worker formats the same record. Because
 `format` mutates only a copy, no mutation leaks to the caller or to other
 backends. The broker worker additionally computes its dict fields
 **independently** — `level = level_abbreviation(record.levelno)`,
-`name = f"{self.config.service_name}:{self.config.worker_id}"`, and
+`name = f"{self.config.service_name}:{self.config.instance_id}"`, and
 `time = datetime.fromtimestamp(record.created, timezone.utc).isoformat()`
 (`message_broker_handler.py:192-199`) — from config and the record rather than
 from formatter-mutated attributes, so the broker wire format is invariant under

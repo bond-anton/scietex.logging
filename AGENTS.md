@@ -143,10 +143,12 @@ logging.Handler (standard library)
 
 ### ScietexFormatter
 
-- Service name and worker ID included in logs: `{service_name}:{worker_id}`
+- Service name and instance ID included in logs: `{service_name}:{instance_id}`
 - Log levels abbreviated: `DBG`, `INF`, `WRN`, `ERR`, `CRT`
 - Timestamps in ISO 8601 UTC format by default
 - Default format: `%(asctime)s - %(levelname)s - [%(worker_name)s] - %(message)s`
+- `worker_id` (int) is deprecated in favor of `instance_id` (str, default `"1"`);
+  passing both raises `ValueError`, and `worker_id` is removed in v2.0
 
 ## Common Tasks
 

@@ -7,7 +7,7 @@ are async and must run inside an asyncio event loop.
 ## Construction (`__init__`)
 
 **`AsyncLoggingHandler.__init__`** (`async_logging_handler.py:111`):
-- Constructs a `ScietexFormatter(service_name, worker_id)`.
+- Constructs a `ScietexFormatter(service_name, instance_id)`.
 - Creates two `asyncio.Event`s: `logging_accept_event`, `logging_running_event`
   (both initially **unset**).
 - Initializes empty `log_queues`, `log_worker_factories`, `_drain_hooks`,

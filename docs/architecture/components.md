@@ -44,9 +44,11 @@ identity and abbreviated levels, and formats timestamps as ISO-8601 UTC.
   re-exported from `formatter.py:11` for backward compatibility (AR-026).
 
 **Public interface.**
-- `ScietexFormatter(service_name, worker_id=None, fmt=None, datefmt=None)`
-  - `worker_name` attribute = `f"{service_name}:{worker_id}"` (worker_id
-    defaults to 1).
+- `ScietexFormatter(service_name, worker_id=None, instance_id=None, fmt=None, datefmt=None)`
+  - `worker_name` attribute = `f"{service_name}:{instance_id}"` (`instance_id`
+    defaults to `"1"`; the deprecated numeric `worker_id` is stringified into
+    it). `worker_id` and `instance_id` are mutually exclusive — passing both
+    raises `ValueError`.
   - Default `fmt` = `"%(asctime)s - %(levelname)s - [%(worker_name)s] - %(message)s"`.
   - `formatTime(record, datefmt=None)` — ISO-8601 UTC when `datefmt` is None.
   - `format(record)` — sets `record.worker_name` and `record.levelname`
@@ -103,8 +105,8 @@ per-backend queues/workers, the error channel, and the generic
 **Class.** `AsyncLoggingHandler(logging.Handler)` — `async_logging_handler.py:57`
 
 **Public interface.**
-- `AsyncLoggingHandler(service_name=None, worker_id=None, *, error_handler=None, queue_maxsize=10000, stdout_enable=True, backend_config=None, formatter=None)`
-  - Constructs a `ScietexFormatter(service_name, worker_id)` unless a custom
+- `AsyncLoggingHandler(service_name=None, worker_id=None, instance_id=None, *, error_handler=None, queue_maxsize=10000, stdout_enable=True, backend_config=None, formatter=None)`
+  - Constructs a `ScietexFormatter(service_name, instance_id)` unless a custom
     `formatter=` is injected (AR-024).
   - Builds a typed `self.config = LoggingConfig(...)` from its explicit keyword
     args; `queue_maxsize` is validated to a positive int via
@@ -113,7 +115,7 @@ per-backend queues/workers, the error channel, and the generic
     flat `queue_maxsize`/`error_handler` attributes are read-only `@property`
     aliases over `self.config`.
 - `worker_name` (read-only `@property`) — `async_logging_handler.py:221`.
-  Handler identity `f"{config.service_name}:{config.worker_id}"`. `config` is
+  Handler identity `f"{config.service_name}:{config.instance_id}"`. `config` is
   the single owner of handler identity; the default `ScietexFormatter` and the
   broker worker both derive from it, so console and broker output cannot diverge
   (AR-107). A user-injected formatter keeps its own `worker_name`.
@@ -341,7 +343,7 @@ console backend as a peer. Public signature unchanged.
 **Class.** `AsyncBaseHandler(AsyncLoggingHandler)` — `basic_handler.py:16`
 
 **Public interface.**
-- `AsyncBaseHandler(service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000, backend_config=None, formatter=None)`
+- `AsyncBaseHandler(service_name=None, worker_id=None, instance_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000, backend_config=None, formatter=None)`
   - Builds a typed `self.config = LoggingConfig(...)` (adding `stdout_enable`);
     no `**kwargs` — unknown keyword args raise `TypeError`. Accepts an optional
     `formatter=` kwarg forwarded to super (AR-024).
@@ -377,7 +379,7 @@ backend. The rotation variants subclass it and reuse the stdlib rollover logic.
 - `AsyncWatchedFileHandler(AsyncFileHandler)` — `file_handler.py:459`
 
 **Public interface.**
-- `AsyncFileHandler(filename, service_name=None, worker_id=None, *, mode='a', encoding=None, delay=False, errors=None, file=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)` — `file_handler.py:55`.
+- `AsyncFileHandler(filename, service_name=None, worker_id=None, instance_id=None, *, mode='a', encoding=None, delay=False, errors=None, file=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)` — `file_handler.py:55`.
   Mirrors the stdlib `logging.FileHandler` signature plus the scietex options.
   When `file` is None, constructs a `FileBackend` (with
   `formatter_provider=lambda: self.formatter`, `stream_provider=lambda:
@@ -445,7 +447,7 @@ connect/disconnect/send_message contract concrete backends implement.
 **Class.** `AsyncBrokerHandler(AsyncBaseHandler, abc.ABC)` — `message_broker_handler.py:25`
 
 **Public interface.**
-- `AsyncBrokerHandler(queue_name, service_name=None, worker_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000, backend_config=None, client=None, formatter=None)`
+- `AsyncBrokerHandler(queue_name, service_name=None, worker_id=None, instance_id=None, *, error_handler=None, stdout_enable=True, queue_maxsize=10000, backend_config=None, client=None, formatter=None)`
   - Registers `log_queues[queue_name]` (a bounded `asyncio.Queue(maxsize=self.queue_maxsize)`)
     and `self._worker` (a bound method used as a worker factory) via
     `register_backend`. No `**kwargs` — unknown keyword args raise `TypeError`.
@@ -484,7 +486,7 @@ backends, so a custom `queue_name` must avoid them (a collision raises
 "time": datetime.fromtimestamp(record.created, timezone.utc).isoformat()}`.
 `level` is computed via `level_abbreviation(record.levelno)` (imported from
 `config.py`, AR-026); `name` is the handler identity property `worker_name`
-(`f"{config.service_name}:{config.worker_id}"`, AR-107) and `time` is derived
+(`f"{config.service_name}:{config.instance_id}"`, AR-107) and `time` is derived
 from the record directly, **not** from the formatter, so the dict is
 deterministic and invariant under `setFormatter`.
 
@@ -503,7 +505,7 @@ stdlib `asyncio`, `datetime`.
 **Class.** `AsyncRedisHandler(AsyncBrokerHandler)` — `redis_handler.py:16`
 
 **Public interface.**
-- `AsyncRedisHandler(stream_name, service_name=None, worker_id=None, *,
+- `AsyncRedisHandler(stream_name, service_name=None, worker_id=None, instance_id=None, *,
   redis_config=None, client=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)`
   — passes `queue_name="redis"` to super. Converts `redis_config` into a typed
   `RedisConfig` stored as `self.config.backend_config`; `RedisConfig` mirrors
@@ -541,7 +543,7 @@ the `valkey-glide` client.
 **Class.** `AsyncValkeyHandler(AsyncBrokerHandler)` — `valkey_handler.py:16`
 
 **Public interface.**
-- `AsyncValkeyHandler(stream_name, service_name=None, worker_id=None, *,
+- `AsyncValkeyHandler(stream_name, service_name=None, worker_id=None, instance_id=None, *,
   valkey_config=None, client=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)`
   — passes `queue_name="valkey"` to super. `valkey_config` is a **dict**
   (mirroring Redis's seam, AR-025) whose keys mirror
@@ -580,7 +582,7 @@ an MQTT topic via the `aiomqtt` client.
 **Class.** `AsyncMqttHandler(AsyncBrokerHandler)` — `mqtt_handler.py:19`
 
 **Public interface.**
-- `AsyncMqttHandler(topic, service_name=None, worker_id=None, *, mqtt_config=None, qos=0, retain=False, client=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)`
+- `AsyncMqttHandler(topic, service_name=None, worker_id=None, instance_id=None, *, mqtt_config=None, qos=0, retain=False, client=None, error_handler=None, stdout_enable=True, queue_maxsize=10000, formatter=None)`
   — passes `queue_name="mqtt"` to super. `mqtt_config` is a **dict** whose keys
   mirror `aiomqtt.Client`'s scalar plain options; a typed `MqttConfig` is stored
   as `self.config.backend_config` (defaulting to `{"host": "localhost", "port":

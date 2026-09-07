@@ -34,7 +34,7 @@ class AsyncPostgresHandler(AsyncBrokerHandler):
     async def send_message(self, record):
         """Send log record to PostgreSQL."""
         await self._conn.execute(
-            "INSERT INTO logs (level, message, service, worker_id, timestamp) VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO logs (level, message, service, instance_id, timestamp) VALUES ($1, $2, $3, $4, $5)",
             record["level"],
             record["message"],
             record["name"],
@@ -71,11 +71,11 @@ record dropped due to a send failure is still reported through the error channel
 The record is a dictionary with the following keys:
 - `level`: Log level abbreviation (DBG, INF, WRN, ERR, CRT)
 - `message`: The log message
-- `name`: Service and worker name
+- `name`: Service name and instance ID (`service_name:instance_id`)
 - `time`: Formatted timestamp
 
 This record schema is **independent of the formatter**. Broker payloads are
-built from the handler's `service_name`/`worker_id` config and the log record
+built from the handler's `service_name`/`instance_id` config and the log record
 directly, so they are invariant under `setFormatter`/`formatter=`. A custom
 formatter affects the console (stdout) sink only — see
 {ref}`Formatter scope: console output only <formatter-scope>`.
