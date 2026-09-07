@@ -91,6 +91,48 @@ comparing against a stale loop, which the thread-safe buffer also resolves.
 
 ---
 
+## 1.x — `instance_id` replaces `worker_id`
+
+**Status:** Proposed (design only; not yet implemented).
+
+The handler identity is currently a numeric `worker_id: int | None = None` that
+defaults to `1` (`async_logging_handler.py:174-175`, `config.py:41`) and is
+rendered into the formatter's `worker_name` as `service_name:worker_id`
+(`async_logging_handler.py:229`, `formatter.py:54`). A numeric worker id is a
+poor fit for the actual use case — identifying a logging *instance* (a process,
+container, replica, or deployment unit) — where a string label is far more
+expressive.
+
+### Change
+
+1. Add `instance_id: str | None = None` as a keyword parameter next to
+   `worker_id` in `AsyncLoggingHandler.__init__` (and, by inheritance, every
+   handler that forwards it).
+2. Internally switch from `worker_id` to `instance_id`, which defaults to
+   `"1"` when neither is supplied.
+3. Accept **both** for now for backward compatibility, but raise `ValueError`
+   if both are provided at the same time (they are aliases for the same
+   concept; supplying both is contradictory).
+4. Mark `worker_id: int` as **deprecated** (documented + `DeprecationWarning`),
+   to be removed in v2.0.
+
+### Why 1.x
+
+This is an **additive, backward-compatible** change: `worker_id` keeps working
+unchanged, and `instance_id` is a new optional parameter. No existing
+constructor signature, `__all__` entry, or method contract breaks. It therefore
+belongs in a **1.x** minor release (e.g. 1.8.0), with the deprecation warning
+giving users a migration window before the v2.0 removal.
+
+### Why 2.0 (removal)
+
+Removing the deprecated `worker_id` parameter entirely is a **public-API
+breaking** change (it changes every handler constructor signature), so it is
+routed through the **2.0** release alongside the other constructor-surface
+changes (AR-116).
+
+---
+
 ## 2.0 — Architecture-review follow-ups
 
 **Status:** Proposed. Extracted from the deep architecture review
@@ -139,3 +181,13 @@ the loop-independent `emit` work above.
   document the reserved names (the 1.0 choice).
 - **Why 2.0:** namespacing changes the public `log_queues["console"]` key and
   the console drain-result name — breaking for any code that reads them.
+
+### Remove deprecated `worker_id` (from the 1.x `instance_id` change)
+
+- **Problem:** the 1.x `instance_id` change (see above) deprecates
+  `worker_id: int` in favor of `instance_id: str`. The deprecated parameter
+  must eventually be removed.
+- **Why 2.0:** removing `worker_id` changes every handler constructor signature
+  — a public-API breaking change. It is routed through 2.0 alongside AR-116
+  (which also reshapes the constructor surface), so all constructor churn lands
+  in one breaking release.
