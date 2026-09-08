@@ -7,13 +7,13 @@ import os
 
 import pytest
 
-from scietex.logging.file_handler import (
+from scietex.logging.formatter.json import JsonFormatter
+from scietex.logging.handler.file import (
     AsyncFileHandler,
     AsyncRotatingFileHandler,
     AsyncTimedRotatingFileHandler,
     AsyncWatchedFileHandler,
 )
-from scietex.logging.json_formatter import JsonFormatter
 
 
 def _make_record(message: str = "test message") -> logging.LogRecord:
@@ -30,23 +30,31 @@ def _make_record(message: str = "test message") -> logging.LogRecord:
 
 @pytest.mark.asyncio
 async def test_file_handler_registers_file_backend(tmp_path):
-    """AsyncFileHandler registers a 'file' backend like AsyncBaseHandler registers console."""
+    """AsyncFileHandler registers a 'file' backend like ConsoleHandler registers console."""
     path = tmp_path / "app.log"
-    handler = AsyncFileHandler(str(path), service_name="TestService", worker_id=1)
+    handler = AsyncFileHandler(str(path))
     await handler.start_logging()
 
-    assert "file" in handler.log_queues
+    assert "_file" in handler.log_queues
     assert handler._file_backend is not None
-    assert handler.log_queues["file"] is handler._file_backend.queue
+    assert handler.log_queues["_file"] is handler._file_backend.queue
 
     await handler.stop_logging()
+
+
+def test_file_handler_registers_no_console_backend(tmp_path):
+    """AsyncFileHandler registers only its own backend, never console."""
+    handler = AsyncFileHandler(str(tmp_path / "x.log"))
+
+    assert "_console" not in handler.log_queues
+    assert len(handler.log_worker_factories) == 1
 
 
 @pytest.mark.asyncio
 async def test_file_handler_writes_to_file(tmp_path):
     """Records are formatted and written to the file."""
     path = tmp_path / "app.log"
-    handler = AsyncFileHandler(str(path), service_name="TestService", worker_id=1)
+    handler = AsyncFileHandler(str(path))
     await handler.start_logging()
 
     logger = logging.getLogger("FileTestLogger")
@@ -64,7 +72,7 @@ async def test_file_handler_appends_by_default(tmp_path):
     """mode='a' (the default) appends to an existing file."""
     path = tmp_path / "app.log"
     path.write_text("preexisting\n")
-    handler = AsyncFileHandler(str(path), service_name="TestService", worker_id=1)
+    handler = AsyncFileHandler(str(path))
     await handler.start_logging()
 
     logger = logging.getLogger("FileTestLogger")
@@ -84,8 +92,6 @@ async def test_file_handler_json_formatter(tmp_path):
     path = tmp_path / "app.jsonl"
     handler = AsyncFileHandler(
         str(path),
-        service_name="TestService",
-        worker_id=1,
         formatter=JsonFormatter(),
     )
     await handler.start_logging()
@@ -109,10 +115,7 @@ async def test_file_handler_injected_file_like_not_closed():
     """An injected file-like is written to but never closed by the handler."""
     stream = io.StringIO()
     handler = AsyncFileHandler(
-        service_name="TestService",
-        worker_id=1,
         file=stream,
-        stdout_enable=False,
     )
     await handler.start_logging()
 
@@ -138,11 +141,8 @@ async def test_rotating_file_handler_rolls_over(tmp_path):
     path = tmp_path / "rot.log"
     handler = AsyncRotatingFileHandler(
         str(path),
-        service_name="TestService",
-        worker_id=1,
         maxBytes=100,
         backupCount=2,
-        stdout_enable=False,
     )
     await handler.start_logging()
 
@@ -166,11 +166,8 @@ async def test_rotating_handler_rolls_over_off_the_loop_thread(tmp_path):
     path = tmp_path / "rot.log"
     handler = AsyncRotatingFileHandler(
         str(path),
-        service_name="TestService",
-        worker_id=1,
         maxBytes=100,
         backupCount=2,
-        stdout_enable=False,
     )
     loop_thread = threading.current_thread().name
     write_threads: list[str] = []
@@ -224,11 +221,8 @@ async def test_rotating_handler_backups_and_order(tmp_path):
     path = tmp_path / "rot.log"
     handler = AsyncRotatingFileHandler(
         str(path),
-        service_name="TestService",
-        worker_id=1,
         maxBytes=512,
         backupCount=2,
-        stdout_enable=False,
     )
     await handler.start_logging()
 
@@ -268,11 +262,8 @@ async def test_rotating_handler_cancelled_no_write_after_close(tmp_path):
     path = tmp_path / "rot.log"
     handler = AsyncRotatingFileHandler(
         str(path),
-        service_name="TestService",
-        worker_id=1,
         maxBytes=0,
         backupCount=0,
-        stdout_enable=False,
     )
     await handler.start_logging()
 
@@ -326,12 +317,9 @@ async def test_timed_rotating_file_handler_writes(tmp_path):
     path = tmp_path / "timed.log"
     handler = AsyncTimedRotatingFileHandler(
         str(path),
-        service_name="TestService",
-        worker_id=1,
         when="S",
         interval=1,
         backupCount=2,
-        stdout_enable=False,
     )
     await handler.start_logging()
 
@@ -352,12 +340,9 @@ async def test_timed_rotating_handler_writes_off_the_loop_thread(tmp_path):
     path = tmp_path / "timed.log"
     handler = AsyncTimedRotatingFileHandler(
         str(path),
-        service_name="TestService",
-        worker_id=1,
         when="S",
         interval=1,
         backupCount=2,
-        stdout_enable=False,
     )
     loop_thread = threading.current_thread().name
     write_threads: list[str] = []
@@ -401,12 +386,9 @@ async def test_timed_rotating_handler_rolls_over_and_orders(tmp_path):
     path = tmp_path / "timed.log"
     handler = AsyncTimedRotatingFileHandler(
         str(path),
-        service_name="TestService",
-        worker_id=1,
         when="S",
         interval=1,
         backupCount=2,
-        stdout_enable=False,
     )
     await handler.start_logging()
 
@@ -441,12 +423,9 @@ async def test_timed_rotating_handler_cancelled_no_write_after_close(tmp_path):
     path = tmp_path / "timed.log"
     handler = AsyncTimedRotatingFileHandler(
         str(path),
-        service_name="TestService",
-        worker_id=1,
         when="S",
         interval=1,
         backupCount=0,
-        stdout_enable=False,
     )
     await handler.start_logging()
 
@@ -498,7 +477,7 @@ async def test_timed_rotating_handler_cancelled_no_write_after_close(tmp_path):
 async def test_watched_file_handler_writes(tmp_path):
     """AsyncWatchedFileHandler writes records to the watched file."""
     path = tmp_path / "watched.log"
-    handler = AsyncWatchedFileHandler(str(path), service_name="TestService", worker_id=1)
+    handler = AsyncWatchedFileHandler(str(path))
     await handler.start_logging()
 
     logger = logging.getLogger("WatchedLogger")
@@ -516,7 +495,7 @@ async def test_watched_file_handler_writes_off_the_loop_thread(tmp_path):
     import threading
 
     path = tmp_path / "watched.log"
-    handler = AsyncWatchedFileHandler(str(path), service_name="TestService", worker_id=1)
+    handler = AsyncWatchedFileHandler(str(path))
     loop_thread = threading.current_thread().name
     write_threads: list[str] = []
 
@@ -557,9 +536,6 @@ async def test_watched_file_handler_reopens_replaced_file(tmp_path):
     path = tmp_path / "watched.log"
     handler = AsyncWatchedFileHandler(
         str(path),
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
     )
     await handler.start_logging()
 
@@ -597,9 +573,6 @@ async def test_watched_handler_cancelled_no_write_after_close(tmp_path):
     path = tmp_path / "watched.log"
     handler = AsyncWatchedFileHandler(
         str(path),
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
     )
     await handler.start_logging()
 
@@ -665,10 +638,7 @@ async def test_file_handler_writes_off_the_event_loop_thread():
 
     stream = RecordingStream()
     handler = AsyncFileHandler(
-        service_name="TestService",
-        worker_id=1,
         file=stream,
-        stdout_enable=False,
     )
     await handler.start_logging()
 
@@ -692,7 +662,7 @@ async def test_cancelled_worker_closes_stream_after_inflight_write(tmp_path):
     import time
 
     path = tmp_path / "app.log"
-    handler = AsyncFileHandler(str(path), service_name="TestService", worker_id=1)
+    handler = AsyncFileHandler(str(path))
     await handler.start_logging()
 
     # Make the stream's write block so we can cancel the worker mid-write.
@@ -747,7 +717,7 @@ async def test_cancelled_worker_closes_stream_after_inflight_write(tmp_path):
 async def test_file_handler_restartable_with_executor(tmp_path):
     """A file handler survives multiple start/stop cycles with fresh executors."""
     path = tmp_path / "app.log"
-    handler = AsyncFileHandler(str(path), service_name="TestService", worker_id=1)
+    handler = AsyncFileHandler(str(path))
 
     for i in range(3):
         await handler.start_logging()

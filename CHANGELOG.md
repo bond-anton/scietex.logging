@@ -5,6 +5,55 @@ All notable changes to `scietex.logging` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-09-08
+
+### Removed
+
+- **Identity parameters**: `service_name`, `worker_id`, `instance_id`, the
+  `worker_name` property, and the `resolve_instance_id` helper are removed from
+  the package. Identity now comes solely from the standard-library logger name
+  (`record.name`, set by `logging.getLogger("name")`). This is a hard breaking
+  change.
+- **`ScietexFormatter` signature**: now `ScietexFormatter(fmt=None, datefmt=None)`.
+  The `service_name`/`instance_id`/`worker_id` arguments are gone, and the
+  default format is
+  `"%(asctime)s - %(levelname)s - [%(name)s] - %(message)s"` — the
+  `%(worker_name)s` token no longer exists; use `%(name)s`.
+- **`LoggingConfig`**: no longer has `service_name`/`instance_id`/`worker_id`
+  fields. No handler constructor accepts identity arguments.
+- **Broker wire payload**: the `name` field is now `record.name` (the logger
+  name), not `service_name:instance_id`.
+- **`stdout_enable` parameter**: removed from every handler constructor and from
+  `LoggingConfig`. Passing `stdout_enable=` now raises `TypeError`. File and
+  broker handlers no longer auto-register a console sink — a handler emits only
+  to its own backend.
+- **`formatter` parameter**: removed from the pure-machinery base
+  `AsyncLoggingHandler` and from every broker handler (`AsyncBrokerHandler`,
+  `AsyncRedisHandler`, `AsyncValkeyHandler`, `AsyncMqttHandler`). Passing
+  `formatter=` to a broker handler or the base now raises `TypeError`. The
+  `formatter` keyword is now console/file-specific: only `ConsoleHandler` and
+  `AsyncFileHandler` (and its rotation variants) accept it, each owning its own
+  `self.formatter` (default `ScietexFormatter`). Broker wire payloads are built
+  from the record directly and were never affected by the formatter.
+
+### Changed
+
+- **`AsyncBaseHandler` renamed to `ConsoleHandler`**: the console handler is now
+  a sibling of the file/broker handlers and registers the console backend
+  unconditionally. Console output requires adding a `ConsoleHandler` to the
+  logger explicitly, like any stdlib handler.
+- **Handler re-parenting**: `AsyncFileHandler` and `AsyncBrokerHandler` now
+  subclass `AsyncLoggingHandler` directly (no inherited console sink). Each
+  registers only its own backend.
+- **Namespaced built-in backend queue keys**: the built-in backends now register
+  under `_`-prefixed queue keys (`"_console"`, `"_file"`, `"_redis"`,
+  `"_valkey"`, `"_mqtt"`) instead of
+  `"console"`/`"file"`/`"redis"`/`"valkey"`/`"mqtt"`, so a user-supplied
+  `queue_name` can never collide with a built-in backend. Breaking for any code
+  that reads `handler.log_queues["console"]` or a drain result's `.name` — those
+  keys are now `"_console"` etc. The shutdown status text (e.g. "Console Logger
+  has completed processing its queue.") is unchanged.
+
 ## [1.8.0] - 2026-09-07
 
 ### Added

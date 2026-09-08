@@ -29,13 +29,8 @@ async def main():
     logger = logging.getLogger("MemoryLogger")
     logger.setLevel(logging.DEBUG)
 
-    # stdout_enable=False drops the inherited console backend, so this handler is
-    # broker-only: every record reaches send_message and lands in self.records.
     handler = InMemoryHandler(
         queue_name="memory",
-        service_name="MemoryService",
-        instance_id="1",
-        stdout_enable=False,
     )
     logger.addHandler(handler)
 

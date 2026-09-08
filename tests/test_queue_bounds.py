@@ -6,8 +6,8 @@ import queue
 
 import pytest
 
-from scietex.logging import AsyncBaseHandler
-from scietex.logging.message_broker_handler import AsyncBrokerHandler
+from scietex.logging import ConsoleHandler
+from scietex.logging.handler.broker import AsyncBrokerHandler
 
 
 def _make_record(message: str = "test message") -> logging.LogRecord:
@@ -56,7 +56,6 @@ async def test_overflow_drops_record_and_reports_via_error_channel():
     errors = []
     handler = FakeBrokerHandler(
         queue_name="broker",
-        stdout_enable=False,
         queue_maxsize=1,
         error_handler=lambda record, exc: errors.append(exc),
     )
@@ -81,7 +80,6 @@ async def test_overflow_reported_exception_is_exactly_queue_full():
     errors = []
     handler = FakeBrokerHandler(
         queue_name="broker",
-        stdout_enable=False,
         queue_maxsize=1,
         error_handler=lambda record, exc: errors.append(exc),
     )
@@ -100,7 +98,6 @@ async def test_bounded_queue_drains_fully_at_stop():
     """A queue filled to capacity drains completely and delivers every accepted record."""
     handler = FakeBrokerHandler(
         queue_name="broker",
-        stdout_enable=False,
         queue_maxsize=2,
     )
 
@@ -120,7 +117,6 @@ async def test_restart_after_overflow_delivers_normally():
     errors = []
     handler = FakeBrokerHandler(
         queue_name="broker",
-        stdout_enable=False,
         queue_maxsize=1,
         error_handler=lambda record, exc: errors.append(exc),
     )
@@ -149,12 +145,7 @@ async def test_restart_after_overflow_delivers_normally():
 @pytest.mark.asyncio
 async def test_console_drain_does_not_hang_when_queue_full():
     """Shutdown returns when the console queue is full and its worker is stalled."""
-    handler = FakeBrokerHandler(
-        queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-        queue_maxsize=2,
-    )
+    handler = ConsoleHandler(queue_maxsize=2)
 
     # Replace the console worker with one that never drains, so the console
     # queue fills and stays full for the whole shutdown.
@@ -172,28 +163,24 @@ async def test_console_drain_does_not_hang_when_queue_full():
     # dropped and queue.join is bounded by the timeout) instead of deadlocking.
     await asyncio.wait_for(handler.stop_logging(timeout=0.05), timeout=5)
 
-    # The broker still delivered both records; the stalled console's undelivered
-    # records were dropped on stop (AR-020), not left queued for a later replay.
-    assert [entry["message"] for entry in handler.sent] == ["one", "two"]
-    assert handler.log_queues["console"].empty()
+    # The stalled console's undelivered records were dropped on stop (AR-020),
+    # not left queued for a later replay.
+    assert handler.log_queues["_console"].empty()
 
 
 def test_queue_maxsize_reaches_console_queue():
     """queue_maxsize bounds the console backend's queue."""
-    handler = AsyncBaseHandler(queue_maxsize=5)
-    assert handler.log_queues["console"].maxsize == 5
+    handler = ConsoleHandler(queue_maxsize=5)
+    assert handler.log_queues["_console"].maxsize == 5
 
 
 def test_queue_maxsize_reaches_broker_queue():
     """queue_maxsize bounds the broker backend's queue."""
-    handler = FakeBrokerHandler(queue_name="broker", stdout_enable=False, queue_maxsize=5)
+    handler = FakeBrokerHandler(queue_name="broker", queue_maxsize=5)
     assert handler.log_queues["broker"].maxsize == 5
 
 
 def test_queue_maxsize_default_is_10000():
     """The default queue bound is 10000 for both console and broker backends."""
-    assert AsyncBaseHandler().log_queues["console"].maxsize == 10000
-    assert (
-        FakeBrokerHandler(queue_name="broker", stdout_enable=False).log_queues["broker"].maxsize
-        == 10000
-    )
+    assert ConsoleHandler().log_queues["_console"].maxsize == 10000
+    assert FakeBrokerHandler(queue_name="broker").log_queues["broker"].maxsize == 10000

@@ -1,12 +1,12 @@
-"""AsyncBaseHandler and AsyncRedisHandler simultaneous usage example."""
+"""ConsoleHandler and AsyncRedisHandler simultaneous usage example."""
 
 # examples/console_and_redis_logging.py
 
 import asyncio
 import logging
 
-from scietex.logging.basic_handler import AsyncBaseHandler
-from scietex.logging.redis_handler import AsyncRedisHandler
+from scietex.logging.handler.console import ConsoleHandler
+from scietex.logging.handler.redis import AsyncRedisHandler
 
 
 async def main():
@@ -16,18 +16,13 @@ async def main():
     logger.setLevel(logging.DEBUG)
 
     # Set up asynchronous console logging handler
-    console_handler = AsyncBaseHandler(
-        service_name="CombinedService", instance_id="1", stdout_enable=True
-    )
+    console_handler = ConsoleHandler()
     logger.addHandler(console_handler)
 
     # Set up asynchronous Redis logging handler
     redis_handler = AsyncRedisHandler(
         stream_name="combined_log_stream",
-        service_name="CombinedService",
-        instance_id="2",
         redis_config={"host": "localhost", "port": 6379},
-        stdout_enable=True,
     )
     logger.addHandler(redis_handler)
 

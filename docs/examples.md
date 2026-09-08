@@ -11,7 +11,7 @@ worker, log messages, then stop the worker.
 
 **File**: `examples/basic_console_logging.py`
 
-Demonstrates asynchronous console logging using `AsyncBaseHandler`.
+Demonstrates asynchronous console logging using `ConsoleHandler`.
 
 **Usage**:
 ```bash
@@ -21,7 +21,7 @@ uv run python examples/basic_console_logging.py
 **Key Features**:
 - Default console logging
 - Multiple log levels
-- Service and worker identification
+- Logger-name identification via `record.name`
 
 ---
 
@@ -41,7 +41,7 @@ uv run python examples/redis_logging.py
 
 **Key Features**:
 - Redis stream integration
-- Service and worker identification
+- Logger-name identification via `record.name`
 - Error and info logging
 
 ---
@@ -62,7 +62,7 @@ uv run python examples/valkey_logging.py
 
 **Key Features**:
 - Valkey stream integration
-- Service and worker identification
+- Logger-name identification via `record.name`
 - Error and info logging
 
 ---
@@ -83,7 +83,7 @@ uv run python examples/mqtt_logging.py
 
 **Key Features**:
 - MQTT topic publishing
-- Service and worker identification
+- Logger-name identification via `record.name`
 - Error and info logging
 
 ---
@@ -103,7 +103,6 @@ uv run python examples/file_logging.py
 **Key Features**:
 - Plain-text file output
 - JSON output via `JsonFormatter` (one JSON object per line)
-- `stdout_enable=False` for file-only handlers
 
 ---
 
@@ -142,7 +141,7 @@ uv run python examples/custom_formatter.py
 
 **Key Features**:
 - Custom `fmt` and `datefmt` on `ScietexFormatter`
-- `handler.setFormatter()` replaces the formatter for every sink
+- `handler.setFormatter()` replaces the formatter for the handler's console/file sink
 
 ---
 
@@ -180,7 +179,6 @@ uv run python examples/custom_backend.py
 
 **Key Features**:
 - Subclass `AsyncBrokerHandler` and implement `connect`, `disconnect`, `send_message`
-- `stdout_enable=False` drops the inherited console backend
 - Broker-only handler with no external service
 
 ---
@@ -229,8 +227,7 @@ uv run python examples/restartable_lifecycle.py
 **File**: `examples/all_backends.py`
 
 Demonstrates console, Redis, and Valkey backends on a single logger
-simultaneously, with explicit `redis_config`/`valkey_config` and
-`stdout_enable=False` on the broker handlers.
+simultaneously, with explicit `redis_config`/`valkey_config`.
 
 **Usage**:
 ```bash
@@ -243,7 +240,6 @@ uv run python examples/all_backends.py
 **Key Features**:
 - Console, Redis, and Valkey on one logger
 - Explicit `redis_config` and `valkey_config`
-- `stdout_enable=False` on broker handlers to avoid duplicate console output
 
 ---
 
@@ -297,7 +293,7 @@ Each example follows this pattern:
 
 Modify examples to explore features:
 
-- Change service name and instance ID
+- Change the logger name passed to `logging.getLogger`
 - Adjust log levels
 - Configure custom formatters (`custom_formatter.py`)
 - Add an `error_handler` callback and tune `queue_maxsize`

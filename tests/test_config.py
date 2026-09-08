@@ -18,11 +18,8 @@ from scietex.logging.config import (
 
 def test_logging_config_defaults():
     cfg = LoggingConfig()
-    assert cfg.service_name == "Service"
-    assert cfg.worker_id == 1
     assert cfg.error_handler is None
     assert cfg.queue_maxsize == 10000
-    assert cfg.stdout_enable is True
     assert cfg.backend_config is None
 
 

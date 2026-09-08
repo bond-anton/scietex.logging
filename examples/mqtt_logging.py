@@ -5,7 +5,7 @@
 import asyncio
 import logging
 
-from scietex.logging.mqtt_handler import AsyncMqttHandler
+from scietex.logging.handler.mqtt import AsyncMqttHandler
 
 
 async def main():
@@ -17,8 +17,6 @@ async def main():
     # Set up the asynchronous MQTT logging handler
     mqtt_handler = AsyncMqttHandler(
         topic="example/log/topic",
-        service_name="MqttService",
-        instance_id="4",
         mqtt_config={"host": "localhost", "port": 1883},
     )
     logger.addHandler(mqtt_handler)

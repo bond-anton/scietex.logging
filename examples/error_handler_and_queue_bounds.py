@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from scietex.logging import AsyncBaseHandler
+from scietex.logging import ConsoleHandler
 
 
 def on_error(record, exc):
@@ -19,9 +19,7 @@ async def main():
 
     # queue_maxsize=2 bounds the console queue; when it is full, emit drops new
     # records and routes them to error_handler instead of blocking the producer.
-    handler = AsyncBaseHandler(
-        service_name="OverflowService",
-        instance_id="1",
+    handler = ConsoleHandler(
         queue_maxsize=2,
         error_handler=on_error,
     )

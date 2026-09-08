@@ -11,21 +11,17 @@ async def main():
     logger = logging.getLogger("FileLogger")
     logger.setLevel(logging.DEBUG)
 
-    # Plain-text file handler (console output disabled so records go to the file only).
+    # Plain-text file handler (file-only handler; add a ConsoleHandler separately
+    # if console output is wanted).
     plain_handler = AsyncFileHandler(
         "plain.log",
-        service_name="FileService",
-        instance_id="1",
-        stdout_enable=False,
     )
 
-    # JSON file handler: one JSON object per line.
+    # JSON file handler: one JSON object per line. Both handlers share the
+    # "FileLogger" logger, so both write the same record.name.
     json_handler = AsyncFileHandler(
         "json.log",
-        service_name="FileService",
-        instance_id="2",
         formatter=JsonFormatter(),
-        stdout_enable=False,
     )
 
     logger.addHandler(plain_handler)

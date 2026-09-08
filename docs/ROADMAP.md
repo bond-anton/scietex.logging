@@ -1,6 +1,6 @@
 # Roadmap
 
-Planned direction for `scietex.logging`. Current stable release: **1.8.0**.
+Planned direction for `scietex.logging`. Current stable release: **2.0.0**.
 
 The 1.x public API (`__all__` surface and constructor signatures) has grown
 additively through the 1.x line (client injection, MQTT backend, file sinks,
@@ -129,6 +129,12 @@ breaking** change (it changes every handler constructor signature), so it is
 routed through the **2.0** release alongside the other constructor-surface
 changes (AR-116).
 
+> **Historical note (2.0.0):** this section is retained as history. In 2.0.0 the
+> entire identity surface — `service_name`, `worker_id`, `instance_id`, the
+> `worker_name` property, and the `resolve_instance_id` helper — was removed in
+> favor of the standard-library logger name (`record.name`). See the
+> "Remove identity parameters" item under the 2.0 section below.
+
 ---
 
 ## 2.0 — Architecture-review follow-ups
@@ -139,39 +145,51 @@ questions that were **not** resolved in 1.0 because resolving them breaks the
 frozen public API. Each is a candidate to bundle into the same 2.0 release as
 the loop-independent `emit` work above.
 
-### AR-116 — Constructor surface funnels subclass concerns
+### AR-116 — Constructor surface funnels subclass concerns (partially resolved in 2.0.0)
 
 - **Severity:** LOW (design smell; HIGH confidence).
-- **Problem:** `AsyncLoggingHandler.__init__` — the "pure machinery, no sink"
-  base — accepts `stdout_enable` (console), `backend_config` (broker), and
-  `formatter`, storing them on `config` without acting on them. Every subclass
-  re-declares the full parameter list (eight handlers now repeat the signature:
-  Redis, Valkey, MQTT, File, and the three rotation variants), so adding an
-  option means touching all of them.
-- **Recommendation:** a single `LoggingConfig`-accepting constructor (or
-  narrower per-layer constructors) so options flow as data, not repeated kwargs.
-- **Why 2.0:** changing the constructor signature across all eight handlers is a
-  public-API breaking change. Deferred past 1.0 deliberately — locking the
-  current surface at 1.0 first, then reshaping it in 2.0, is the correct semver
-  posture.
+- **Original problem:** the pure-machinery base `AsyncLoggingHandler.__init__`
+  accepted `stdout_enable`, `backend_config`, and `formatter`, storing them on
+  `config` without acting on them, and every subclass re-declared the full
+  parameter list (eight handlers repeated the signature: Redis, Valkey, MQTT,
+  File, and the three rotation variants), so adding an option meant touching
+  all of them.
+- **Resolved in 2.0.0:** `stdout_enable` removed everywhere; `formatter` removed
+  from the base and all broker handlers, now owned by `ConsoleHandler` and
+  `AsyncFileHandler` (and its rotation variants); identity params removed;
+  console decoupled into a dedicated `ConsoleHandler`. Layer-specific params
+  (`client`, file params, broker dict configs) are now correctly scoped to
+  their layer.
+- **Residual:** `backend_config` is still accepted by the base
+  (`async_logging_handler.py:145`) and stored on `config` without the base
+  reading it — the only readers are the broker subclasses. It persists because
+  the base is the single seam that assembles the frozen `LoggingConfig`, of
+  which `backend_config` is a field. `error_handler`/`queue_maxsize` are still
+  re-declared across the concrete constructors (forwarding boilerplate, not a
+  layer leak).
+- **Decision:** a single `LoggingConfig`-accepting constructor was evaluated and
+  rejected — it moves the boilerplate without removing it and degrades
+  ergonomics for the common `ConsoleHandler()` case. The base's `backend_config`
+  is an accepted, documented forwarding seam. **No further 2.0 work required.**
 
-### Open question 3 — Formatter scope on broker handlers
+### Open question 3 — Formatter scope on broker handlers (resolved in 2.0.0)
 
 - **Problem:** `formatter=`/`setFormatter` affects console output only; broker
   payloads are built from config + record and are invariant under the formatter
-  (AR-104, AR-018). The `formatter=` kwarg is threaded through every handler,
-  so on a broker-only handler (`stdout_enable=False`) it is dead weight.
-- **Options:** (a) move `formatter=` off the broker constructors so it is
-  console-specific (breaking), or (b) add a broker payload-schema hook so a
-  custom formatter can shape the wire record (feature).
-- **Why 2.0:** option (a) is breaking; option (b) is a new public extension
-  point. Either belongs in a 2.0 alongside AR-116 (which also reshapes the
-  constructor surface).
+  (AR-104, AR-018). The `formatter=` kwarg was threaded through every handler,
+  so on a broker handler it was dead weight — the broker has no console sink to
+  render it (the console sink now lives in `ConsoleHandler`).
+- **Resolution (2.0.0):** option (a) — `formatter=` was removed from the
+  pure-machinery base `AsyncLoggingHandler` and from all broker handlers
+  (`AsyncBrokerHandler`, `AsyncRedisHandler`, `AsyncValkeyHandler`,
+  `AsyncMqttHandler`). `ConsoleHandler` and `AsyncFileHandler` (and its rotation
+  variants) now own their own `formatter`, defaulting to `ScietexFormatter`.
+  Passing `formatter=` to a broker handler or the base now raises `TypeError`.
 
 ### Open question 6 — Reserved backend names
 
-- **Problem:** `queue_name="console"` collides with the console backend under
-  the default `stdout_enable=True`, raising `ValueError` at construction
+- **Problem:** `queue_name="console"` collides with the console backend
+  registered by `ConsoleHandler`, raising `ValueError` at construction
   (AR-109). `"console"`/`"redis"`/`"valkey"`/`"mqtt"`/`"file"` are de-facto
   reserved but not namespaced.
 - **Options:** namespace the console backend (e.g. `"_console"`) so user
@@ -179,13 +197,21 @@ the loop-independent `emit` work above.
   document the reserved names (the 1.0 choice).
 - **Why 2.0:** namespacing changes the public `log_queues["console"]` key and
   the console drain-result name — breaking for any code that reads them.
+- **Resolution (2.0.0):** option (a) — namespacing — was chosen. The built-in
+  queue keys are namespaced to `"_console"` / `"_file"` / `"_redis"` /
+  `"_valkey"` / `"_mqtt"`, the `_` prefix is reserved for internal use, and the
+  shutdown status text is unchanged.
 
-### Remove deprecated `worker_id` (from the 1.x `instance_id` change)
+### Remove identity parameters — implemented in 2.0.0
 
-- **Problem:** the 1.x `instance_id` change (see above) deprecates
-  `worker_id: int` in favor of `instance_id: str`. The deprecated parameter
-  must eventually be removed.
-- **Why 2.0:** removing `worker_id` changes every handler constructor signature
-  — a public-API breaking change. It is routed through 2.0 alongside AR-116
-  (which also reshapes the constructor surface), so all constructor churn lands
-  in one breaking release.
+- **Problem:** the 1.x line carried `service_name`, the deprecated `worker_id`,
+  and `instance_id` as the handler identity. All three — plus the `worker_name`
+  property and the `resolve_instance_id` helper — are removed in 2.0.0 in favor
+  of the standard-library logger name. Identity now comes solely from
+  `record.name` (set by `logging.getLogger("name")`), rendered via `%(name)s` in
+  the default `ScietexFormatter` format and emitted as the `name`/`logger` field
+  by broker/JSON sinks.
+- **Why 2.0:** removing these parameters changes every handler constructor and
+  the `ScietexFormatter` signature — a hard public-API breaking change. It lands
+  in 2.0.0 alongside AR-116 (which also reshapes the constructor surface), so
+  all constructor churn lands in one breaking release.

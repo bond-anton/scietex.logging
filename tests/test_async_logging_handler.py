@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from scietex.logging import AsyncLoggingHandler, ScietexFormatter
+from scietex.logging import AsyncLoggingHandler
 from scietex.logging.async_logging_handler import BackendDrainResult, DrainStatus
 
 
@@ -65,7 +65,7 @@ class DeliveringHandler(AsyncLoggingHandler):
 @pytest.mark.asyncio
 async def test_emit_from_worker_thread_delivers():
     """Off-loop emit (from a threading.Thread) delivers the record to the backend."""
-    handler = DeliveringHandler(service_name="TestService", worker_id=1)
+    handler = DeliveringHandler()
     await handler.start_logging()
 
     thread = threading.Thread(target=lambda: handler.emit(_make_record("from-thread")))
@@ -80,7 +80,7 @@ async def test_emit_from_worker_thread_delivers():
 @pytest.mark.asyncio
 async def test_emit_from_no_loop_thread_delivers():
     """emit from a thread with no running asyncio loop delivers (no RuntimeError)."""
-    handler = DeliveringHandler(service_name="TestService", worker_id=1)
+    handler = DeliveringHandler()
     await handler.start_logging()
 
     # A plain threading.Thread has no running loop; emit must still deliver.
@@ -96,7 +96,7 @@ async def test_emit_from_no_loop_thread_delivers():
 @pytest.mark.asyncio
 async def test_emit_ordering_preserved_across_threads():
     """Records emitted from multiple threads arrive at the backend in FIFO order."""
-    handler = DeliveringHandler(service_name="TestService", worker_id=1)
+    handler = DeliveringHandler()
     await handler.start_logging()
 
     # Emit N records from N threads, then one from the loop thread. The bridge
@@ -119,7 +119,7 @@ async def test_emit_ordering_preserved_across_threads():
 @pytest.mark.asyncio
 async def test_restartable_with_bridge():
     """Two full start/stop cycles deliver both cycles' records via fresh bridges."""
-    handler = DeliveringHandler(service_name="TestService", worker_id=1)
+    handler = DeliveringHandler()
 
     for i in range(2):
         await handler.start_logging()
@@ -134,7 +134,7 @@ async def test_restartable_with_bridge():
 
 def test_pure_handler_owns_no_backend():
     """The base machinery holds no queue, worker, drain hook, or reporter on its own."""
-    handler = BareHandler(service_name="TestService", worker_id=1)
+    handler = BareHandler()
 
     assert handler.log_queues == {}
     assert handler.log_worker_factories == []
@@ -145,7 +145,7 @@ def test_pure_handler_owns_no_backend():
 @pytest.mark.asyncio
 async def test_pure_handler_starts_and_stops_cleanly():
     """A backend-less handler starts and stops without any queue activity."""
-    handler = BareHandler(service_name="TestService", worker_id=1)
+    handler = BareHandler()
 
     await handler.start_logging()
     assert handler.logging_accept_event.is_set()
@@ -161,31 +161,26 @@ async def test_pure_handler_starts_and_stops_cleanly():
 def test_unknown_kwarg_raises_type_error():
     """A typo'd kwarg fails loudly instead of being silently swallowed."""
     with pytest.raises(TypeError):
-        BareHandler(service_name="TestService", worker_id=1, stdout_enabel=True)
+        BareHandler(unknown_kwarg=True)
 
 
-def test_default_formatter_is_scietex_formatter():
-    """No formatter kwarg yields a default ScietexFormatter derived from config."""
-    formatter = BareHandler(service_name="Svc", worker_id=3).formatter
+def test_base_owns_no_formatter():
+    """The pure-machinery base installs no formatter (console/file own theirs)."""
+    handler = BareHandler()
 
-    assert isinstance(formatter, ScietexFormatter)
-    assert formatter.worker_name == "Svc:3"
+    # stdlib logging.Handler.__init__ sets self.formatter = None, but the base
+    # installs no ScietexFormatter and owns no formatter concept of its own.
+    assert handler.formatter is None
 
 
-def test_custom_formatter_injected_at_construction():
-    """A formatter= kwarg is used as-is instead of a ScietexFormatter (AR-024)."""
-    custom = logging.Formatter("%(levelname)s: %(message)s")
-    handler = BareHandler(service_name="Svc", worker_id=3, formatter=custom)
-
-    assert handler.formatter is custom
+def test_base_rejects_formatter_kwarg():
+    """formatter= is console/file-specific; the machinery base rejects it (TypeError)."""
+    with pytest.raises(TypeError):
+        BareHandler(formatter=logging.Formatter("%(message)s"))
 
 
 def test_config_exposes_machinery_options():
-    handler = BareHandler(
-        service_name="Svc", worker_id=7, queue_maxsize=123, error_handler=lambda r, e: None
-    )
-    assert handler.config.service_name == "Svc"
-    assert handler.config.worker_id == 7
+    handler = BareHandler(queue_maxsize=123, error_handler=lambda r, e: None)
     assert handler.config.queue_maxsize == 123
     assert handler.config.error_handler is not None
     assert handler.queue_maxsize == 123
@@ -198,31 +193,18 @@ def test_config_is_single_source_of_truth():
     def err(record, exc):
         pass
 
-    handler = BareHandler(service_name="Svc", worker_id=7, queue_maxsize=123, error_handler=err)
+    handler = BareHandler(queue_maxsize=123, error_handler=err)
 
     # The flat aliases mirror config, which is authoritative.
     assert handler.queue_maxsize == handler.config.queue_maxsize == 123
     assert handler.error_handler is handler.config.error_handler
     assert handler.error_handler is err
-    # Identity comes from config, not from parallel flat state.
-    assert (
-        handler.formatter.worker_name == f"{handler.config.service_name}:{handler.config.worker_id}"
-    )
 
     # The aliases are read-only, so they cannot drift from the config that drives behavior.
     with pytest.raises(AttributeError):
         handler.queue_maxsize = 5
     with pytest.raises(AttributeError):
         handler.error_handler = None
-
-
-def test_worker_name_property_derives_from_config():
-    """worker_name is a read-only property derived from config (AR-107)."""
-    handler = BareHandler(service_name="Svc", worker_id=7)
-    assert handler.worker_name == "Svc:7"
-    assert handler.worker_name == f"{handler.config.service_name}:{handler.config.worker_id}"
-    with pytest.raises(AttributeError):
-        handler.worker_name = "other"  # read-only
 
 
 @pytest.mark.asyncio
@@ -372,7 +354,7 @@ async def test_report_error_falls_back_to_module_logger_when_error_handler_raise
 @pytest.mark.asyncio
 async def test_emit_off_loop_delivers_not_drops():
     """Off-loop emit now delivers the record instead of dropping it (AR-102 fixed)."""
-    handler = DeliveringHandler(service_name="TestService", worker_id=1)
+    handler = DeliveringHandler()
     await handler.start_logging()
 
     # Emit from a thread whose loop is NOT the handler's loop. The old guard

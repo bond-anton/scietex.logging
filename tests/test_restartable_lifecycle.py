@@ -5,8 +5,8 @@ import logging
 
 import pytest
 
-from scietex.logging import AsyncBaseHandler
-from scietex.logging.message_broker_handler import AsyncBrokerHandler
+from scietex.logging import ConsoleHandler
+from scietex.logging.handler.broker import AsyncBrokerHandler
 
 
 def _make_record(message: str = "test message") -> logging.LogRecord:
@@ -76,14 +76,14 @@ class FlakyBrokerHandler(AsyncBrokerHandler):
 @pytest.mark.asyncio
 async def test_console_start_stop_start_cycle(capsys):
     """A console handler can be started, stopped, and started again on one loop."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    handler = ConsoleHandler()
 
     await handler.start_logging()
     handler.emit(_make_record("first"))
     await handler.stop_logging()
     assert not handler.logging_accept_event.is_set()
     assert not handler.logging_running_event.is_set()
-    assert handler.log_queues["console"].empty()
+    assert handler.log_queues["_console"].empty()
 
     await handler.start_logging()
     handler.emit(_make_record("second"))
@@ -92,7 +92,7 @@ async def test_console_start_stop_start_cycle(capsys):
     captured = capsys.readouterr().out
     assert "first" in captured
     assert "second" in captured
-    assert handler.log_queues["console"].empty()
+    assert handler.log_queues["_console"].empty()
 
 
 @pytest.mark.asyncio
@@ -100,9 +100,6 @@ async def test_broker_start_stop_start_cycle():
     """Each start reconnects, and each stop disconnects and clears the client."""
     handler = FakeBrokerHandler(
         queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
     )
 
     await handler.start_logging()
@@ -126,35 +123,38 @@ async def test_broker_start_stop_start_cycle():
 @pytest.mark.asyncio
 async def test_mixed_handler_start_stop_start_cycle(capsys):
     """Console and broker both deliver records across two full cycles."""
-    handler = FakeBrokerHandler(
-        queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-    )
+    broker = FakeBrokerHandler(queue_name="broker")
+    console = ConsoleHandler()
 
-    await handler.start_logging()
-    handler.emit(_make_record("mixed-first"))
-    await _wait_for(lambda: len(handler.sent) == 1)
-    await handler.stop_logging(timeout=1)
-    assert handler.client is None
+    await broker.start_logging()
+    await console.start_logging()
+    broker.emit(_make_record("mixed-first"))
+    console.emit(_make_record("mixed-first"))
+    await _wait_for(lambda: len(broker.sent) == 1)
+    await broker.stop_logging(timeout=1)
+    await console.stop_logging()
+    assert broker.client is None
 
-    await handler.start_logging()
-    handler.emit(_make_record("mixed-second"))
-    await _wait_for(lambda: len(handler.sent) == 2)
-    await handler.stop_logging(timeout=1)
-    assert handler.client is None
+    await broker.start_logging()
+    await console.start_logging()
+    broker.emit(_make_record("mixed-second"))
+    console.emit(_make_record("mixed-second"))
+    await _wait_for(lambda: len(broker.sent) == 2)
+    await broker.stop_logging(timeout=1)
+    await console.stop_logging()
+    assert broker.client is None
 
     captured = capsys.readouterr().out
     assert "mixed-first" in captured
     assert "mixed-second" in captured
-    assert handler.sent[0]["message"] == "mixed-first"
-    assert handler.sent[1]["message"] == "mixed-second"
+    assert broker.sent[0]["message"] == "mixed-first"
+    assert broker.sent[1]["message"] == "mixed-second"
 
 
 @pytest.mark.asyncio
 async def test_double_start_raises():
     """start_logging is not re-entrant while running."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    handler = ConsoleHandler()
 
     await handler.start_logging()
     with pytest.raises(RuntimeError):
@@ -165,7 +165,7 @@ async def test_double_start_raises():
 @pytest.mark.asyncio
 async def test_close_refuses_later_start():
     """A closed handler refuses start_logging (AR-103)."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    handler = ConsoleHandler()
     handler.close()
 
     with pytest.raises(RuntimeError):
@@ -175,7 +175,7 @@ async def test_close_refuses_later_start():
 @pytest.mark.asyncio
 async def test_close_while_running_then_stop_is_safe():
     """close() while running leaves workers up until stop_logging, which is not blocked."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    handler = ConsoleHandler()
     await handler.start_logging()
 
     handler.close()
@@ -189,7 +189,7 @@ async def test_close_while_running_then_stop_is_safe():
 @pytest.mark.asyncio
 async def test_stop_without_start_is_noop():
     """stop_logging on a fresh handler is a no-op that leaves events unset."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    handler = ConsoleHandler()
 
     await handler.stop_logging()
 
@@ -203,9 +203,6 @@ async def test_emit_during_gap_is_dropped():
     """Records emitted between stop and the next start reach no backend."""
     handler = FakeBrokerHandler(
         queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
     )
 
     await handler.start_logging()
@@ -229,13 +226,16 @@ async def test_send_failure_acks_and_restart_recovers(capsys):
     errors = []
     handler = FlakyBrokerHandler(
         queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
         error_handler=lambda record, exc: errors.append(exc),
     )
     handler.failures_before_success = 2  # first two sends fail, then succeed
 
+    # Broker handlers no longer register a console status reporter (Phase 1), so
+    # a sibling ConsoleHandler supplies the shutdown status output.
+    console = ConsoleHandler()
+
     await handler.start_logging()
+    await console.start_logging()
     handler.emit(_make_record("one"))
     handler.emit(_make_record("two"))
     handler.emit(_make_record("three"))
@@ -247,9 +247,10 @@ async def test_send_failure_acks_and_restart_recovers(capsys):
     # TIMEOUT, and stop_logging returns promptly.
     await handler.stop_logging(timeout=0.5)
     assert handler.client is None
+    await console.stop_logging()
     captured = capsys.readouterr().out
-    assert "Broker Logger has completed processing its queue." in captured
-    assert "Timeout while waiting for broker" not in captured
+    assert "Console Logger has completed processing its queue." in captured
+    assert "Timeout while waiting for" not in captured
 
     # A fresh start schedules a fresh worker that reconnects and delivers.
     sent_before = len(handler.sent)

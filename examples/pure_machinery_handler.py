@@ -3,15 +3,20 @@
 import asyncio
 import logging
 
-from scietex.logging import AsyncLoggingHandler
+from scietex.logging import AsyncLoggingHandler, ScietexFormatter
 from scietex.logging.async_logging_handler import BackendDrainResult, DrainStatus
 
 
 class FileLikeHandler(AsyncLoggingHandler):
     """Handler that formats records into an in-memory list of lines."""
 
-    def __init__(self, *args, **kwargs):
+    # Always non-None: __init__ installs a default ScietexFormatter when no
+    # formatter is passed, so the worker can format records without a None guard.
+    formatter: logging.Formatter
+
+    def __init__(self, *args, formatter: logging.Formatter | None = None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.formatter = formatter if formatter is not None else ScietexFormatter()
         self.written: list[str] = []
         # AsyncLoggingHandler registers no backend itself; this handler registers a
         # single "filelike" backend whose worker formats records into self.written.
@@ -39,7 +44,7 @@ async def main():
     logger = logging.getLogger("PureLogger")
     logger.setLevel(logging.DEBUG)
 
-    handler = FileLikeHandler(service_name="PureService", instance_id="1")
+    handler = FileLikeHandler()
     logger.addHandler(handler)
 
     await handler.start_logging()

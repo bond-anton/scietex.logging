@@ -1,6 +1,6 @@
 """Asynchronous Valkey logging handler for non-blocking logging."""
 
-from .config import ValkeyConfig, optional_dependency_error
+from ..config import ValkeyConfig, optional_dependency_error
 
 try:
     from glide import GlideClient, GlideClientConfiguration, NodeAddress, ServerCredentials
@@ -12,7 +12,8 @@ import logging
 from collections.abc import Callable
 from typing import cast
 
-from .message_broker_handler import AsyncBrokerHandler
+from ..async_logging_handler import _QUEUE_VALKEY
+from .broker import AsyncBrokerHandler
 
 
 class AsyncValkeyHandler(AsyncBrokerHandler):
@@ -39,27 +40,17 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
     def __init__(
         self,
         stream_name: str,
-        service_name: str | None = None,
-        worker_id: int | None = None,
-        instance_id: str | None = None,
         *,
         valkey_config: dict | None = None,
         client: GlideClient | None = None,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
-        stdout_enable: bool = True,
         queue_maxsize: int = 10000,
-        formatter: logging.Formatter | None = None,
     ) -> None:
         """
         Initialize the asynchronous Valkey logging handler.
 
         Args:
             stream_name (str): The Valkey stream name to which log records are sent.
-            service_name (str, optional): Service name for log identification. Defaults to None.
-            worker_id (int, optional): Deprecated identifier for the logging worker instance.
-                Use ``instance_id`` instead; this parameter is removed in v2.0. Defaults to None.
-            instance_id (str, optional): Identifier for the logging instance.
-                Defaults to "1". Mutually exclusive with ``worker_id``. Defaults to None.
             valkey_config (dict, optional): Configuration dictionary for the Valkey connection.
                 Keys mirror ``GlideClientConfiguration``'s scalar plain options; ``addresses``
                 is a list of ``(host, port)`` tuples and defaults to ``[("localhost", 6379)]``.
@@ -74,15 +65,8 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
             error_handler (callable, optional): Callback invoked with ``(record, exc)``
                 when a log record cannot be delivered. Defaults to None, in which case
                 errors are reported via the ``scietex.logging`` module logger.
-            stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can hold.
                 Defaults to 10000.
-            formatter (logging.Formatter | None): Formatter used to render records
-                for the console (stdout) sink only. Broker payloads are built from
-                the handler's ``service_name``/``instance_id`` config and the record
-                directly, so they are invariant under this formatter. Defaults to
-                None, in which case a default ``ScietexFormatter`` is constructed
-                from ``service_name`` and ``instance_id``.
 
         Attributes:
             stream_name (str): The Valkey stream name where log entries are sent.
@@ -100,16 +84,11 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
         else:
             backend_cfg = ValkeyConfig(**(valkey_config or {}))
         super().__init__(
-            queue_name="valkey",
-            service_name=service_name,
-            worker_id=worker_id,
-            instance_id=instance_id,
+            queue_name=_QUEUE_VALKEY,
             error_handler=error_handler,
-            stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
             backend_config=backend_cfg,
             client=client,
-            formatter=formatter,
         )
         self.stream_name = stream_name
 

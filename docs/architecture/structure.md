@@ -23,59 +23,62 @@ scietex.logging/
 
 | Module | Responsibility |
 |---|---|
-| `__init__.py` | Public API. Re-exports `AsyncBaseHandler`, `AsyncBrokerHandler`, `AsyncLoggingHandler`, `AsyncFileHandler`, `AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`, `AsyncWatchedFileHandler`, `ConsoleBackend`, `FileBackend`, `JsonFormatter`, `ScietexFormatter`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler`; defines `__version__ = "1.8.0"`. |
+| `__init__.py` | Public API. Re-exports `ConsoleHandler`, `AsyncBrokerHandler`, `AsyncLoggingHandler`, `AsyncFileHandler`, `AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`, `AsyncWatchedFileHandler`, `ConsoleBackend`, `FileBackend`, `JsonFormatter`, `ScietexFormatter`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler`; defines `__version__ = "2.0.0"`. |
 | `_executor.py` | `_WriteExecutor` — private single-thread executor helper offloading blocking write I/O off the event loop (lazy-create / run / `shutdown(wait=True)`). |
 | `async_logging_handler.py` | `AsyncLoggingHandler` — pure shared async machinery (queues/events/workers, `register_backend`, `start_logging`/`emit`/`stop_logging`, error channel); no sink of its own. |
-| `console_backend.py` | `ConsoleBackend` — the console (stdout) sink as a peer backend (queue + worker + drain hook). |
-| `file_backend.py` | `FileBackend` — the file sink as a peer backend (queue + worker + drain hook), cloned from `ConsoleBackend` but writing to a `stream_provider()`-supplied file object. |
-| `basic_handler.py` | `AsyncBaseHandler` — thin concrete subclass of `AsyncLoggingHandler` that registers the console backend as a peer when `stdout_enable=True`. |
-| `file_handler.py` | `AsyncFileHandler` — concrete subclass of `AsyncBaseHandler` that registers the `"file"` backend; plus rotation variants `AsyncRotatingFileHandler` / `AsyncTimedRotatingFileHandler` / `AsyncWatchedFileHandler` subclassing it. |
-| `formatter.py` | `ScietexFormatter` (`logging.Formatter` subclass) + `level_abbreviation` helper. |
-| `json_formatter.py` | `JsonFormatter` (`logging.Formatter` subclass) emitting single-line NDJSON. |
-| `config.py` | Typed config objects (`LoggingConfig`, `RedisConfig`, `ValkeyConfig`, `MqttConfig`) + `validate_queue_maxsize` / `optional_dependency_error` / `resolve_instance_id` helpers. Stdlib-only leaf module. |
-| `message_broker_handler.py` | `AsyncBrokerHandler` — abstract broker backend base (registers queue + worker; connect/disconnect/send_message contract). |
-| `redis_handler.py` | `AsyncRedisHandler` — Redis stream backend via `redis.asyncio`. |
-| `valkey_handler.py` | `AsyncValkeyHandler` — Valkey stream backend via `valkey-glide`. |
-| `mqtt_handler.py` | `AsyncMqttHandler` — MQTT topic backend via `aiomqtt`. |
+| `backend/console.py` | `ConsoleBackend` — the console (stdout) sink as a peer backend (queue + worker + drain hook). |
+| `backend/file.py` | `FileBackend` — the file sink as a peer backend (queue + worker + drain hook), cloned from `ConsoleBackend` but writing to a `stream_provider()`-supplied file object. |
+| `handler/console.py` | `ConsoleHandler` — thin concrete subclass of `AsyncLoggingHandler` that registers the console backend as a peer unconditionally. |
+| `handler/file.py` | `AsyncFileHandler` — concrete subclass of `AsyncLoggingHandler` that registers the `"_file"` backend; plus rotation variants `AsyncRotatingFileHandler` / `AsyncTimedRotatingFileHandler` / `AsyncWatchedFileHandler` subclassing it. |
+| `formatter/scietex.py` | `ScietexFormatter` (`logging.Formatter` subclass) + `level_abbreviation` helper. |
+| `formatter/json.py` | `JsonFormatter` (`logging.Formatter` subclass) emitting single-line NDJSON. |
+| `config.py` | Typed config objects (`LoggingConfig`, `RedisConfig`, `ValkeyConfig`, `MqttConfig`) + `validate_queue_maxsize` / `level_abbreviation` / `optional_dependency_error` / `report_error` helpers. Stdlib-only leaf module. |
+| `handler/broker.py` | `AsyncBrokerHandler` — abstract broker backend base (registers queue + worker; connect/disconnect/send_message contract). |
+| `handler/redis.py` | `AsyncRedisHandler` — Redis stream backend via `redis.asyncio`. |
+| `handler/valkey.py` | `AsyncValkeyHandler` — Valkey stream backend via `valkey-glide`. |
+| `handler/mqtt.py` | `AsyncMqttHandler` — MQTT topic backend via `aiomqtt`. |
 | `py.typed` | Marker file (empty) enabling PEP 561 type info. |
 
 ### Module dependency graph (imports)
 
 ```
-formatter.py            (no intra-package imports)
-json_formatter.py       (no intra-package imports)
+formatter/scietex.py      → config.py
+formatter/json.py         (no intra-package imports)
 config.py               (no intra-package imports)
 _executor.py            (no intra-package imports)
-async_logging_handler.py → formatter.py, config.py
-console_backend.py      → async_logging_handler.py, _executor.py
-file_backend.py         → async_logging_handler.py, config.py, _executor.py
-basic_handler.py        → async_logging_handler.py, console_backend.py, config.py
-file_handler.py         → basic_handler.py, file_backend.py, async_logging_handler.py, _executor.py
-message_broker_handler.py → basic_handler.py
-redis_handler.py        → message_broker_handler.py, config.py
-valkey_handler.py       → message_broker_handler.py, config.py
-mqtt_handler.py         → message_broker_handler.py, config.py
-__init__.py             → basic_handler.py, file_backend.py, file_handler.py,
-                          formatter.py, json_formatter.py,
-                          message_broker_handler.py,
-                          redis_handler.py (guarded), valkey_handler.py (guarded),
-                          mqtt_handler.py (guarded)
+async_logging_handler.py → config.py
+backend/console.py       → async_logging_handler.py, _executor.py
+backend/file.py          → async_logging_handler.py, config.py, _executor.py
+handler/console.py       → async_logging_handler.py, backend/console.py, formatter/scietex.py
+handler/file.py          → backend/file.py, async_logging_handler.py, _executor.py, formatter/scietex.py
+handler/broker.py        → async_logging_handler.py, config.py
+handler/redis.py         → handler/broker.py, config.py
+handler/valkey.py        → handler/broker.py, config.py
+handler/mqtt.py          → handler/broker.py, config.py
+__init__.py              → handler/console.py, backend/file.py, handler/file.py,
+                           formatter/scietex.py, formatter/json.py,
+                           handler/broker.py,
+                           handler/redis.py (guarded), handler/valkey.py (guarded),
+                           handler/mqtt.py (guarded)
 ```
 
-Dependency direction is strictly **top-down / one-way**: formatter ← machinery
-← console/file/handler ← broker ← concrete backends ← `__init__`. There are no
-cycles.
+Dependency direction is strictly **top-down / one-way** (no cycles): `config`
+is the shared leaf; `async_logging_handler` depends only on `config`, while the
+console/file handlers additionally import `formatter/scietex`; broker handlers
+extend the base; concrete backends extend the broker base; `__init__` re-exports
+everything.
 
 ## Tests: `tests/`
 
 | File | Covers |
 |---|---|
 | `test_async_logging_handler.py` | `AsyncLoggingHandler` machinery: init, register_backend, start/stop, emit, error channel. |
-| `test_basic_handler.py` | `AsyncBaseHandler` init, start/stop, emit→queue, console worker stdout, pending-task drain, cleanup threshold. |
+| `test_executor.py` | `_WriteExecutor` single-thread executor: off-loop run, write-then-close serialization, no-op shutdown, exception propagation, restartability. |
+| `test_console_handler.py` | `ConsoleHandler` init, start/stop, emit→queue, console worker stdout, pending-task drain, cleanup threshold. |
 | `test_message_broker_handler.py` | `AsyncBrokerHandler` queue/worker registration and drain behavior. |
+| `test_client_injection.py` | `client=` injection into `AsyncBrokerHandler` (never-close ownership contract; injected client is not closed). |
 | `test_config.py` | `LoggingConfig` / `RedisConfig` / `ValkeyConfig` / `MqttConfig`, `validate_queue_maxsize`, `optional_dependency_error`. |
-| `test_instance_id.py` | `instance_id` parameter, deprecated `worker_id` alias, mutual exclusivity, and the default `"1"`. |
-| `test_formatter.py` | `level_abbreviation`, `ScietexFormatter.formatTime` (ISO UTC), `format` (worker name + level abbrev). |
+| `test_formatter.py` | `level_abbreviation`, `ScietexFormatter.formatTime` (ISO UTC), `format` (level abbrev + `%(name)s` logger name). |
 | `test_console_backend.py` | `ConsoleBackend` queue/worker/drain and shutdown-status reporting. |
 | `test_file_backend.py` | `FileBackend` queue/worker/drain, dynamic stream provider, and shutdown-status reporting. |
 | `test_json_formatter.py` | `JsonFormatter` single-line JSON output, extra flattening, exception handling, self-copying. |
@@ -125,8 +128,8 @@ backend that is not implemented).
 
 ## Notable boundaries
 
-- **Optional-dependency boundary.** `redis_handler.py`, `valkey_handler.py`,
-  and `mqtt_handler.py` hard-import their third-party client at module top and
+- **Optional-dependency boundary.** `handler/redis.py`, `handler/valkey.py`,
+  and `handler/mqtt.py` hard-import their third-party client at module top and
   raise a descriptive `ImportError` if missing. `__init__.py` guards these
   imports so the base package imports cleanly without extras. This is the main
   seam between "core" and "optional backends".

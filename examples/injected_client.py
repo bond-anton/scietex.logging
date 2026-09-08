@@ -13,7 +13,7 @@ import logging
 
 from glide import GlideClient, GlideClientConfiguration, MaxId, MinId, NodeAddress
 
-from scietex.logging.valkey_handler import AsyncValkeyHandler
+from scietex.logging.handler.valkey import AsyncValkeyHandler
 
 
 async def main():
@@ -32,8 +32,6 @@ async def main():
     # handler builds no connection of its own and never closes this client.
     handler = AsyncValkeyHandler(
         stream_name=stream_name,
-        service_name="InjectedService",
-        instance_id="1",
         client=valkey_client,
     )
     logger.addHandler(handler)

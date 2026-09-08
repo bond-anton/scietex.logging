@@ -16,7 +16,7 @@ Five backends are supported, layered on a class hierarchy whose shared
 machinery is separated from the sinks:
 
 - **Console** (stdout) — always available, no extra dependency. A peer backend
-  (`ConsoleBackend`) registered by `AsyncBaseHandler`.
+  (`ConsoleBackend`) registered by `ConsoleHandler`.
 - **File** (plain text / JSON) — always available, no extra dependency. A peer
   backend (`FileBackend`) registered by `AsyncFileHandler` and its rotation
   variants.
@@ -24,7 +24,7 @@ machinery is separated from the sinks:
 - **Valkey** (streams) — optional, requires the `valkey-glide` package.
 - **MQTT** (topic) — optional, requires the `aiomqtt` package.
 
-The package is small: ~3000 lines of source across 14 modules under
+The package is small: ~3000 lines of source across 13 modules under
 `src/scietex/logging/`.
 
 ## Document Index
@@ -41,19 +41,19 @@ The package is small: ~3000 lines of source across 14 modules under
 
 ## Key Facts (quick reference)
 
-- **Package**: `scietex.logging`, version `1.8.0` (`src/scietex/logging/__init__.py:138`)
+- **Package**: `scietex.logging`, version `2.0.0` (`src/scietex/logging/__init__.py:138`)
 - **Python**: `>=3.10` (`pyproject.toml`)
 - **Build**: setuptools, `src/` layout; package data ships `py.typed`
 - **Runtime deps**: none (base); `redis>=5.0.0` (`[redis]`), `valkey-glide~=2.5.0` (`[valkey]`), `aiomqtt~=2.5.0` (`[mqtt]`)
-- **Public API** (`__init__.py`): `AsyncBaseHandler`, `AsyncBrokerHandler`,
+- **Public API** (`__init__.py`): `ConsoleHandler`, `AsyncBrokerHandler`,
   `AsyncFileHandler`, `AsyncLoggingHandler`, `AsyncRotatingFileHandler`,
   `AsyncTimedRotatingFileHandler`, `AsyncWatchedFileHandler`, `ConsoleBackend`,
   `FileBackend`, `JsonFormatter`, `ScietexFormatter`;
   `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler` added
   conditionally on successful import
 - **Class hierarchy**: `logging.Handler` → `AsyncLoggingHandler` (pure
-  machinery, no sink) → `AsyncBaseHandler` (registers `ConsoleBackend` peer) →
-  {`AsyncFileHandler` (registers `FileBackend` peer) →
+  machinery, no sink) → {`ConsoleHandler` (registers `ConsoleBackend` peer),
+  `AsyncFileHandler` (registers `FileBackend` peer) →
   {`AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`,
   `AsyncWatchedFileHandler`}, `AsyncBrokerHandler` → {`AsyncRedisHandler`,
   `AsyncValkeyHandler`, `AsyncMqttHandler`}}

@@ -8,9 +8,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from .async_logging_handler import BackendDrainResult, DrainStatus
-from .basic_handler import AsyncBaseHandler
-from .config import MqttConfig, RedisConfig, ValkeyConfig, level_abbreviation
+from ..async_logging_handler import AsyncLoggingHandler, BackendDrainResult, DrainStatus
+from ..config import MqttConfig, RedisConfig, ValkeyConfig, level_abbreviation
 
 # Connect-retry backoff (AR-022). A fixed 1s retry would spam the error channel
 # ~3600x/hour during a prolonged outage. Consecutive connect() failures sleep a
@@ -22,7 +21,7 @@ _CONNECT_RETRY_CAP = 30.0
 _CONNECT_RETRY_JITTER = 0.2
 
 
-class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
+class AsyncBrokerHandler(AsyncLoggingHandler, abc.ABC):
     """
     Abstract asynchronous logging handler for non-blocking logging to a message broker.
 
@@ -58,31 +57,20 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
     def __init__(
         self,
         queue_name: str,
-        service_name: str | None = None,
-        worker_id: int | None = None,
-        instance_id: str | None = None,
         *,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
-        stdout_enable: bool = True,
         queue_maxsize: int = 10000,
         backend_config: RedisConfig | ValkeyConfig | MqttConfig | None = None,
         client: Any | None = None,
-        formatter: logging.Formatter | None = None,
     ) -> None:
         """
         Initialize the asynchronous Message broker logging handler.
 
         Args:
             queue_name (str): The name of the queue from which log records are read.
-            service_name (str, optional): Service name for log identification. Defaults to None.
-            worker_id (int, optional): Deprecated identifier for the logging worker instance.
-                Use ``instance_id`` instead; this parameter is removed in v2.0. Defaults to None.
-            instance_id (str, optional): Identifier for the logging instance.
-                Defaults to "1". Mutually exclusive with ``worker_id``. Defaults to None.
             error_handler (callable, optional): Callback invoked with ``(record, exc)``
                 when a log record cannot be delivered. Defaults to None, in which case
                 errors are reported via the ``scietex.logging`` module logger.
-            stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can hold.
                 Defaults to 10000.
             backend_config (RedisConfig | ValkeyConfig | MqttConfig | None): Backend-specific config
@@ -92,9 +80,6 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
                 it — the caller owns its lifetime and recovery. Mutually exclusive with
                 ``backend_config``. Defaults to None, in which case the handler connects
                 and disconnects on its own.
-            formatter (logging.Formatter | None): Formatter used to render records.
-                Defaults to None, in which case a default ``ScietexFormatter`` is
-                constructed from ``service_name`` and ``instance_id``.
 
         Attributes:
             queue_name (str): The name of the queue for the handler.
@@ -105,14 +90,9 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
             ValueError: If both ``client`` and ``backend_config`` are provided.
         """
         super().__init__(
-            service_name=service_name,
-            worker_id=worker_id,
-            instance_id=instance_id,
             error_handler=error_handler,
-            stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
             backend_config=backend_config,
-            formatter=formatter,
         )
         if client is not None and backend_config is not None:
             raise ValueError(
@@ -163,12 +143,13 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
         Send a log record to the message broker asynchronously.
 
         ``record`` is a serializable log entry: a ``dict[str, str]`` mapping the keys
-        ``level``, ``message``, ``name``, and ``time`` to their string values. Each
-        concrete adapter translates the entry to the argument shape its client expects
-        (e.g. Redis ``xadd`` accepts the dict directly, while Valkey-glide ``xadd``
-        expects ``record.items()``). A failure must raise so the worker can report it
-        via the error channel and acknowledge the queue task; the record is dropped,
-        not retried.
+        ``level``, ``message``, ``name``, and ``time`` to their string values. ``name``
+        is the record's standard library logger name (``LogRecord.name``), not a
+        config-derived identity. Each concrete adapter translates the entry to the
+        argument shape its client expects (e.g. Redis ``xadd`` accepts the dict
+        directly, while Valkey-glide ``xadd`` expects ``record.items()``). A failure
+        must raise so the worker can report it via the error channel and acknowledge
+        the queue task; the record is dropped, not retried.
 
         Args:
             record (dict[str, str]): The log record to send, keyed by ``level``,
@@ -235,15 +216,14 @@ class AsyncBrokerHandler(AsyncBaseHandler, abc.ABC):
                     record = await asyncio.wait_for(self.log_queues[self.queue_name].get(), 1)
                 except asyncio.TimeoutError:
                     continue
-                # Compute the broker fields from the handler identity (config) and the
-                # record directly, not from formatter internals. A plain
-                # logging.Formatter installed via setFormatter has no worker_name
-                # attribute and a non-ISO formatTime, so deriving name/time from the
-                # formatter would silently change the broker wire format. The identity
-                # lives on config, and time is always ISO-8601 UTC regardless of any
-                # custom formatter/datefmt.
+                # Compute the broker fields from the record directly, not from
+                # formatter internals. The record's identity is the standard
+                # library logger name (record.name), and time is always ISO-8601
+                # UTC regardless of any custom formatter/datefmt, so deriving
+                # either from a formatter would let a custom formatter silently
+                # change the broker wire format.
                 level = level_abbreviation(record.levelno)
-                name = self.worker_name
+                name = record.name
                 log_entry: dict[str, str] = {
                     "level": level,
                     "message": record.getMessage(),

@@ -34,11 +34,10 @@ class AsyncPostgresHandler(AsyncBrokerHandler):
     async def send_message(self, record):
         """Send log record to PostgreSQL."""
         await self._conn.execute(
-            "INSERT INTO logs (level, message, service, instance_id, timestamp) VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO logs (level, message, name, timestamp) VALUES ($1, $2, $3, $4)",
             record["level"],
             record["message"],
             record["name"],
-            1,
             record["time"],
         )
 ```
@@ -71,25 +70,28 @@ record dropped due to a send failure is still reported through the error channel
 The record is a dictionary with the following keys:
 - `level`: Log level abbreviation (DBG, INF, WRN, ERR, CRT)
 - `message`: The log message
-- `name`: Service name and instance ID (`service_name:instance_id`)
+- `name`: The record's logger name (`record.name`)
 - `time`: Formatted timestamp
 
 This record schema is **independent of the formatter**. Broker payloads are
-built from the handler's `service_name`/`instance_id` config and the log record
-directly, so they are invariant under `setFormatter`/`formatter=`. A custom
-formatter affects the console (stdout) sink only — see
-{ref}`Formatter scope: console output only <formatter-scope>`.
+built from the log record directly — the `name` field is the record's logger
+name (`record.name`) — so they are invariant under `setFormatter`. Broker
+handlers no longer accept a `formatter=` keyword (passing one raises
+`TypeError`); a formatter affects the console (stdout) and file sinks only — see
+{ref}`Formatter scope: console and file output only <formatter-scope>`.
 
-### Console-by-default and reserved names
+### Reserved names
 
-`AsyncBrokerHandler` extends `AsyncBaseHandler`, so a custom broker backend
-**attaches a console sink by default** (`stdout_enable=True`). Pass
-`stdout_enable=False` for a broker-only handler (see `examples/custom_backend.py`).
+`AsyncBrokerHandler` extends `AsyncLoggingHandler` directly, so a custom broker
+backend registers **only its own broker backend** — no console sink is attached.
+To add console output alongside a broker handler, add a `ConsoleHandler` to the
+logger separately.
 
-The built-in backends reserve the queue names `"console"`, `"redis"`, and
-`"valkey"`. Choose a distinct `queue_name` for your custom backend — using a
-reserved name raises `ValueError` at construction when the console backend is
-enabled.
+The built-in backends register under `_`-prefixed queue keys (`"_console"`,
+`"_file"`, `"_redis"`, `"_valkey"`, `"_mqtt"`). The `_` prefix is reserved for
+internal use — a user-supplied `queue_name` never starts with `_`, so it cannot
+collide with a built-in backend. `register_backend` still raises `ValueError` at
+construction if two custom backends reuse the same `queue_name`.
 
 ## Worker Configuration
 
@@ -132,7 +134,7 @@ the configured error channel instead of being silently dropped.
 Pass an `error_handler` callback when constructing a handler:
 
 ```python
-from scietex.logging import AsyncBaseHandler
+from scietex.logging import ConsoleHandler
 
 
 def on_error(record, exc):
@@ -140,7 +142,7 @@ def on_error(record, exc):
     print(f"Logging error: {exc}")
 
 
-handler = AsyncBaseHandler(error_handler=on_error)
+handler = ConsoleHandler(error_handler=on_error)
 ```
 
 When no `error_handler` is provided, errors are logged through the `scietex.logging`
@@ -168,7 +170,7 @@ Always ensure proper cleanup:
 
 ```python
 async def main():
-    handler = AsyncBaseHandler()
+    handler = ConsoleHandler()
     logger.addHandler(handler)
     
     await handler.start_logging()
@@ -181,12 +183,15 @@ async def main():
 You can extend the formatter to add custom fields:
 
 ```python
+import copy
 import logging
 from scietex.logging import ScietexFormatter
 
 
 class CustomFormatter(ScietexFormatter):
     def format(self, record):
+        # Copy the record first so the shared record is not mutated in place.
+        record = copy.copy(record)
         # Add custom fields
         record.custom_field = "value"
         return super().format(record)

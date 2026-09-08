@@ -1,11 +1,11 @@
-"""AsyncBaseHandler usage example."""
+"""ConsoleHandler usage example."""
 
 # examples/basic_console_logging.py
 
 import asyncio
 import logging
 
-from scietex.logging import AsyncBaseHandler
+from scietex.logging import ConsoleHandler
 
 
 async def main():
@@ -15,7 +15,7 @@ async def main():
     logger.setLevel(logging.DEBUG)
 
     # Set up asynchronous logging handler with console output
-    async_handler = AsyncBaseHandler(service_name="MyService", instance_id="1", stdout_enable=True)
+    async_handler = ConsoleHandler()
     logger.addHandler(async_handler)
 
     # Start the asynchronous logging tasks

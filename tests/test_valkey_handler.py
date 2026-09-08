@@ -46,11 +46,8 @@ async def test_valkey_handler_logs_to_stream():
     # Clear the test stream if it exists
     await valkey_client.delete([stream_name])
     service_name = "TestLogger"
-    worker_id = 1
     # Create the Valkey log handler
     handler = AsyncValkeyHandler(
-        service_name=service_name,
-        worker_id=worker_id,
         stream_name=stream_name,
         valkey_config={"addresses": [("localhost", 6379)]},
     )
@@ -89,9 +86,7 @@ async def test_valkey_handler_logs_to_stream():
             "Valkey logger:Log message data mismatch."
         )
         assert decoded_message_data["level"] == "INF", "Valkey logger: Log level mismatch."
-        assert decoded_message_data["name"] == f"{service_name}:{worker_id}", (
-            "Valkey logger:Logger name mismatch."
-        )
+        assert decoded_message_data["name"] == service_name, "Valkey logger:Logger name mismatch."
 
     # Clean up
     await handler.stop_logging()
@@ -187,7 +182,7 @@ async def test_valkey_connect_omits_credentials_when_unset(monkeypatch):
 
 def test_valkey_unknown_kwarg_raises_type_error():
     with pytest.raises(TypeError):
-        AsyncValkeyHandler(stream_name="s", stdout_enabel=True)
+        AsyncValkeyHandler(stream_name="s", unknown_kwarg=True)
 
 
 @pytest.mark.asyncio

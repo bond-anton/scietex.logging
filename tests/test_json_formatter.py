@@ -4,7 +4,7 @@ import json
 import logging
 import sys
 
-from scietex.logging.json_formatter import JsonFormatter
+from scietex.logging.formatter.json import JsonFormatter
 
 
 def _make_record(

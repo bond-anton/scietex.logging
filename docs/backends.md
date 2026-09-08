@@ -4,20 +4,21 @@ This document details all supported logging backends in scietex.logging.
 
 ## Console Logging
 
-Console logging is the default backend and is always available. It outputs log messages to standard output.
+Console logging writes log messages to standard output and is always available.
+It is provided by `ConsoleHandler`, which registers the console backend. Console
+output requires adding a `ConsoleHandler` to the logger explicitly.
 
 ### Features
 
 - No additional dependencies required
-- Enabled by default in `AsyncBaseHandler`
-- Can be disabled with `stdout_enable=False`
+- Registered by `ConsoleHandler` (added to the logger explicitly)
 
 ### Usage
 
 ```python
-from scietex.logging import AsyncBaseHandler
+from scietex.logging import ConsoleHandler
 
-handler = AsyncBaseHandler()
+handler = ConsoleHandler()
 ```
 
 ## Redis Logging
@@ -245,7 +246,7 @@ You can use multiple handlers simultaneously:
 ```python
 import logging
 from scietex.logging import (
-    AsyncBaseHandler,
+    ConsoleHandler,
     AsyncFileHandler,
     AsyncRedisHandler,
     AsyncValkeyHandler,
@@ -256,7 +257,7 @@ logger = logging.getLogger("MultiLogger")
 logger.setLevel(logging.DEBUG)
 
 # Console handler (always available)
-console_handler = AsyncBaseHandler()
+console_handler = ConsoleHandler()
 
 # File handler
 file_handler = AsyncFileHandler("logs.log")

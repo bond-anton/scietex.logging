@@ -5,7 +5,7 @@
 import asyncio
 import logging
 
-from scietex.logging.redis_handler import AsyncRedisHandler
+from scietex.logging.handler.redis import AsyncRedisHandler
 
 
 async def main():
@@ -17,8 +17,6 @@ async def main():
     # Set up the asynchronous Redis logging handler
     redis_handler = AsyncRedisHandler(
         stream_name="example_log_stream",
-        service_name="RedisService",
-        instance_id="2",
         redis_config={"host": "localhost", "port": 6379},
     )
     logger.addHandler(redis_handler)

@@ -43,11 +43,11 @@ Example Usage:
 Basic usage with console logging:
 
     import logging
-    from scietex.logging import AsyncBaseHandler
+    from scietex.logging import ConsoleHandler
 
     logger = logging.getLogger("MyAsyncLogger")
     logger.setLevel(logging.DEBUG)
-    handler = AsyncBaseHandler()
+    handler = ConsoleHandler()
     logger.addHandler(handler)
 
     async def main():
@@ -135,25 +135,22 @@ behaviors.
 
 """
 
-__version__ = "1.8.0"
+__version__ = "2.0.0"
 
 from .async_logging_handler import AsyncLoggingHandler
-from .basic_handler import AsyncBaseHandler
+from .backend import ConsoleBackend, FileBackend
 from .config import LoggingConfig, MqttConfig, RedisConfig, ValkeyConfig
-from .console_backend import ConsoleBackend
-from .file_backend import FileBackend
-from .file_handler import (
+from .formatter import JsonFormatter, ScietexFormatter
+from .handler import (
+    AsyncBrokerHandler,
     AsyncFileHandler,
     AsyncRotatingFileHandler,
     AsyncTimedRotatingFileHandler,
     AsyncWatchedFileHandler,
+    ConsoleHandler,
 )
-from .formatter import ScietexFormatter
-from .json_formatter import JsonFormatter
-from .message_broker_handler import AsyncBrokerHandler
 
 __all__ = [
-    "AsyncBaseHandler",
     "AsyncBrokerHandler",
     "AsyncFileHandler",
     "AsyncLoggingHandler",
@@ -161,6 +158,7 @@ __all__ = [
     "AsyncTimedRotatingFileHandler",
     "AsyncWatchedFileHandler",
     "ConsoleBackend",
+    "ConsoleHandler",
     "FileBackend",
     "JsonFormatter",
     "LoggingConfig",
@@ -171,7 +169,7 @@ __all__ = [
 ]
 
 try:
-    from .redis_handler import AsyncRedisHandler
+    from .handler.redis import AsyncRedisHandler
 
     __all__ += ["AsyncRedisHandler"]
 except ImportError as exc:
@@ -180,14 +178,14 @@ except ImportError as exc:
     if exc.name != "redis":
         raise
 try:
-    from .valkey_handler import AsyncValkeyHandler
+    from .handler.valkey import AsyncValkeyHandler
 
     __all__ += ["AsyncValkeyHandler"]
 except ImportError as exc:
     if exc.name != "glide":
         raise
 try:
-    from .mqtt_handler import AsyncMqttHandler
+    from .handler.mqtt import AsyncMqttHandler
 
     __all__ += ["AsyncMqttHandler"]
 except ImportError as exc:

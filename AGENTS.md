@@ -21,23 +21,27 @@ scietex.logging/
 │   ├── __init__.py              # Public API exports
 │   ├── _executor.py             # _WriteExecutor (single-thread executor helper)
 │   ├── async_logging_handler.py # AsyncLoggingHandler machinery base
-│   ├── basic_handler.py         # AsyncBaseHandler (base class with console backend)
 │   ├── config.py                # LoggingConfig, RedisConfig, ValkeyConfig, MqttConfig
-│   ├── console_backend.py       # ConsoleBackend peer backend
-│   ├── file_backend.py          # FileBackend peer backend
-│   ├── file_handler.py          # AsyncFileHandler + rotation variants
-│   ├── formatter.py             # ScietexFormatter
-│   ├── json_formatter.py        # JsonFormatter (structured JSON output)
-│   ├── message_broker_handler.py # AsyncBrokerHandler (base class for broker backends)
-│   ├── mqtt_handler.py          # AsyncMqttHandler (MQTT backend)
-│   ├── redis_handler.py         # AsyncRedisHandler (Redis backend)
-│   └── valkey_handler.py        # AsyncValkeyHandler (Valkey backend)
+│   ├── backend/
+│   │   ├── console.py           # ConsoleBackend peer backend
+│   │   └── file.py              # FileBackend peer backend
+│   ├── formatter/
+│   │   ├── scietex.py           # ScietexFormatter
+│   │   └── json.py              # JsonFormatter (structured JSON output)
+│   └── handler/
+│       ├── console.py           # ConsoleHandler (console backend)
+│       ├── file.py              # AsyncFileHandler + rotation variants
+│       ├── broker.py            # AsyncBrokerHandler (base class for broker backends)
+│       ├── redis.py             # AsyncRedisHandler (Redis backend)
+│       ├── valkey.py            # AsyncValkeyHandler (Valkey backend)
+│       └── mqtt.py              # AsyncMqttHandler (MQTT backend)
 ├── tests/
 │   ├── test_async_logging_handler.py
-│   ├── test_basic_handler.py
+│   ├── test_client_injection.py
 │   ├── test_config.py
 │   ├── test_console_backend.py
-│   ├── test_client_injection.py
+│   ├── test_console_handler.py
+│   ├── test_executor.py
 │   ├── test_file_backend.py
 │   ├── test_file_handler.py
 │   ├── test_formatter.py
@@ -80,16 +84,16 @@ scietex.logging/
 
 ### Exported Classes (from `__init__.py`)
 
-- `AsyncBaseHandler` - Base handler with console logging backend (always available)
+- `ConsoleHandler` - Console logging backend handler (always available)
 - `AsyncBrokerHandler` - Base handler for message broker backends
 - `AsyncFileHandler` - File logging backend (always available)
 - `AsyncLoggingHandler` - Shared queue/worker machinery base for all handlers (always available)
 - `AsyncRotatingFileHandler` - Size-based rotating file backend (always available)
 - `AsyncTimedRotatingFileHandler` - Time-based rotating file backend (always available)
 - `AsyncWatchedFileHandler` - Watched file backend (always available)
-- `ConsoleBackend` - Console sink registered by `AsyncBaseHandler` (always available)
+- `ConsoleBackend` - Console sink registered by `ConsoleHandler` (always available)
 - `JsonFormatter` - Structured JSON output formatter (always available)
-- `ScietexFormatter` - Custom formatter with worker name and 3-letter log level abbreviations
+- `ScietexFormatter` - Custom formatter with 3-letter log level abbreviations and `%(name)s` logger-name identity
 - `AsyncRedisHandler` - Redis logging backend (optional, requires `[redis]` extra)
 - `AsyncValkeyHandler` - Valkey logging backend (optional, requires `[valkey]` extra)
 - `AsyncMqttHandler` - MQTT logging backend (optional, requires `[mqtt]` extra)
@@ -118,15 +122,15 @@ scietex.logging/
 ```
 logging.Handler (standard library)
     └── AsyncLoggingHandler (src/scietex/logging/async_logging_handler.py)
-        └── AsyncBaseHandler (src/scietex/logging/basic_handler.py)
-            ├── AsyncFileHandler (src/scietex/logging/file_handler.py)
-            │   ├── AsyncRotatingFileHandler
-            │   ├── AsyncTimedRotatingFileHandler
-            │   └── AsyncWatchedFileHandler
-            └── AsyncBrokerHandler (src/scietex/logging/message_broker_handler.py)
-                ├── AsyncRedisHandler (src/scietex/logging/redis_handler.py)
-                ├── AsyncValkeyHandler (src/scietex/logging/valkey_handler.py)
-                └── AsyncMqttHandler (src/scietex/logging/mqtt_handler.py)
+        ├── ConsoleHandler (src/scietex/logging/handler/console.py)
+        ├── AsyncFileHandler (src/scietex/logging/handler/file.py)
+        │   ├── AsyncRotatingFileHandler
+        │   ├── AsyncTimedRotatingFileHandler
+        │   └── AsyncWatchedFileHandler
+        └── AsyncBrokerHandler (src/scietex/logging/handler/broker.py)
+            ├── AsyncRedisHandler (src/scietex/logging/handler/redis.py)
+            ├── AsyncValkeyHandler (src/scietex/logging/handler/valkey.py)
+            └── AsyncMqttHandler (src/scietex/logging/handler/mqtt.py)
 ```
 
 ### Key Concepts
@@ -143,12 +147,12 @@ logging.Handler (standard library)
 
 ### ScietexFormatter
 
-- Service name and instance ID included in logs: `{service_name}:{instance_id}`
+- Identity comes from the standard-library logger name via `record.name`
+  (set by `logging.getLogger("name")`), rendered by the `%(name)s` token
 - Log levels abbreviated: `DBG`, `INF`, `WRN`, `ERR`, `CRT`
 - Timestamps in ISO 8601 UTC format by default
-- Default format: `%(asctime)s - %(levelname)s - [%(worker_name)s] - %(message)s`
-- `worker_id` (int) is deprecated in favor of `instance_id` (str, default `"1"`);
-  passing both raises `ValueError`, and `worker_id` is removed in v2.0
+- Signature: `ScietexFormatter(fmt=None, datefmt=None)`
+- Default format: `%(asctime)s - %(levelname)s - [%(name)s] - %(message)s`
 
 ## Common Tasks
 
@@ -199,11 +203,11 @@ uv run ruff check .
 
 ## Important Notes
 
-- **Console logging is always enabled** by default in `AsyncBaseHandler` (controlled by `stdout_enable` parameter)
+- **Console logging requires adding a `ConsoleHandler` to the logger explicitly**; file/broker handlers do not register a console sink.
 - **Handlers must be started** with `await handler.start_logging()` before logging
 - **Handlers must be stopped** with `await handler.stop_logging()` to ensure all logs are processed
 - **Async context required**: `start_logging()` and `stop_logging()` are async and must be called within an asyncio event loop. `emit()` is thread-safe and does not need a loop — it may be called from any thread, including one with no running loop.
-- **Backends share the same formatter**: All handlers use the configured formatter
+- **Formatter is console/file-specific**: Only `ConsoleHandler` and `AsyncFileHandler` (and its rotation variants) accept a `formatter=` keyword and render records through it (default `ScietexFormatter`). Broker handlers and the pure-machinery base `AsyncLoggingHandler` do not accept `formatter=` — broker wire payloads are built from the record directly.
 - **Error handling**: Queue operations catch `queue.Full` (ingress overflow) and `asyncio.QueueFull` (backend overflow), plus other exceptions, and route them through the error channel to prevent crashes
 - **Async write offload**: Since 1.6.0, an injected `file=` object's `write`/`flush` runs on a non-loop thread (the single-thread write executor), so an injected file-like must tolerate cross-thread writes. The handler still never closes an injected file-like.
 
@@ -212,8 +216,8 @@ uv run ruff check .
 1. PostgreSQL support is mentioned in docs but not yet implemented (no `postgres` extra defined)
 2. The `__init__.py` imports Redis/Valkey/MQTT handlers conditionally - ensure the `[redis]`, `[valkey]`, or `[mqtt]` extras are installed
 3. `client` and a backend config (`valkey_config`/`redis_config`/`mqtt_config`/`backend_config`) are mutually exclusive — passing both raises `ValueError`. When injecting a client, omit the config dict.
-4. `"mqtt"` is a reserved queue name (used by `AsyncMqttHandler`); custom backends must not reuse it.
-5. `"file"` is a reserved queue name (used by `AsyncFileHandler`); custom backends must not reuse it.
+4. `"_mqtt"` is a reserved queue name (used by `AsyncMqttHandler`); custom backends must not reuse it.
+5. `"_file"` is a reserved queue name (used by `AsyncFileHandler`); custom backends must not reuse it.
 
 ## Development Commands
 

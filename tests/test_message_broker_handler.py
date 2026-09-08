@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import pytest
 
 from scietex.logging.async_logging_handler import DrainStatus
-from scietex.logging.message_broker_handler import AsyncBrokerHandler
+from scietex.logging.handler.broker import AsyncBrokerHandler
 
 
 def _make_record(message: str = "test message") -> logging.LogRecord:
@@ -125,9 +125,6 @@ async def test_stop_logging_cancels_stuck_connect_worker():
     """stop_logging returns instead of deadlocking when connect() outlives the timeout."""
     handler = StuckConnectBrokerHandler(
         queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
     )
 
     await handler.start_logging()
@@ -149,9 +146,6 @@ async def test_connect_failure_surfaced_and_retried():
     errors = []
     handler = FakeBrokerHandler(
         queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
         error_handler=lambda record, exc: errors.append(exc),
     )
     handler.connect_failures = 1
@@ -173,9 +167,6 @@ async def test_connect_retry_backs_off_exponentially(monkeypatch):
     """Consecutive connect() failures sleep a doubling, jitter-free, capped delay."""
     handler = FakeBrokerHandler(
         queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
         error_handler=lambda record, exc: None,
     )
     handler.connect_failures = 10**9  # keep failing for the duration of the test
@@ -209,9 +200,6 @@ async def test_connect_backoff_resets_after_success(monkeypatch):
     """A successful connect() resets the backoff so a later outage starts from base."""
     handler = ScriptedConnectBrokerHandler(
         queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
         error_handler=lambda record, exc: None,
         outcomes=["fail", "fail", "ok"],  # then fail once the script is exhausted
         send_error=RuntimeError("send failed"),
@@ -250,7 +238,6 @@ async def test_send_failure_surfaces_and_acks_record():
     errors = []
     handler = FakeBrokerHandler(
         queue_name="broker",
-        stdout_enable=False,
         error_handler=lambda record, exc: errors.append(exc),
     )
     handler._send_error = RuntimeError("send failed")
@@ -275,7 +262,7 @@ async def test_send_failure_surfaces_and_acks_record():
 def test_broker_unknown_kwarg_raises_type_error():
     """A typo'd kwarg on a broker handler fails loudly."""
     with pytest.raises(TypeError):
-        FakeBrokerHandler(queue_name="broker", stdout_enabel=True)
+        FakeBrokerHandler(queue_name="broker", unknown_kwarg=True)
 
 
 def test_broker_handler_is_abstract():
@@ -297,9 +284,6 @@ async def test_broker_output_deterministic_without_console():
     """Broker fields are computed independently of console formatting."""
     handler = FakeBrokerHandler(
         queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
     )
 
     await handler.start_logging()
@@ -308,22 +292,20 @@ async def test_broker_output_deterministic_without_console():
     await _wait_for(lambda: bool(handler.sent))
     entry = handler.sent[0]
     assert entry["level"] == "INF"
-    assert entry["name"] == "TestService:1"
+    assert entry["name"] == "TestLogger"
 
     await handler.stop_logging(timeout=0.5)
 
 
 @pytest.mark.asyncio
-async def test_broker_payload_invariant_under_plain_formatter():
-    """Broker name/time derive from handler identity, not the formatter internals."""
+async def test_broker_payload_invariant_under_set_formatter():
+    """Broker name/time derive from the record; setFormatter cannot change the payload."""
     handler = FakeBrokerHandler(
         queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
     )
-    # A plain stdlib formatter has no worker_name attribute and a non-ISO
-    # formatTime; broker output must be unaffected by swapping it in.
+    # Broker handlers no longer accept formatter=; setFormatter (stdlib) sets an
+    # unused attribute. The wire payload must still be record-derived, so a plain
+    # stdlib formatter (non-ISO time) must not change the broker wire format.
     handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
 
     await handler.start_logging()
@@ -332,7 +314,7 @@ async def test_broker_payload_invariant_under_plain_formatter():
 
     await _wait_for(lambda: bool(handler.sent))
     entry = handler.sent[0]
-    assert entry["name"] == "TestService:1"
+    assert entry["name"] == "TestLogger"
     assert entry["time"] == datetime.fromtimestamp(record.created, timezone.utc).isoformat()
 
     await handler.stop_logging(timeout=0.5)
@@ -341,7 +323,7 @@ async def test_broker_payload_invariant_under_plain_formatter():
 @pytest.mark.asyncio
 async def test_drain_returns_completed_result():
     """drain() returns a COMPLETED BackendDrainResult when the queue drains."""
-    handler = FakeBrokerHandler(queue_name="broker", stdout_enable=False)
+    handler = FakeBrokerHandler(queue_name="broker")
 
     await handler.start_logging()
     handler.emit(_make_record("hello"))
@@ -358,7 +340,7 @@ async def test_drain_returns_completed_result():
 @pytest.mark.asyncio
 async def test_drain_returns_timeout_result():
     """drain() returns a TIMEOUT result when the queue does not drain in time."""
-    handler = FakeBrokerHandler(queue_name="broker", stdout_enable=False)
+    handler = FakeBrokerHandler(queue_name="broker")
     handler.log_queues["broker"].put_nowait(_make_record("stuck"))  # no worker: never acked
 
     result = await handler.drain(timeout=0.01)
@@ -370,7 +352,7 @@ async def test_drain_returns_timeout_result():
 @pytest.mark.asyncio
 async def test_drain_returns_error_result(monkeypatch):
     """drain() returns an ERROR result carrying the exception on join() failure."""
-    handler = FakeBrokerHandler(queue_name="broker", stdout_enable=False)
+    handler = FakeBrokerHandler(queue_name="broker")
 
     async def failing_join():
         raise RuntimeError("join failed")
@@ -385,11 +367,12 @@ async def test_drain_returns_error_result(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_stdout_disabled_registers_no_status_reporter(capsys):
-    """stdout_enable=False leaves no status reporter, so no shutdown status is printed."""
-    handler = FakeBrokerHandler(queue_name="broker", stdout_enable=False)
+async def test_broker_handler_registers_no_console_status_reporter(capsys):
+    """Broker handlers register no console status reporter, so no shutdown status is printed."""
+    handler = FakeBrokerHandler(queue_name="broker")
 
     assert handler._status_reporters == []
+    assert "_console" not in handler.log_queues
 
     await handler.start_logging()
     handler.emit(_make_record("hello"))

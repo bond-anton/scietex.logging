@@ -9,9 +9,7 @@ import pytest
 from redis.asyncio import Redis
 
 from scietex.logging.config import RedisConfig
-from scietex.logging.redis_handler import (
-    AsyncRedisHandler,
-)  # Replace with actual module path
+from scietex.logging.handler.redis import AsyncRedisHandler
 
 
 def _redis_server_reachable() -> bool:
@@ -42,11 +40,8 @@ async def test_redis_handler_logs_to_stream():
     # Clear the test stream if it exists
     await redis_client.delete(stream_name)
     service_name = "TestLogger"
-    worker_id = 1
     # Create the Redis log handler
     handler = AsyncRedisHandler(
-        service_name=service_name,
-        worker_id=worker_id,
         stream_name=stream_name,
         redis_config=redis_config,
     )
@@ -78,7 +73,7 @@ async def test_redis_handler_logs_to_stream():
     # Check the contents of the log entry
     assert decoded_message_data["message"] == test_message, "Log message content mismatch."
     assert decoded_message_data["level"] == "INF", "Log level mismatch."
-    assert decoded_message_data["name"] == f"{service_name}:{worker_id}", "Logger name mismatch."
+    assert decoded_message_data["name"] == service_name, "Logger name mismatch."
 
     # Clean up
     await handler.stop_logging()
@@ -101,7 +96,7 @@ def test_redis_config_is_typed_and_validated():
 
 def test_redis_unknown_kwarg_raises_type_error():
     with pytest.raises(TypeError):
-        AsyncRedisHandler(stream_name="s", stdout_enabel=True)
+        AsyncRedisHandler(stream_name="s", unknown_kwarg=True)
 
 
 def test_redis_config_accepts_valid_extra_options():

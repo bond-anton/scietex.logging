@@ -9,7 +9,7 @@ from dataclasses import asdict
 import pytest
 
 from scietex.logging.config import MqttConfig
-from scietex.logging.mqtt_handler import AsyncMqttHandler
+from scietex.logging.handler.mqtt import AsyncMqttHandler
 
 
 def _mqtt_server_reachable() -> bool:
@@ -32,7 +32,6 @@ async def test_mqtt_handler_publishes_to_topic():
 
     topic = "test/log/topic"
     service_name = "TestLogger"
-    worker_id = 1
 
     # Subscribe with a separate client to capture the published message.
     received = []
@@ -49,8 +48,6 @@ async def test_mqtt_handler_publishes_to_topic():
 
     handler = AsyncMqttHandler(
         topic=topic,
-        service_name=service_name,
-        worker_id=worker_id,
         mqtt_config={"host": "localhost", "port": 1883},
     )
     await handler.start_logging()
@@ -69,7 +66,7 @@ async def test_mqtt_handler_publishes_to_topic():
     payload = json.loads(received[0])
     assert payload["message"] == test_message, "Log message content mismatch."
     assert payload["level"] == "INF", "Log level mismatch."
-    assert payload["name"] == f"{service_name}:{worker_id}", "Logger name mismatch."
+    assert payload["name"] == service_name, "Logger name mismatch."
 
 
 def test_mqtt_config_is_typed_and_validated():
@@ -95,7 +92,7 @@ def test_mqtt_config_defaults():
 
 def test_mqtt_unknown_kwarg_raises_type_error():
     with pytest.raises(TypeError):
-        AsyncMqttHandler(topic="s", stdout_enabel=True)
+        AsyncMqttHandler(topic="s", unknown_kwarg=True)
 
 
 @pytest.mark.asyncio

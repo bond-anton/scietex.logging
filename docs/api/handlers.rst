@@ -7,16 +7,16 @@ The handler hierarchy
 ``scietex.logging`` builds on the standard-library ``logging.Handler``. The
 public hierarchy is:
 
-``AsyncLoggingHandler`` (pure queue/worker machinery, no sink)
-  -> ``AsyncBaseHandler`` (registers the console backend when
-  ``stdout_enable=True``)
-  -> ``AsyncBrokerHandler`` (abstract broker base)
-  -> ``AsyncRedisHandler`` / ``AsyncValkeyHandler`` / ``AsyncMqttHandler``.
+``AsyncLoggingHandler`` (pure queue/worker machinery, no sink) is the common
+base. ``ConsoleHandler`` (registers the console backend),
+``AsyncFileHandler`` (registers the file backend, plus its rotation variants),
+and ``AsyncBrokerHandler`` (abstract broker base -> ``AsyncRedisHandler`` /
+``AsyncValkeyHandler`` / ``AsyncMqttHandler``) each subclass it directly.
 
 .. autoclass:: scietex.logging.AsyncLoggingHandler
    :no-index:
 
-.. autoclass:: scietex.logging.AsyncBaseHandler
+.. autoclass:: scietex.logging.ConsoleHandler
    :no-index:
 
 .. autoclass:: scietex.logging.AsyncBrokerHandler

@@ -3,7 +3,7 @@ Pure machinery base for asynchronous, non-blocking logging in Python.
 
 Provides `AsyncLoggingHandler`, which owns the queue/worker infrastructure and
 control events shared by every backend. It has no backend of its own; concrete
-handlers (e.g. `AsyncBaseHandler` for console, `AsyncBrokerHandler` for brokers)
+handlers (e.g. `ConsoleHandler` for console, `AsyncBrokerHandler` for brokers)
 register their own queues and workers on top of it.
 """
 
@@ -21,10 +21,8 @@ from .config import (
     RedisConfig,
     ValkeyConfig,
     report_error,
-    resolve_instance_id,
     validate_queue_maxsize,
 )
-from .formatter import ScietexFormatter
 
 
 class DrainStatus(Enum):
@@ -40,7 +38,7 @@ class BackendDrainResult:
     """Outcome of draining one backend queue during shutdown.
 
     Attributes:
-        name (str): The backend's queue name (e.g. "redis", "valkey").
+        name (str): The backend's queue name (e.g. "_redis", "_valkey").
         status (DrainStatus): How the drain concluded.
         error (BaseException | None): The exception, when status is ERROR.
     """
@@ -48,6 +46,18 @@ class BackendDrainResult:
     name: str
     status: DrainStatus
     error: BaseException | None = None
+
+
+# Built-in backend queue names are namespaced with a leading underscore so a
+# user-supplied ``queue_name`` can never collide with a backend the handlers
+# register themselves (ROADMAP open question 6). The underscore is stripped only
+# where the name becomes user-visible shutdown-status text (see the backend
+# ``_status_record`` helpers).
+_QUEUE_CONSOLE = "_console"
+_QUEUE_FILE = "_file"
+_QUEUE_REDIS = "_redis"
+_QUEUE_VALKEY = "_valkey"
+_QUEUE_MQTT = "_mqtt"
 
 
 DrainHook = Callable[[float], Awaitable[BackendDrainResult]]
@@ -94,8 +104,6 @@ class AsyncLoggingHandler(logging.Handler):
         error_handler (callable | None): Read-only alias for `config.error_handler`;
             optional callback invoked with ``(record, exc)`` when a log record cannot
             be delivered.
-        formatter (logging.Formatter): Formatter used to render records; the
-            default ``ScietexFormatter`` unless a custom one was injected.
         _loop (asyncio.AbstractEventLoop | None): Event loop captured at
             `start_logging` and used only by the bridge's ``call_soon_threadsafe``
             wakeup; `emit()` itself is thread-safe and never uses it directly.
@@ -131,32 +139,19 @@ class AsyncLoggingHandler(logging.Handler):
 
     def __init__(
         self,
-        service_name: str | None = None,
-        worker_id: int | None = None,
-        instance_id: str | None = None,
         *,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         queue_maxsize: int = 10000,
-        stdout_enable: bool = True,
         backend_config: RedisConfig | ValkeyConfig | MqttConfig | None = None,
-        formatter: logging.Formatter | None = None,
     ) -> None:
         """
         Initialize the asynchronous logging handler machinery.
 
         Assembles the single ``LoggingConfig`` that governs this handler at work
-        time. ``stdout_enable`` and ``backend_config`` are forwarded by the
-        concrete subclasses (console and broker handlers respectively); the base
-        stores them on ``config`` without acting on them.
+        time. ``backend_config`` is forwarded by the broker subclasses; the base
+        stores it on ``config`` without acting on it.
 
         Args:
-            service_name (str, optional): Name of the service for log identification.
-                Defaults to "Service".
-            worker_id (int, optional): Deprecated identifier for the worker instance.
-                Use ``instance_id`` instead; this parameter is removed in v2.0.
-            instance_id (str, optional): Identifier for the logging instance
-                (a process, container, replica, or deployment unit). Defaults to
-                "1". Mutually exclusive with ``worker_id``.
             error_handler (callable, optional): Callback invoked with
                 ``(record, exc)`` when a log record cannot be delivered. Defaults to
                 None, in which case errors are reported via the ``scietex.logging``
@@ -165,37 +160,17 @@ class AsyncLoggingHandler(logging.Handler):
                 hold. When a queue is full, `emit` drops the record and reports it
                 through the error channel instead of blocking. Defaults to 10000.
                 Must be a positive int; invalid values raise ``ValueError``.
-            stdout_enable (bool): Whether the console backend is registered by
-                `AsyncBaseHandler`. Defaults to True.
             backend_config (RedisConfig | ValkeyConfig | MqttConfig | None): Backend-specific
                 config attached by broker subclasses. Defaults to None.
-            formatter (logging.Formatter | None): Formatter used to render records.
-                Defaults to None, in which case a default ``ScietexFormatter`` is
-                constructed from ``service_name`` and ``instance_id``.
 
         Raises:
             TypeError: If an unknown keyword argument is passed.
-            ValueError: If both ``worker_id`` and ``instance_id`` are provided.
         """
         super().__init__()
-        if service_name is None:
-            service_name = "Service"
-        resolved_instance_id = resolve_instance_id(worker_id, instance_id)
         self.config = LoggingConfig(
-            service_name=service_name,
-            instance_id=resolved_instance_id,
-            worker_id=worker_id if worker_id is not None else 1,
             error_handler=error_handler,
             queue_maxsize=validate_queue_maxsize(queue_maxsize),
-            stdout_enable=stdout_enable,
             backend_config=backend_config,
-        )
-        self.formatter = (
-            formatter
-            if formatter is not None
-            else ScietexFormatter(
-                service_name=self.config.service_name, instance_id=self.config.instance_id
-            )
         )
         self.logging_accept_event = asyncio.Event()  # Indicates if logging accepting events
         self.logging_running_event = asyncio.Event()  # Indicates if logging is running
@@ -223,17 +198,6 @@ class AsyncLoggingHandler(logging.Handler):
     def queue_maxsize(self) -> int:
         """Read-only alias for ``config.queue_maxsize``."""
         return self.config.queue_maxsize
-
-    @property
-    def worker_name(self) -> str:
-        """Read-only handler identity ``service_name:instance_id`` derived from config.
-
-        The single owner of handler identity is ``config``; the default
-        ``ScietexFormatter`` is built from the same fields and the broker worker
-        reads this property, so console and broker output cannot diverge (AR-107).
-        A user-injected formatter keeps its own ``worker_name``.
-        """
-        return f"{self.config.service_name}:{self.config.instance_id}"
 
     def register_backend(
         self,

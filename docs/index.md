@@ -31,18 +31,18 @@ pip install scietex.logging[mqtt]    # For MQTT logging
 
 ## Quick Start
 
-### Console Logging (Default)
+### Console Logging
 
-Console logging is enabled by default and requires no additional dependencies.
+Console logging requires adding a `ConsoleHandler` to the logger.
 
 ```python
 import logging
-from scietex.logging import AsyncBaseHandler
+from scietex.logging import ConsoleHandler
 import asyncio
 
 logger = logging.getLogger("MyAsyncLogger")
 logger.setLevel(logging.DEBUG)
-handler = AsyncBaseHandler()
+handler = ConsoleHandler()
 logger.addHandler(handler)
 
 

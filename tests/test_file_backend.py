@@ -7,7 +7,7 @@ import logging
 import pytest
 
 from scietex.logging.async_logging_handler import BackendDrainResult, DrainStatus
-from scietex.logging.file_backend import FileBackend
+from scietex.logging.backend.file import FileBackend
 
 
 def _make_record(message: str = "test message") -> logging.LogRecord:
@@ -147,8 +147,8 @@ async def test_report_status_queues_synthetic_records():
     worker = asyncio.create_task(backend._worker())
 
     results = [
-        BackendDrainResult(name="file", status=DrainStatus.COMPLETED),
-        BackendDrainResult(name="redis", status=DrainStatus.TIMEOUT),
+        BackendDrainResult(name="_file", status=DrainStatus.COMPLETED),
+        BackendDrainResult(name="_redis", status=DrainStatus.TIMEOUT),
     ]
     await backend.report_status(results)
     # Let the worker flush the status records before reading the stream.
@@ -173,7 +173,7 @@ async def test_drain_returns_file_completed_result():
     await backend.queue.put(_make_record("drain me"))
     result = await backend.drain(timeout=5)
 
-    assert result.name == "file"
+    assert result.name == "_file"
     assert result.status is DrainStatus.COMPLETED
 
     running_event.clear()
@@ -190,7 +190,7 @@ async def test_drain_reports_timeout_when_queue_not_drained():
 
     result = await backend.drain(timeout=0.01)
 
-    assert result.name == "file"
+    assert result.name == "_file"
     assert result.status is DrainStatus.TIMEOUT
 
 

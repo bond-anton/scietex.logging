@@ -18,62 +18,63 @@ sub-packages. Architecturally it decomposes into four cooperating layers:
    Conditionally imports the Redis/Valkey handlers so the base package works
    without optional dependencies.
 
-2. **Formatter layer** — `src/scietex/logging/formatter.py` and
-   `src/scietex/logging/json_formatter.py`
-   `ScietexFormatter` (a `logging.Formatter`). Enriches records with a
-   `worker_name` (`service_name:instance_id`) and 3-letter level abbreviations;
-   emits ISO-8601 UTC timestamps. The `level_abbreviation` helper it uses now
-   lives in `config.py` (the neutral leaf) and is re-exported here for backward
+2. **Formatter layer** — `src/scietex/logging/formatter/scietex.py` and
+   `src/scietex/logging/formatter/json.py`
+   `ScietexFormatter` (a `logging.Formatter`). Abbreviates levels to 3-letter
+   codes and emits ISO-8601 UTC timestamps; identity is the record's
+   standard-library logger name (`record.name`), rendered via the `%(name)s`
+   format token. The `level_abbreviation` helper it uses now lives in
+   `config.py` (the neutral leaf) and is re-exported here for backward
    compatibility (AR-026). `JsonFormatter` (a `logging.Formatter`) renders each
    record as a single-line JSON object (NDJSON). Both are stdlib-only.
 
 3. **Machinery base layer** — `src/scietex/logging/async_logging_handler.py`
    `AsyncLoggingHandler` (a `logging.Handler`). Pure shared machinery with **no
    sink of its own**: per-backend `asyncio.Queue`s, the accept/running
-   `asyncio.Event`s, worker task lifecycle, formatter construction, the error
-   channel, and a generic `register_backend(name, queue, worker, drain)`
-   mechanism. Concrete handlers register their own backends on top of it.
+   `asyncio.Event`s, worker task lifecycle, the error channel, and a generic
+   `register_backend(name, queue, worker, drain)` mechanism. Concrete handlers
+   register their own backends on top of it.
 
-4. **Console backend** — `src/scietex/logging/console_backend.py`
+4. **Console backend** — `src/scietex/logging/backend/console.py`
    `ConsoleBackend`. The console (stdout) sink as a **peer backend**: it owns
    its queue, its worker coroutine, and its shutdown-status reporting (the
    synthetic "… has completed processing its queue." records live in its
    `report_status` method, invoked as a post-drain status reporter).
 
-5. **File backend** — `src/scietex/logging/file_backend.py`
+5. **File backend** — `src/scietex/logging/backend/file.py`
    `FileBackend`. The file sink as a **peer backend**, cloned from
    `ConsoleBackend`: it owns its queue, its worker coroutine, and its
    shutdown-status reporting, writing to whatever `stream_provider()` returns
    instead of `sys.stdout`.
 
-6. **Concrete handler layer** — `src/scietex/logging/basic_handler.py`
-   `AsyncBaseHandler` (extends `AsyncLoggingHandler`). A thin concrete subclass
-   that registers the console backend as a peer when `stdout_enable=True`.
+6. **Concrete handler layer** — `src/scietex/logging/handler/console.py`
+   `ConsoleHandler` (extends `AsyncLoggingHandler`). A thin concrete subclass
+   that registers the console backend as a peer unconditionally.
    Public constructor signatures are unchanged, but `**kwargs` is gone: each
    handler builds a typed `self.config` (`LoggingConfig` etc., from
    `config.py`) from its explicit keyword args, and unknown/typo'd kwargs now
    raise `TypeError` instead of being silently swallowed.
 
-7. **File handler layer** — `src/scietex/logging/file_handler.py`
-   `AsyncFileHandler` (extends `AsyncBaseHandler`). Registers the `"file"`
-   backend as a peer, mirroring how `AsyncBaseHandler` registers the console
+7. **File handler layer** — `src/scietex/logging/handler/file.py`
+   `AsyncFileHandler` (extends `AsyncLoggingHandler`). Registers the `"_file"`
+   backend as a peer, mirroring how `ConsoleHandler` registers the console
    backend. The rotation variants `AsyncRotatingFileHandler`,
    `AsyncTimedRotatingFileHandler`, and `AsyncWatchedFileHandler` subclass it
    and reuse the stdlib rollover logic, driven from the worker (the sole
    writer).
 
-8. **Broker handler layer** — `src/scietex/logging/message_broker_handler.py`
-   `AsyncBrokerHandler` (extends `AsyncBaseHandler`, `abc.ABC`). Registers a
+8. **Broker handler layer** — `src/scietex/logging/handler/broker.py`
+   `AsyncBrokerHandler` (extends `AsyncLoggingHandler`, `abc.ABC`). Registers a
    generic "message broker" backend via `register_backend`: a named queue, a
    client connection slot, and an abstract `connect` / `disconnect` /
    `send_message` contract that concrete backends implement.
 
 9. **Concrete broker backends**
-   - `src/scietex/logging/redis_handler.py` — `AsyncRedisHandler` writes to a
+   - `src/scietex/logging/handler/redis.py` — `AsyncRedisHandler` writes to a
      Redis stream via `redis.asyncio`.
-   - `src/scietex/logging/valkey_handler.py` — `AsyncValkeyHandler` writes to
+   - `src/scietex/logging/handler/valkey.py` — `AsyncValkeyHandler` writes to
      a Valkey stream via `valkey-glide` (`GlideClient`).
-   - `src/scietex/logging/mqtt_handler.py` — `AsyncMqttHandler` publishes log
+   - `src/scietex/logging/handler/mqtt.py` — `AsyncMqttHandler` publishes log
      records as JSON payloads to an MQTT topic via `aiomqtt`.
 
 ## How the components interact
@@ -108,11 +109,11 @@ same executor and call `shutdown(wait=True)` (no write-after-close).
 
 Key relationships:
 
-- `AsyncLoggingHandler` **depends on** `ScietexFormatter` (constructs one in
-  `__init__`).
-- `AsyncBaseHandler` **extends** `AsyncLoggingHandler` and registers a
-  `ConsoleBackend` as a peer when `stdout_enable=True`.
-- `AsyncBrokerHandler` **extends** `AsyncBaseHandler` and registers its own
+- `ConsoleHandler` and `AsyncFileHandler` **depend on** `ScietexFormatter`
+  (each constructs one in `__init__`).
+- `ConsoleHandler` **extends** `AsyncLoggingHandler` and registers a
+  `ConsoleBackend` as a peer unconditionally.
+- `AsyncBrokerHandler` **extends** `AsyncLoggingHandler` and registers its own
   broker queue + worker via `register_backend`.
 - `AsyncRedisHandler`, `AsyncValkeyHandler`, and `AsyncMqttHandler` **extend**
   `AsyncBrokerHandler` and implement the three abstract methods.
@@ -127,8 +128,8 @@ The canonical usage pattern (from `docs/index.md`, `examples/*.py`, and the
 module docstring in `__init__.py`) is:
 
 1. `logger = logging.getLogger(...)`; `logger.setLevel(...)`.
-2. Construct a handler, e.g. `AsyncBaseHandler(service_name=..., instance_id=...)`
-   or `AsyncRedisHandler(stream_name=...)`.
+2. Construct a handler, e.g. `ConsoleHandler()` or
+   `AsyncRedisHandler(stream_name=...)`.
 3. `logger.addHandler(handler)`.
 4. Inside an async context: `await handler.start_logging()`.
 5. Log normally (`logger.info(...)`, etc.).
@@ -142,8 +143,8 @@ The `examples/` directory contains runnable scripts demonstrating this
 
 - **Per-handler worker coroutines.** Each handler owns one or more worker
   coroutines, each draining one `asyncio.Queue`:
-  - `ConsoleBackend._worker` (console queue) — `console_backend.py:113`.
-  - `AsyncBrokerHandler._worker` (broker queue) — `message_broker_handler.py:139`.
+  - `ConsoleBackend._worker` (console queue) — `backend/console.py:114`.
+  - `AsyncBrokerHandler._worker` (broker queue) — `handler/broker.py:187`.
   Workers loop while `logging_running_event` is set **or** their queue is
   non-empty, using a 1-second `asyncio.wait_for` timeout on `queue.get()`.
 - **Blocking-write offload.** The Console and File workers format on the loop
@@ -175,8 +176,9 @@ The `examples/` directory contains runnable scripts demonstrating this
   are instance attributes. Multiple handlers (even on the same logger) are
   fully independent. See `examples/console_and_redis_logging.py`.
 - **Console is a peer backend, not a privileged sink in the base.** The console
-  sink lives in `ConsoleBackend`, which `AsyncBaseHandler` registers the same
-  way `AsyncBrokerHandler` registers its broker backend. A broker handler with
-  `stdout_enable=True` runs *both* a console worker and a broker worker.
+  sink lives in `ConsoleBackend`, which `ConsoleHandler` registers the same
+  way `AsyncBrokerHandler` registers its broker backend. A logger that needs
+  both console and broker output attaches a `ConsoleHandler` and a broker
+  handler separately.
 - **Connection lifecycle is per-worker.** The broker worker calls
-  `connect()` on start and `disconnect()` on exit (`message_broker_handler.py:92,105`).
+  `_connect()` on start and `_disconnect()` on exit (`handler/broker.py:163,176`).

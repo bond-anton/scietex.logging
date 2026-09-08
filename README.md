@@ -50,13 +50,13 @@ The following example shows how to set up asynchronous console logging.
 
 ```python
 import logging
-from scietex.logging import AsyncBaseHandler
+from scietex.logging import ConsoleHandler
 import asyncio
 
 # Set up logger and handler
 logger = logging.getLogger("MyAsyncLogger")
 logger.setLevel(logging.DEBUG)
-handler = AsyncBaseHandler()
+handler = ConsoleHandler()
 logger.addHandler(handler)
 
 
@@ -185,14 +185,15 @@ formatter = logging.Formatter(
 handler.setFormatter(formatter)
 ```
 
-A formatter affects the **console (stdout) output only**; broker backends build
-their payloads from the handler's `service_name`/`instance_id` config and the
-record directly, so they are invariant under `setFormatter`. See
-[docs/configuration.md](docs/configuration.md#formatter-scope-console-output-only).
+A formatter affects the **console (stdout) and file output only**; broker
+handlers no longer accept a `formatter=` keyword and build their payloads from
+the log record directly — its `name` field is the record's logger name
+(`record.name`) — so they are invariant under `setFormatter`. See
+[docs/configuration.md](docs/configuration.md#formatter-scope-console-and-file-output-only).
 
 ## Extending scietex.logging
 
-To add support for additional logging backends, subclass `AsyncBrokerHandler` and implement `connect()`, `disconnect()`, and `send_message()` methods. `AsyncLoggingHandler` is the pure-machinery base that owns the queue/worker infrastructure but no sink of its own; `AsyncBaseHandler` builds on it and registers the console as a peer backend (enabled by default via `stdout_enable`), while `AsyncBrokerHandler` is designed for message broker backends like Redis or Valkey. `AsyncFileHandler` (and its rotation variants) build on `AsyncBaseHandler` to register a file sink.
+To add support for additional logging backends, subclass `AsyncBrokerHandler` and implement `connect()`, `disconnect()`, and `send_message()` methods. `AsyncLoggingHandler` is the pure-machinery base that owns the queue/worker infrastructure but no sink of its own. `ConsoleHandler`, `AsyncFileHandler` (and its rotation variants), and `AsyncBrokerHandler` are sibling concrete handlers that each subclass `AsyncLoggingHandler` directly and register their own backend — the console, file, and message-broker sinks respectively. A handler emits only to the backend it registers, so console output requires adding a `ConsoleHandler` to the logger explicitly.
 
 ### Example: Custom Database Handler
 

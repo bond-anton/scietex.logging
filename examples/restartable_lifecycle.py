@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from scietex.logging import AsyncBaseHandler
+from scietex.logging import ConsoleHandler
 
 
 async def main():
@@ -11,7 +11,7 @@ async def main():
     logger = logging.getLogger("LifecycleLogger")
     logger.setLevel(logging.DEBUG)
 
-    handler = AsyncBaseHandler(service_name="LifecycleService", instance_id="1")
+    handler = ConsoleHandler()
     logger.addHandler(handler)
 
     # Cycle 1: start, log, stop with a custom drain timeout.

@@ -3,7 +3,7 @@
 import logging
 from datetime import datetime, timezone
 
-from scietex.logging.formatter import ScietexFormatter, level_abbreviation
+from scietex.logging.formatter.scietex import ScietexFormatter, level_abbreviation
 
 
 def test_level_abbreviation():
@@ -18,7 +18,7 @@ def test_level_abbreviation():
 
 def test_scietex_formatter_format_time():
     """Test the formatTime method to ensure it returns ISO format."""
-    formatter = ScietexFormatter(service_name="TestService", worker_id=42)
+    formatter = ScietexFormatter()
     record = logging.LogRecord("test", logging.INFO, "", 0, "Test message", None, None)
     record.created = datetime(2024, 11, 4, 12, 0, 0, tzinfo=timezone.utc).timestamp()
     formatted_time = formatter.formatTime(record)
@@ -26,18 +26,18 @@ def test_scietex_formatter_format_time():
     assert formatted_time == expected_time
 
 
-def test_scietex_formatter_format_with_worker_name():
-    """Test the format method to include worker name and level abbreviation."""
-    formatter = ScietexFormatter(service_name="TestService", worker_id=42)
+def test_scietex_formatter_format_with_logger_name():
+    """Test the format method to include the logger name and level abbreviation."""
+    formatter = ScietexFormatter()
     record = logging.LogRecord("test", logging.INFO, "", 0, "Test message", None, None)
     formatted_message = formatter.format(record)
-    expected_message_part = " - INF - [TestService:42] - Test message"
+    expected_message_part = " - INF - [test] - Test message"
     assert expected_message_part in formatted_message
 
 
 def test_scietex_formatter_format_with_debug_level():
     """Test the formatter with DEBUG level."""
-    formatter = ScietexFormatter(service_name="TestService", worker_id=42)
+    formatter = ScietexFormatter()
     record = logging.LogRecord("test", logging.DEBUG, "", 0, "Debug message", None, None)
     formatted_message = formatter.format(record)
     assert " - DBG -" in formatted_message
@@ -45,7 +45,7 @@ def test_scietex_formatter_format_with_debug_level():
 
 def test_format_does_not_mutate_record():
     """Test that format() does not mutate the caller's LogRecord."""
-    formatter = ScietexFormatter(service_name="TestService", worker_id=42)
+    formatter = ScietexFormatter()
     record = logging.LogRecord("test", logging.INFO, "", 0, "Test message", None, None)
     formatter.format(record)
     assert record.levelname == "INFO"  # Full level name is preserved

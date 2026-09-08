@@ -2,7 +2,7 @@
 Console backend for the asynchronous logging framework.
 
 Encapsulates the console sink as a peer backend: it owns its queue, its worker
-coroutine, and a provider for the handler's formatter. `AsyncBaseHandler`
+coroutine, and a provider for the handler's formatter. `ConsoleHandler`
 registers this backend's queue and worker into the shared machinery the same
 way `AsyncBrokerHandler` registers its broker queue and worker.
 """
@@ -13,9 +13,9 @@ import sys
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from ._executor import _WriteExecutor
-from .async_logging_handler import BackendDrainResult, DrainStatus
-from .config import report_error
+from .._executor import _WriteExecutor
+from ..async_logging_handler import _QUEUE_CONSOLE, BackendDrainResult, DrainStatus
+from ..config import report_error
 
 
 def _status_record(result: BackendDrainResult) -> logging.LogRecord:
@@ -28,17 +28,18 @@ def _status_record(result: BackendDrainResult) -> logging.LogRecord:
     Returns:
         logging.LogRecord: A record describing how the backend's queue drained.
     """
+    display = result.name.lstrip("_")
     if result.status is DrainStatus.COMPLETED:
         level = logging.INFO
-        message = f"{result.name.capitalize()} Logger has completed processing its queue."
+        message = f"{display.capitalize()} Logger has completed processing its queue."
     elif result.status is DrainStatus.TIMEOUT:
         level = logging.ERROR
-        message = f"Timeout while waiting for {result.name} logger to complete its queue."
+        message = f"Timeout while waiting for {display} logger to complete its queue."
     else:
         level = logging.ERROR
-        message = f"Error while waiting for {result.name} Logger: {result.error}"
+        message = f"Error while waiting for {display} Logger: {result.error}"
     return logging.LogRecord(
-        name=f"{result.name.capitalize()}Logger",
+        name=f"{display.capitalize()}Logger",
         level=level,
         pathname=__file__,
         lineno=0,
@@ -104,7 +105,7 @@ class ConsoleBackend:
     def worker(self) -> Callable[[], Coroutine[Any, Any, None]]:
         """Public worker-factory accessor for registration (AR-115).
 
-        Returns the bound ``_worker`` coroutine method so ``AsyncBaseHandler``
+        Returns the bound ``_worker`` coroutine method so ``ConsoleHandler``
         and custom integrators can register this backend's worker without
         reaching into a private attribute.
         """
@@ -181,11 +182,11 @@ class ConsoleBackend:
         try:
             await asyncio.wait_for(self.queue.join(), timeout=timeout)
         except asyncio.TimeoutError:
-            return BackendDrainResult("console", DrainStatus.TIMEOUT)
+            return BackendDrainResult(_QUEUE_CONSOLE, DrainStatus.TIMEOUT)
         except Exception as exc:
-            return BackendDrainResult("console", DrainStatus.ERROR, exc)
+            return BackendDrainResult(_QUEUE_CONSOLE, DrainStatus.ERROR, exc)
         else:
-            return BackendDrainResult("console", DrainStatus.COMPLETED)
+            return BackendDrainResult(_QUEUE_CONSOLE, DrainStatus.COMPLETED)
 
     async def report_status(self, results: list[BackendDrainResult]) -> None:
         """

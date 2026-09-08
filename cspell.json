@@ -8,6 +8,8 @@
     "scietex",
     "redis",
     "valkey",
+    "mqtt",
+    "aiomqtt",
     "htmlcov",
     "pycache",
     "mypy",
@@ -19,7 +21,12 @@
     "xadd",
     "xrange",
     "pythonpath",
-    "addopts"
+    "addopts",
+    "pyproject",
+    "datefmt",
+    "asctime",
+    "levelname",
+    "acking"
   ],
   "ignoreWords": [],
   "import": []

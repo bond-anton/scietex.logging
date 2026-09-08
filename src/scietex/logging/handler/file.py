@@ -2,7 +2,7 @@
 Asynchronous file logging handlers.
 
 Provides AsyncFileHandler, a concrete handler that registers a file backend on
-top of the queue/worker machinery in AsyncBaseHandler, plus the rotation
+top of the queue/worker machinery in AsyncLoggingHandler, plus the rotation
 variants AsyncRotatingFileHandler, AsyncTimedRotatingFileHandler, and
 AsyncWatchedFileHandler that mirror the standard-library handler names.
 """
@@ -18,21 +18,25 @@ from logging.handlers import (
 )
 from typing import Any
 
-from ._executor import _WriteExecutor
-from .async_logging_handler import BackendDrainResult, DrainStatus
-from .basic_handler import AsyncBaseHandler
-from .file_backend import FileBackend
+from .._executor import _WriteExecutor
+from ..async_logging_handler import (
+    _QUEUE_FILE,
+    AsyncLoggingHandler,
+    BackendDrainResult,
+    DrainStatus,
+)
+from ..backend.file import FileBackend
+from ..formatter.scietex import ScietexFormatter
 
 
-class AsyncFileHandler(AsyncBaseHandler):
+class AsyncFileHandler(AsyncLoggingHandler):
     """
     Asynchronous file logging handler.
 
-    Registers a ``"file"`` backend that formats queued records and writes them
+    Registers a ``"_file"`` backend that formats queued records and writes them
     to a file. The constructor mirrors the standard-library ``logging.FileHandler``
     signature (``filename``, ``mode``, ``encoding``, ``delay``, ``errors``) plus
-    the scietex options (``service_name``, ``instance_id``, ``error_handler``,
-    ``stdout_enable``, ``queue_maxsize``, ``formatter``).
+    the scietex options (``error_handler``, ``queue_maxsize``, ``formatter``).
 
     The file handle is opened lazily by the worker (respecting ``delay``) and
     closed when the worker exits, so the file is only open while logging runs.
@@ -49,17 +53,13 @@ class AsyncFileHandler(AsyncBaseHandler):
             was injected; otherwise None.
     """
 
-    # Always non-None: AsyncLoggingHandler.__init__ installs a default
-    # ScietexFormatter when no formatter is passed, so the worker can format
-    # records without a None guard.
+    # Always non-None: __init__ installs a default ScietexFormatter when no
+    # formatter is passed, so the worker can format records without a None guard.
     formatter: logging.Formatter
 
     def __init__(
         self,
         filename: str | None = None,
-        service_name: str | None = None,
-        worker_id: int | None = None,
-        instance_id: str | None = None,
         *,
         mode: str = "a",
         encoding: str | None = None,
@@ -67,7 +67,6 @@ class AsyncFileHandler(AsyncBaseHandler):
         errors: str | None = None,
         file: Any | None = None,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
-        stdout_enable: bool = True,
         queue_maxsize: int = 10000,
         formatter: logging.Formatter | None = None,
     ) -> None:
@@ -77,11 +76,6 @@ class AsyncFileHandler(AsyncBaseHandler):
         Args:
             filename (str, optional): Path to the log file. Mutually exclusive
                 with ``file``; omit it when injecting ``file=``.
-            service_name (str, optional): Name of the service for log identification.
-            worker_id (int, optional): Deprecated identifier for the worker instance.
-                Use ``instance_id`` instead; this parameter is removed in v2.0.
-            instance_id (str, optional): Identifier for the logging instance.
-                Defaults to "1". Mutually exclusive with ``worker_id``.
             mode (str): File open mode (default "a").
             encoding (str, optional): File encoding (default None -> locale default).
             delay (bool): If True, defer opening the file until the first write
@@ -92,26 +86,21 @@ class AsyncFileHandler(AsyncBaseHandler):
                 the caller owns its lifetime. Mutually exclusive with ``filename``.
             error_handler (callable, optional): Callback invoked with
                 ``(record, exc)`` when a log record cannot be delivered.
-            stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can
                 hold. Defaults to 10000.
             formatter (logging.Formatter | None): Formatter used to render records.
                 Defaults to None, in which case a default ``ScietexFormatter`` is
-                constructed from ``service_name`` and ``instance_id``.
+                constructed.
 
         Raises:
             TypeError: If an unknown keyword argument is passed.
             ValueError: If both ``file`` and ``filename`` are provided.
         """
         super().__init__(
-            service_name=service_name,
-            worker_id=worker_id,
-            instance_id=instance_id,
             error_handler=error_handler,
-            stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
-            formatter=formatter,
         )
+        self.formatter = formatter if formatter is not None else ScietexFormatter()
         if file is not None and filename is not None:
             raise ValueError(
                 "file and filename are mutually exclusive: pass an injected "
@@ -137,7 +126,7 @@ class AsyncFileHandler(AsyncBaseHandler):
         # and closes it in its finally. The FileBackend supplies the queue and the
         # shutdown status reporter.
         self.register_backend(
-            "file",
+            _QUEUE_FILE,
             self._file_backend.queue,
             self._worker,
             self.drain,
@@ -213,9 +202,9 @@ class AsyncFileHandler(AsyncBaseHandler):
         """
         executor = _WriteExecutor()
         try:
-            while self.logging_running_event.is_set() or not self.log_queues["file"].empty():
+            while self.logging_running_event.is_set() or not self.log_queues[_QUEUE_FILE].empty():
                 try:
-                    record = await asyncio.wait_for(self.log_queues["file"].get(), 1)
+                    record = await asyncio.wait_for(self.log_queues[_QUEUE_FILE].get(), 1)
                 except asyncio.TimeoutError:
                     continue
                 try:
@@ -227,7 +216,7 @@ class AsyncFileHandler(AsyncBaseHandler):
                     # the queue is still acknowledged and shutdown completes.
                     self._report_error(record, exc)
                 finally:
-                    self.log_queues["file"].task_done()
+                    self.log_queues[_QUEUE_FILE].task_done()
         finally:
             # Release the file whether the worker exits normally or is cancelled.
             # Submit _close_stream to the SAME single-thread executor so it is
@@ -247,13 +236,13 @@ class AsyncFileHandler(AsyncBaseHandler):
             BackendDrainResult: How the drain concluded.
         """
         try:
-            await asyncio.wait_for(self.log_queues["file"].join(), timeout=timeout)
+            await asyncio.wait_for(self.log_queues[_QUEUE_FILE].join(), timeout=timeout)
         except asyncio.TimeoutError:
-            return BackendDrainResult("file", DrainStatus.TIMEOUT)
+            return BackendDrainResult(_QUEUE_FILE, DrainStatus.TIMEOUT)
         except Exception as exc:
-            return BackendDrainResult("file", DrainStatus.ERROR, exc)
+            return BackendDrainResult(_QUEUE_FILE, DrainStatus.ERROR, exc)
         else:
-            return BackendDrainResult("file", DrainStatus.COMPLETED)
+            return BackendDrainResult(_QUEUE_FILE, DrainStatus.COMPLETED)
 
 
 class AsyncRotatingFileHandler(AsyncFileHandler):
@@ -268,9 +257,6 @@ class AsyncRotatingFileHandler(AsyncFileHandler):
     def __init__(
         self,
         filename: str,
-        service_name: str | None = None,
-        worker_id: int | None = None,
-        instance_id: str | None = None,
         *,
         mode: str = "a",
         maxBytes: int = 0,
@@ -280,7 +266,6 @@ class AsyncRotatingFileHandler(AsyncFileHandler):
         errors: str | None = None,
         file: Any | None = None,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
-        stdout_enable: bool = True,
         queue_maxsize: int = 10000,
         formatter: logging.Formatter | None = None,
     ) -> None:
@@ -289,11 +274,6 @@ class AsyncRotatingFileHandler(AsyncFileHandler):
 
         Args:
             filename (str): Path to the log file.
-            service_name (str, optional): Name of the service for log identification.
-            worker_id (int, optional): Deprecated identifier for the worker instance.
-                Use ``instance_id`` instead; this parameter is removed in v2.0.
-            instance_id (str, optional): Identifier for the logging instance.
-                Defaults to "1". Mutually exclusive with ``worker_id``.
             mode (str): File open mode (default "a").
             maxBytes (int): Roll over when the file exceeds this many bytes.
                 0 disables size-based rotation (default).
@@ -303,24 +283,18 @@ class AsyncRotatingFileHandler(AsyncFileHandler):
             errors (str, optional): Encoding error handling scheme.
             file (Any | None): An externally-managed, already-open file-like.
             error_handler (callable, optional): Delivery-error callback.
-            stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can hold.
             formatter (logging.Formatter | None): Formatter used to render records.
         """
         super().__init__(
             filename,
-            service_name=service_name,
-            worker_id=worker_id,
-            instance_id=instance_id,
             mode=mode,
             encoding=encoding,
             delay=delay,
             errors=errors,
             file=file,
             error_handler=error_handler,
-            stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
-            formatter=formatter,
         )
         self.maxBytes: int = maxBytes
         self.backupCount: int = backupCount
@@ -381,9 +355,9 @@ class AsyncRotatingFileHandler(AsyncFileHandler):
         """
         executor = _WriteExecutor()
         try:
-            while self.logging_running_event.is_set() or not self.log_queues["file"].empty():
+            while self.logging_running_event.is_set() or not self.log_queues[_QUEUE_FILE].empty():
                 try:
-                    record = await asyncio.wait_for(self.log_queues["file"].get(), 1)
+                    record = await asyncio.wait_for(self.log_queues[_QUEUE_FILE].get(), 1)
                 except asyncio.TimeoutError:
                     continue
                 try:
@@ -396,7 +370,7 @@ class AsyncRotatingFileHandler(AsyncFileHandler):
                 except Exception as exc:
                     self._report_error(record, exc)
                 finally:
-                    self.log_queues["file"].task_done()
+                    self.log_queues[_QUEUE_FILE].task_done()
         finally:
             # Close on the SAME single-thread executor (serialized strictly after
             # any in-flight write), then wait for the executor to finish.
@@ -416,9 +390,6 @@ class AsyncTimedRotatingFileHandler(AsyncFileHandler):
     def __init__(
         self,
         filename: str,
-        service_name: str | None = None,
-        worker_id: int | None = None,
-        instance_id: str | None = None,
         *,
         when: str = "h",
         interval: int = 1,
@@ -430,7 +401,6 @@ class AsyncTimedRotatingFileHandler(AsyncFileHandler):
         errors: str | None = None,
         file: Any | None = None,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
-        stdout_enable: bool = True,
         queue_maxsize: int = 10000,
         formatter: logging.Formatter | None = None,
     ) -> None:
@@ -439,11 +409,6 @@ class AsyncTimedRotatingFileHandler(AsyncFileHandler):
 
         Args:
             filename (str): Path to the log file.
-            service_name (str, optional): Name of the service for log identification.
-            worker_id (int, optional): Deprecated identifier for the worker instance.
-                Use ``instance_id`` instead; this parameter is removed in v2.0.
-            instance_id (str, optional): Identifier for the logging instance.
-                Defaults to "1". Mutually exclusive with ``worker_id``.
             when (str): Rollover interval type: 'S', 'M', 'H', 'D', 'W0'-'W6',
                 or 'midnight' (default 'h').
             interval (int): Number of ``when`` units between rollovers (default 1).
@@ -455,24 +420,18 @@ class AsyncTimedRotatingFileHandler(AsyncFileHandler):
             errors (str, optional): Encoding error handling scheme.
             file (Any | None): An externally-managed, already-open file-like.
             error_handler (callable, optional): Delivery-error callback.
-            stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can hold.
             formatter (logging.Formatter | None): Formatter used to render records.
         """
         super().__init__(
             filename,
-            service_name=service_name,
-            worker_id=worker_id,
-            instance_id=instance_id,
             mode="a",
             encoding=encoding,
             delay=delay,
             errors=errors,
             file=file,
             error_handler=error_handler,
-            stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
-            formatter=formatter,
         )
         self.when: str = when
         self.interval: int = interval
@@ -535,9 +494,9 @@ class AsyncTimedRotatingFileHandler(AsyncFileHandler):
         """
         executor = _WriteExecutor()
         try:
-            while self.logging_running_event.is_set() or not self.log_queues["file"].empty():
+            while self.logging_running_event.is_set() or not self.log_queues[_QUEUE_FILE].empty():
                 try:
-                    record = await asyncio.wait_for(self.log_queues["file"].get(), 1)
+                    record = await asyncio.wait_for(self.log_queues[_QUEUE_FILE].get(), 1)
                 except asyncio.TimeoutError:
                     continue
                 try:
@@ -550,7 +509,7 @@ class AsyncTimedRotatingFileHandler(AsyncFileHandler):
                 except Exception as exc:
                     self._report_error(record, exc)
                 finally:
-                    self.log_queues["file"].task_done()
+                    self.log_queues[_QUEUE_FILE].task_done()
         finally:
             # Close on the SAME single-thread executor (serialized strictly after
             # any in-flight write), then wait for the executor to finish.
@@ -570,9 +529,6 @@ class AsyncWatchedFileHandler(AsyncFileHandler):
     def __init__(
         self,
         filename: str,
-        service_name: str | None = None,
-        worker_id: int | None = None,
-        instance_id: str | None = None,
         *,
         mode: str = "a",
         encoding: str | None = None,
@@ -580,7 +536,6 @@ class AsyncWatchedFileHandler(AsyncFileHandler):
         errors: str | None = None,
         file: Any | None = None,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
-        stdout_enable: bool = True,
         queue_maxsize: int = 10000,
         formatter: logging.Formatter | None = None,
     ) -> None:
@@ -589,35 +544,24 @@ class AsyncWatchedFileHandler(AsyncFileHandler):
 
         Args:
             filename (str): Path to the log file.
-            service_name (str, optional): Name of the service for log identification.
-            worker_id (int, optional): Deprecated identifier for the worker instance.
-                Use ``instance_id`` instead; this parameter is removed in v2.0.
-            instance_id (str, optional): Identifier for the logging instance.
-                Defaults to "1". Mutually exclusive with ``worker_id``.
             mode (str): File open mode (default "a").
             encoding (str, optional): File encoding.
             delay (bool): If True, defer opening the file until the first write.
             errors (str, optional): Encoding error handling scheme.
             file (Any | None): An externally-managed, already-open file-like.
             error_handler (callable, optional): Delivery-error callback.
-            stdout_enable (bool): Flag to enable console logging (defaults to True).
             queue_maxsize (int): Maximum number of records each backend queue can hold.
             formatter (logging.Formatter | None): Formatter used to render records.
         """
         super().__init__(
             filename,
-            service_name=service_name,
-            worker_id=worker_id,
-            instance_id=instance_id,
             mode=mode,
             encoding=encoding,
             delay=delay,
             errors=errors,
             file=file,
             error_handler=error_handler,
-            stdout_enable=stdout_enable,
             queue_maxsize=queue_maxsize,
-            formatter=formatter,
         )
         self._watcher = WatchedFileHandler(
             filename,
@@ -662,9 +606,9 @@ class AsyncWatchedFileHandler(AsyncFileHandler):
         """
         executor = _WriteExecutor()
         try:
-            while self.logging_running_event.is_set() or not self.log_queues["file"].empty():
+            while self.logging_running_event.is_set() or not self.log_queues[_QUEUE_FILE].empty():
                 try:
-                    record = await asyncio.wait_for(self.log_queues["file"].get(), 1)
+                    record = await asyncio.wait_for(self.log_queues[_QUEUE_FILE].get(), 1)
                 except asyncio.TimeoutError:
                     continue
                 try:
@@ -673,7 +617,7 @@ class AsyncWatchedFileHandler(AsyncFileHandler):
                 except Exception as exc:
                     self._report_error(record, exc)
                 finally:
-                    self.log_queues["file"].task_done()
+                    self.log_queues[_QUEUE_FILE].task_done()
         finally:
             await executor.run(self._close_stream)
             await executor.shutdown()

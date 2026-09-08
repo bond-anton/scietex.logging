@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from scietex.logging.message_broker_handler import AsyncBrokerHandler
+from scietex.logging.handler.broker import AsyncBrokerHandler
 
 
 def _make_record(message: str = "test message") -> logging.LogRecord:
@@ -87,7 +87,6 @@ def test_injected_client_wiring_immediate():
     client = RecordingClient()
     handler = InjectedFakeBrokerHandler(
         queue_name="broker",
-        stdout_enable=False,
         client=client,
     )
 
@@ -102,9 +101,6 @@ async def test_injected_client_never_closed_on_stop():
     client = RecordingClient()
     handler = InjectedFakeBrokerHandler(
         queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
         client=client,
     )
 
@@ -126,9 +122,6 @@ async def test_injected_client_reused_across_restart():
     client = RecordingClient()
     handler = InjectedFakeBrokerHandler(
         queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
         client=client,
     )
 
@@ -155,9 +148,6 @@ async def test_injected_client_send_failure_does_not_close_or_reconnect():
     errors = []
     handler = FlakyInjectedBrokerHandler(
         queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
         client=client,
         error_handler=lambda record, exc: errors.append(exc),
     )
@@ -182,9 +172,6 @@ async def test_default_no_client_manages_own_connection():
     """Without injection the handler owns its client: connects on start, clears on stop."""
     handler = InjectedFakeBrokerHandler(
         queue_name="broker",
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
     )
 
     assert handler._owns_client is True
@@ -209,7 +196,6 @@ def test_base_client_and_backend_config_raise():
     with pytest.raises(ValueError):
         InjectedFakeBrokerHandler(
             queue_name="broker",
-            stdout_enable=False,
             client=client,
             backend_config=object(),
         )
@@ -220,7 +206,6 @@ def test_base_client_only_no_error():
     client = RecordingClient()
     handler = InjectedFakeBrokerHandler(
         queue_name="broker",
-        stdout_enable=False,
         client=client,
     )
     assert handler._owns_client is False
@@ -229,12 +214,11 @@ def test_base_client_only_no_error():
 
 def test_valkey_client_and_config_raise():
     """AsyncValkeyHandler rejects both client and valkey_config."""
-    valkey = pytest.importorskip("scietex.logging.valkey_handler")
+    valkey = pytest.importorskip("scietex.logging.handler.valkey")
     client = object()
     with pytest.raises(ValueError):
         valkey.AsyncValkeyHandler(
             stream_name="s",
-            stdout_enable=False,
             client=client,
             valkey_config={"addresses": [("localhost", 6379)]},
         )
@@ -242,11 +226,10 @@ def test_valkey_client_and_config_raise():
 
 def test_valkey_client_only_no_error():
     """AsyncValkeyHandler accepts client alone (config unused, no spurious raise)."""
-    valkey = pytest.importorskip("scietex.logging.valkey_handler")
+    valkey = pytest.importorskip("scietex.logging.handler.valkey")
     client = object()
     handler = valkey.AsyncValkeyHandler(
         stream_name="s",
-        stdout_enable=False,
         client=client,
     )
     assert handler._owns_client is False
@@ -256,12 +239,11 @@ def test_valkey_client_only_no_error():
 
 def test_redis_client_and_config_raise():
     """AsyncRedisHandler rejects both client and redis_config."""
-    redis_mod = pytest.importorskip("scietex.logging.redis_handler")
+    redis_mod = pytest.importorskip("scietex.logging.handler.redis")
     client = object()
     with pytest.raises(ValueError):
         redis_mod.AsyncRedisHandler(
             stream_name="s",
-            stdout_enable=False,
             client=client,
             redis_config={"host": "localhost"},
         )
@@ -269,11 +251,10 @@ def test_redis_client_and_config_raise():
 
 def test_redis_client_only_no_error():
     """AsyncRedisHandler accepts client alone (config unused, no spurious raise)."""
-    redis_mod = pytest.importorskip("scietex.logging.redis_handler")
+    redis_mod = pytest.importorskip("scietex.logging.handler.redis")
     client = object()
     handler = redis_mod.AsyncRedisHandler(
         stream_name="s",
-        stdout_enable=False,
         client=client,
     )
     assert handler._owns_client is False
@@ -283,12 +264,11 @@ def test_redis_client_only_no_error():
 
 def test_mqtt_client_and_config_raise():
     """AsyncMqttHandler rejects both client and mqtt_config."""
-    mqtt_mod = pytest.importorskip("scietex.logging.mqtt_handler")
+    mqtt_mod = pytest.importorskip("scietex.logging.handler.mqtt")
     client = object()
     with pytest.raises(ValueError):
         mqtt_mod.AsyncMqttHandler(
             topic="s",
-            stdout_enable=False,
             client=client,
             mqtt_config={"host": "localhost"},
         )
@@ -296,11 +276,10 @@ def test_mqtt_client_and_config_raise():
 
 def test_mqtt_client_only_no_error():
     """AsyncMqttHandler accepts client alone (config unused, no spurious raise)."""
-    mqtt_mod = pytest.importorskip("scietex.logging.mqtt_handler")
+    mqtt_mod = pytest.importorskip("scietex.logging.handler.mqtt")
     client = object()
     handler = mqtt_mod.AsyncMqttHandler(
         topic="s",
-        stdout_enable=False,
         client=client,
     )
     assert handler._owns_client is False

@@ -1,12 +1,13 @@
-"""Tests for AsyncBaseHandler class."""
+"""Tests for ConsoleHandler class."""
 
 import asyncio
 import logging
 
 import pytest
 
-from scietex.logging import AsyncBaseHandler, ScietexFormatter
-from scietex.logging.message_broker_handler import AsyncBrokerHandler
+from scietex.logging import ConsoleHandler, ScietexFormatter
+from scietex.logging.handler.broker import AsyncBrokerHandler
+from scietex.logging.handler.file import AsyncFileHandler
 
 
 def _make_record(message: str = "test message") -> logging.LogRecord:
@@ -51,19 +52,18 @@ class _ExplodingFormatter(logging.Formatter):
 
 
 @pytest.mark.asyncio
-async def test_basic_handler_initialization():
-    """Test the initialization of AsyncBaseHandler with default values."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+async def test_console_handler_initialization():
+    """Test the initialization of ConsoleHandler with default values."""
+    handler = ConsoleHandler()
     await handler.start_logging()
-    assert handler.stdout_enable is True
-    assert "console" in handler.log_queues  # Console queue should be initialized by default
+    assert "_console" in handler.log_queues  # Console queue should be initialized by default
     await handler.stop_logging()
 
 
 @pytest.mark.asyncio
 async def test_start_and_stop_logging():
     """Test starting and stopping the logging process."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    handler = ConsoleHandler()
     await handler.start_logging()
 
     # Ensure logging events are set
@@ -80,7 +80,7 @@ async def test_start_and_stop_logging():
 @pytest.mark.asyncio
 async def test_emit_logs_to_queue():
     """Test that log records are added to the appropriate queues."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    handler = ConsoleHandler()
     await handler.start_logging()
 
     # Create a test log record
@@ -92,7 +92,7 @@ async def test_emit_logs_to_queue():
     logger.info("Test log message")
 
     # Ensure the log record was added to the console queue
-    log_record = await asyncio.wait_for(handler.log_queues["console"].get(), timeout=1)
+    log_record = await asyncio.wait_for(handler.log_queues["_console"].get(), timeout=1)
     assert log_record.getMessage() == "Test log message"
 
     await handler.stop_logging()
@@ -101,7 +101,7 @@ async def test_emit_logs_to_queue():
 @pytest.mark.asyncio
 async def test_console_worker_outputs_log(capsys):
     """Test that the console worker processes and outputs logs correctly."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    handler = ConsoleHandler()
 
     await handler.start_logging()
 
@@ -124,10 +124,8 @@ async def test_console_worker_outputs_log(capsys):
 @pytest.mark.asyncio
 async def test_set_formatter_propagates_to_console_backend(capsys):
     """setFormatter must update the console backend so console output reflects it."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    handler = ConsoleHandler()
     formatter = ScietexFormatter(
-        service_name="TestService",
-        worker_id=1,
         fmt="%(levelname)s | %(message)s",
     )
     handler.setFormatter(formatter)
@@ -154,16 +152,14 @@ async def test_set_formatter_propagates_to_console_backend(capsys):
 @pytest.mark.asyncio
 async def test_set_formatter_console_reads_dynamically(capsys):
     """setFormatter affects console output mid-stream without a manual backend re-sync."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    handler = ConsoleHandler()
     await handler.start_logging()
 
     logger = logging.getLogger("TestLogger")
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
     logger.info("before")
-    handler.setFormatter(
-        ScietexFormatter(service_name="TestService", worker_id=1, fmt="%(levelname)s | %(message)s")
-    )
+    handler.setFormatter(ScietexFormatter(fmt="%(levelname)s | %(message)s"))
     logger.info("after")
     await handler.stop_logging()
 
@@ -176,9 +172,7 @@ async def test_set_formatter_console_reads_dynamically(capsys):
 async def test_console_write_failure_reported_and_shutdown_clean():
     """A console format/write failure is reported and stop_logging still completes."""
     errors = []
-    handler = AsyncBaseHandler(
-        service_name="TestService",
-        worker_id=1,
+    handler = ConsoleHandler(
         error_handler=lambda record, exc: errors.append(exc),
     )
     handler.setFormatter(_ExplodingFormatter())
@@ -193,13 +187,13 @@ async def test_console_write_failure_reported_and_shutdown_clean():
 
     assert len(errors) >= 1
     assert all(isinstance(err, RuntimeError) for err in errors)
-    assert handler.log_queues["console"].empty()
+    assert handler.log_queues["_console"].empty()
 
 
 @pytest.mark.asyncio
 async def test_stop_logging_drains_queues():
     """Test that stop_logging waits for all queued records to be processed."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    handler = ConsoleHandler()
     await handler.start_logging()
 
     logger = logging.getLogger("TestLogger")
@@ -213,13 +207,13 @@ async def test_stop_logging_drains_queues():
 
     # Records were queued synchronously and drained by the console worker. The
     # queue.join() inside stop_logging already guarantees every item was acknowledged.
-    assert handler.log_queues["console"].empty()
+    assert handler.log_queues["_console"].empty()
 
 
 @pytest.mark.asyncio
 async def test_emit_delivers_to_backend_queue():
     """emit writes to the ingress and the bridge delivers to the backend queue."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1, stdout_enable=False)
+    handler = ConsoleHandler()
     handler.log_queues["custom"] = asyncio.Queue()
     await handler.start_logging()
 
@@ -236,11 +230,7 @@ async def test_emit_off_loop_delivers_not_raises():
     """Off-loop emit delivers the record instead of dropping it (AR-102 fixed)."""
     import threading
 
-    handler = AsyncBaseHandler(
-        service_name="TestService",
-        worker_id=1,
-        stdout_enable=False,
-    )
+    handler = ConsoleHandler()
     handler.log_queues["custom"] = asyncio.Queue()
     await handler.start_logging()
 
@@ -259,9 +249,7 @@ async def test_emit_off_loop_delivers_not_raises():
 async def test_error_channel_invoked_on_emit_failure(monkeypatch):
     """A bridge put failure surfaces through the error handler after the loop yields."""
     errors = []
-    handler = AsyncBaseHandler(
-        service_name="TestService",
-        worker_id=1,
+    handler = ConsoleHandler(
         error_handler=lambda record, exc: errors.append(exc),
     )
     await handler.start_logging()
@@ -276,7 +264,7 @@ async def test_error_channel_invoked_on_emit_failure(monkeypatch):
         if calls == 1:
             raise RuntimeError("put failed")
 
-    monkeypatch.setattr(handler.log_queues["console"], "put_nowait", failing_put_once)
+    monkeypatch.setattr(handler.log_queues["_console"], "put_nowait", failing_put_once)
 
     record = logging.LogRecord("test", logging.INFO, "", 0, "msg", None, None)
     handler.emit(record)
@@ -292,12 +280,12 @@ async def test_error_channel_invoked_on_emit_failure(monkeypatch):
 @pytest.mark.asyncio
 async def test_console_backend_registered_as_peer():
     """The console is registered through register_backend, not special-cased."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1)
+    handler = ConsoleHandler()
     backend = handler._console_backend
     assert backend is not None
 
-    assert "console" in handler.log_queues
-    assert handler.log_queues["console"] is backend.queue
+    assert "_console" in handler.log_queues
+    assert handler.log_queues["_console"] is backend.queue
     assert len(handler.log_worker_factories) == 1
     # The console's drain hook is registered like any other backend's, and its
     # status reporter is registered separately as a post-drain observer.
@@ -308,40 +296,47 @@ async def test_console_backend_registered_as_peer():
     await handler.stop_logging()
 
 
-def test_console_backend_absent_when_stdout_disabled():
-    """stdout_enable=False leaves no console queue (console is a peer, not privileged)."""
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1, stdout_enable=False)
-
-    assert handler.stdout_enable is False
-    assert handler._console_backend is None
-    assert "console" not in handler.log_queues
-    assert handler.log_queues == {}
-    assert handler.log_worker_factories == []
-    assert handler._drain_hooks == []
-    assert handler._status_reporters == []
-
-
 @pytest.mark.asyncio
 async def test_stop_logging_drains_all_backends_generically(capsys):
-    """stop_logging drains console and broker through the same generic mechanism."""
-    handler = _NoopBrokerHandler(queue_name="broker", service_name="TestService", worker_id=1)
+    """stop_logging drains every registered backend through the same generic mechanism."""
+    handler = _NoopBrokerHandler(queue_name="broker")
+    console = ConsoleHandler()
+
     await handler.start_logging()
+    await console.start_logging()
     handler.emit(_make_record("hello"))
+    console.emit(_make_record("hello"))
     await handler.stop_logging(timeout=5)
+    await console.stop_logging()
 
     captured = capsys.readouterr().out
-    # The broker drain completed and the console reported its outcome as a status record.
-    assert "Broker Logger has completed processing its queue." in captured
+    # Both backends drained through the same drain-hook mechanism; the console
+    # reported its own completed drain as a status record.
     assert handler.log_queues["broker"].empty()
+    assert console.log_queues["_console"].empty()
+    assert "Console Logger has completed processing its queue." in captured
 
 
-def test_unknown_kwarg_raises_type_error_on_base_handler():
-    """A typo'd kwarg on AsyncBaseHandler fails loudly."""
+def test_unknown_kwarg_raises_type_error_on_console_handler():
+    """A typo'd kwarg on ConsoleHandler fails loudly."""
     with pytest.raises(TypeError):
-        AsyncBaseHandler(service_name="TestService", worker_id=1, stdout_enabel=True)
+        ConsoleHandler(unknown_kwarg=True)
 
 
-def test_config_exposes_stdout_enable():
-    handler = AsyncBaseHandler(service_name="TestService", worker_id=1, stdout_enable=False)
-    assert handler.config.stdout_enable is False
-    assert handler.stdout_enable is False  # backward-compat alias
+def test_console_handler_always_registers_console_backend():
+    """ConsoleHandler unconditionally registers the console backend."""
+    handler = ConsoleHandler()
+    assert handler._console_backend is not None
+    assert "_console" in handler.log_queues
+    assert len(handler.log_worker_factories) == 1
+
+
+def test_file_and_broker_handlers_register_no_console_backend(tmp_path):
+    """File and broker handlers register only their own backend, never console."""
+    file_handler = AsyncFileHandler(str(tmp_path / "x.log"))
+    broker_handler = _NoopBrokerHandler(queue_name="broker")
+
+    for handler in (file_handler, broker_handler):
+        assert "_console" not in handler.log_queues
+        assert not hasattr(handler, "_console_backend")
+        assert len(handler.log_worker_factories) == 1

@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from scietex.logging.valkey_handler import AsyncValkeyHandler
+from scietex.logging.handler.valkey import AsyncValkeyHandler
 
 
 async def main():
@@ -13,8 +13,6 @@ async def main():
 
     valkey_handler = AsyncValkeyHandler(
         stream_name="example_log_stream",
-        service_name="ValkeyService",
-        instance_id="3",
     )
     logger.addHandler(valkey_handler)
 

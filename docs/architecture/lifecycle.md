@@ -6,20 +6,20 @@ are async and must run inside an asyncio event loop.
 
 ## Construction (`__init__`)
 
-**`AsyncLoggingHandler.__init__`** (`async_logging_handler.py:111`):
-- Constructs a `ScietexFormatter(service_name, instance_id)`.
+**`AsyncLoggingHandler.__init__`** (`async_logging_handler.py:140`):
 - Creates two `asyncio.Event`s: `logging_accept_event`, `logging_running_event`
   (both initially **unset**).
 - Initializes empty `log_queues`, `log_worker_factories`, `_drain_hooks`,
   `_status_reporters`, `log_workers_tasks`.
 
-**`AsyncBaseHandler.__init__`** (`basic_handler.py:33`): calls super, sets
-`stdout_enable` (default True). If `stdout_enable`: constructs a
-`ConsoleBackend` and registers it under the name `"console"` via
-`register_backend` (queue + worker factory + drain hook), and registers the
-console's `report_status` as a status reporter via `register_status_reporter`.
+**`ConsoleHandler.__init__`** (`handler/console.py:28`): calls super, sets
+`self.formatter` (default `ScietexFormatter()` unless a `formatter=` is
+injected), then constructs a `ConsoleBackend` and registers it under the name
+`"_console"` via `register_backend` (queue + worker factory + drain hook), and
+registers the console's `report_status` as a status reporter via
+`register_status_reporter`.
 
-**`AsyncBrokerHandler.__init__`** (`message_broker_handler.py:41`): calls super,
+**`AsyncBrokerHandler.__init__`** (`handler/broker.py:57`): calls super,
 then registers `log_queues[queue_name]` and `self._worker` via
 `register_backend`. Sets `client = None` by default; when an external `client`
 is injected it stores it durably (`_injected_client`) and marks the handler as
@@ -27,17 +27,19 @@ non-owning (`_owns_client = False`). Passing both `client` and `backend_config`
 raises `ValueError`.
 
 **`AsyncRedisHandler.__init__`** / **`AsyncValkeyHandler.__init__`** /
-**`AsyncMqttHandler.__init__`**: call super with `queue_name="redis"` /
-`"valkey"` / `"mqtt"` and `backend_config` (a typed `RedisConfig` /
+**`AsyncMqttHandler.__init__`**: call super with `queue_name="_redis"` /
+`"_valkey"` / `"_mqtt"` and `backend_config` (a typed `RedisConfig` /
 `ValkeyConfig` / `MqttConfig`), then store `stream_name` (Redis/Valkey) or
 `topic` (MQTT). `client_config` is a derived read-only `asdict` view of
 `backend_config`, not a stored raw dict. No connection is opened at
 construction.
 
-**`AsyncFileHandler.__init__`** (`file_handler.py`): calls super, then registers
-the `"file"` backend (queue + worker factory + drain hook) via
-`register_backend`, mirroring how `AsyncBaseHandler` registers the console
-backend. The file handle is **not** opened at construction — it is opened
+**`AsyncFileHandler.__init__`** (`handler/file.py`): calls super, sets
+`self.formatter` (default `ScietexFormatter()` unless a `formatter=` is
+injected), then registers the `"_file"` backend (queue + worker factory + drain
+hook) via `register_backend`, mirroring how `ConsoleHandler` registers the
+console backend. The file handle is **not** opened at construction — it is
+opened
 lazily by the worker on first write and closed in the worker's `finally`
 (mirroring the broker worker's client teardown). When an external `file`-like
 object is injected it is stored durably and the handler never closes it
@@ -52,7 +54,7 @@ registered (not yet invoked); no client connection. The handler is inert until
 
 ## Startup (`start_logging`)
 
-`AsyncLoggingHandler.start_logging` (`async_logging_handler.py:303`):
+`AsyncLoggingHandler.start_logging` (`async_logging_handler.py:274`):
 1. `_loop = asyncio.get_running_loop()` — capture the loop for the bridge's
    `call_soon_threadsafe` wakeup.
 2. Create the thread-safe `_ingress` (`queue.Queue(maxsize=queue_maxsize)`), its
@@ -66,8 +68,8 @@ registered (not yet invoked); no client connection. The handler is inert until
    log_worker_factories]` — each worker factory is invoked to produce a fresh
    coroutine, which becomes a scheduled task.
 
-For broker handlers, the broker worker begins by calling `connect()`
-(`message_broker_handler.py:92`), which lazily opens the client connection
+For broker handlers, the broker worker begins by calling `_connect()`
+(`handler/broker.py:163`), which lazily opens the client connection
 (Redis `redis.Redis(...)`; Valkey `GlideClient.create(...)`; MQTT
 `aiomqtt.Client(...)` entered via its async context manager). The console
 worker needs no connection.
@@ -98,7 +100,7 @@ semantics below).
 
 ## Shutdown (`stop_logging`)
 
-`AsyncLoggingHandler.stop_logging(timeout=5.0)` (`async_logging_handler.py:433`)
+`AsyncLoggingHandler.stop_logging(timeout=5.0)` (`async_logging_handler.py:404`)
 — see data-flow.md Flow 4 for the full sequence. Summary:
 1. Stop accepting new records (`accept_event.clear()`).
 2. Stop the bridge and flush the ingress into the backend queues **before** the
@@ -125,7 +127,7 @@ semantics below).
    tasks.
 7. Clear any records still queued after the drain window and worker teardown:
    each backend queue is drained via `get_nowait()` + `task_done()`, and any
-   leftover ingress entry is cleared (`async_logging_handler.py:534-542`).
+   leftover ingress entry is cleared (`async_logging_handler.py:505-513`).
    Undelivered records are **dropped, not replayed**, so the next
    `start_logging` begins from an actually-empty queue (AR-020). `stop_logging`
    does **not** call `self.close()`.
@@ -195,7 +197,7 @@ moved across loops. To log on a different loop, construct a fresh handler.
 | client connection (`client`) | `connect()` (worker start) | handler instance | `disconnect()` (worker exit) |
 | file handle (`_stream`) | worker first write (lazy open) | handler instance | worker `finally` — `_close_stream` submitted to the write executor, then `shutdown(wait=True)` |
 | write executor (`_WriteExecutor`) | worker run (lazy, first write) | worker-local (not the handler) | worker `finally` — `shutdown(wait=True)` |
-| formatter | `__init__` | handler instance | — |
+| formatter | `__init__` (console/file handlers only) | handler instance | — |
 
 The `client connection` row above holds only for a **self-managed** client (one
 built by the handler's own `connect()`). An **injected** client is owned by the
@@ -251,7 +253,7 @@ reconcile the two contracts:
 - Worker factories are registered once in `__init__` and invoked by
   `start_logging` to schedule fresh tasks on every start cycle.
 - `register_backend` raises `ValueError` if a backend name is already registered
-  (`async_logging_handler.py:231-232`), so a duplicate name cannot silently
+  (`async_logging_handler.py:236-237`), so a duplicate name cannot silently
   overwrite a queue while doubling the worker and drain hooks (AR-028).
 - The broker client connection is opened lazily by the worker's `connect()`
   and closed by `disconnect()` at worker exit — connection lifetime is tied to

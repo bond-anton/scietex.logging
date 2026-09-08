@@ -11,7 +11,6 @@ creating an import cycle.
 from __future__ import annotations
 
 import logging
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -26,29 +25,17 @@ class LoggingConfig:
 
     This is the single runtime source of truth: handlers read these fields at
     work time. The flat attributes each handler exposes (``queue_maxsize``,
-    ``stdout_enable``, ``error_handler``) are read-only aliases over this object.
+    ``error_handler``) are read-only aliases over this object.
 
     Attributes:
-        service_name (str): Service name used in the formatter's worker_name.
-        instance_id (str): Instance id used in the formatter's worker_name. The
-            canonical identity field; ``worker_name`` renders as
-            ``service_name:instance_id``.
-        worker_id (int): Deprecated numeric alias for ``instance_id``, kept only
-            for backward compatibility. Prefer ``instance_id``; this field is
-            removed in v2.0.
         error_handler (Callable | None): Delivery-error callback ``(record, exc)``.
         queue_maxsize (int): Bound for every backend queue (default 10000).
-        stdout_enable (bool): Whether AsyncBaseHandler registers the console backend.
         backend_config (RedisConfig | ValkeyConfig | MqttConfig | None): Backend-specific
-            config, or None for the console-only handlers.
+            config, or None for the console/file handlers.
     """
 
-    service_name: str = "Service"
-    instance_id: str = "1"
-    worker_id: int = 1
     error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None
     queue_maxsize: int = 10000
-    stdout_enable: bool = True
     backend_config: RedisConfig | ValkeyConfig | MqttConfig | None = None
 
 
@@ -76,7 +63,6 @@ class RedisConfig:
     password: str | None = None
     socket_timeout: float | None = None
     socket_connect_timeout: float | None = None
-    socket_read_size: int = 32768
     socket_keepalive: bool = False
     socket_keepalive_options: dict | None = None
     unix_socket_path: str | None = None
@@ -102,7 +88,6 @@ class RedisConfig:
     health_check_interval: int = 0
     client_name: str | None = None
     protocol: int | None = None
-    legacy_responses: bool = True
 
 
 @dataclass(frozen=True)
@@ -175,41 +160,6 @@ class MqttConfig:
     transport: str | None = None
     timeout: float | None = None
     tls_insecure: bool | None = None
-
-
-def resolve_instance_id(worker_id: int | None, instance_id: str | None) -> str:
-    """Resolve the canonical instance id from the legacy and new parameters.
-
-    ``worker_id`` (int) is deprecated in favor of ``instance_id`` (str); the two
-    are aliases for the same identity concept, so supplying both raises
-    ``ValueError``. When only ``instance_id`` is given it is returned unchanged.
-    When only ``worker_id`` is given it is stringified and a ``DeprecationWarning``
-    is emitted. When neither is given the default ``"1"`` is returned.
-
-    Args:
-        worker_id (int | None): Deprecated numeric worker id.
-        instance_id (str | None): Canonical string instance id.
-
-    Returns:
-        str: The resolved instance id (``"1"`` when neither is supplied).
-
-    Raises:
-        ValueError: If both ``worker_id`` and ``instance_id`` are supplied.
-    """
-    if worker_id is not None and instance_id is not None:
-        raise ValueError(
-            "worker_id and instance_id are mutually exclusive: pass one or the other, not both."
-        )
-    if instance_id is not None:
-        return instance_id
-    if worker_id is not None:
-        warnings.warn(
-            "worker_id is deprecated and will be removed in v2.0; use instance_id instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return str(worker_id)
-    return "1"
 
 
 def validate_queue_maxsize(value: int) -> int:

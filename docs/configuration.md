@@ -1,12 +1,12 @@
 # Configuration
 
-This guide covers configuring scietex.logging, including formatters, service names, and custom formats.
+This guide covers configuring scietex.logging, including formatters, logger names, and custom formats.
 
 ## ScietexFormatter
 
 The `ScietexFormatter` is the default formatter for scietex.logging. It provides:
 
-- Service name and instance ID in logs: `{service_name}:{instance_id}`
+- Logger name in logs via the `%(name)s` token (read from `record.name`)
 - 3-letter log level abbreviations: `DBG`, `INF`, `WRN`, `ERR`, `CRT`
 - ISO 8601 UTC timestamps by default
 
@@ -15,8 +15,12 @@ The `ScietexFormatter` is the default formatter for scietex.logging. It provides
 ```python
 from scietex.logging import ScietexFormatter
 
-formatter = ScietexFormatter(service_name="MyService", instance_id="web-1")
+formatter = ScietexFormatter()
 ```
+
+With no arguments, `ScietexFormatter` uses the default format
+`"%(asctime)s - %(levelname)s - [%(name)s] - %(message)s"`, where `%(name)s`
+renders the record's standard-library logger name.
 
 ### Custom Format
 
@@ -26,9 +30,7 @@ You can customize the log format by passing a custom `fmt` string:
 from scietex.logging import ScietexFormatter
 
 formatter = ScietexFormatter(
-    service_name="MyService",
-    instance_id="web-1",
-    fmt="%(asctime)s - %(levelname)s - [%(worker_name)s] - %(message)s",
+    fmt="%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 ```
@@ -41,39 +43,43 @@ By default, timestamps use ISO 8601 format with UTC timezone. You can customize 
 from scietex.logging import ScietexFormatter
 from datetime import datetime, timezone
 
-formatter = ScietexFormatter(service_name="MyService", instance_id="web-1", datefmt="%Y-%m-%d %H:%M:%S")
+formatter = ScietexFormatter(datefmt="%Y-%m-%d %H:%M:%S")
 ```
 
 ## Handler Configuration
 
-### Service Name and Instance ID
+### Logger Name as Identity
 
-Every handler accepts `service_name` and `instance_id` parameters. `instance_id`
-is a string identifying the logging *instance* — a process, container, replica,
-or deployment unit — and is rendered into `worker_name` as
-`{service_name}:{instance_id}`. It defaults to `"1"` when omitted.
+Identity comes solely from the standard-library logger name. The name you pass
+to `logging.getLogger("name")` becomes `record.name`, which is rendered via
+`%(name)s` in the default format and emitted as the `name`/`logger` field by
+broker/JSON sinks. There is no separate identity field to configure — name your
+loggers and the identity follows.
 
 ```python
-handler = AsyncBaseHandler(service_name="MyService", instance_id="web-1")
+logger = logging.getLogger("MyService")  # record.name == "MyService"
+handler = ConsoleHandler()
 ```
 
-The numeric `worker_id` parameter is **deprecated** in favor of `instance_id`.
-Passing `worker_id` emits a `DeprecationWarning`, and its value is stringified
-into `instance_id` (so `worker_id=2` and `instance_id="2"` are equivalent).
-`worker_id` and `instance_id` are mutually exclusive — passing both raises
-`ValueError`. `worker_id` is removed in v2.0.
+Note the edge case: the root logger (`logging.getLogger()` with no argument) has
+an **empty** `record.name`, so its log lines carry an empty identity field.
+Always name your loggers to get useful identification.
 
-### Console Logging Control
+### Console Logging
 
-Console logging is a **peer backend** (`ConsoleBackend`) that `AsyncBaseHandler`
-registers by default. It can be disabled by setting `stdout_enable=False`:
+`ConsoleHandler` is a concrete handler that registers the console backend
+(`ConsoleBackend`) **unconditionally**. Console output requires adding a
+`ConsoleHandler` to the logger explicitly — file and broker handlers do not
+register a console sink.
 
 ```python
-handler = AsyncBaseHandler(stdout_enable=False)
+from scietex.logging import ConsoleHandler
+
+handler = ConsoleHandler()
 ```
 
 For a handler with **no console sink at all**, subclass the pure-machinery base
-`AsyncLoggingHandler` directly instead of `AsyncBaseHandler`. It owns the shared
+`AsyncLoggingHandler` directly. It owns the shared
 queue/worker/event machinery but registers no backend of its own, so you add
 only the backends you want. See `examples/pure_machinery_handler.py` for a
 runnable version:
@@ -87,15 +93,11 @@ from scietex.logging import AsyncLoggingHandler
 class MyHandler(AsyncLoggingHandler):
     def __init__(
         self,
-        service_name=None,
-        instance_id=None,
         *,
         error_handler=None,
         queue_maxsize=10000,
     ):
         super().__init__(
-            service_name=service_name,
-            instance_id=instance_id,
             error_handler=error_handler,
             queue_maxsize=queue_maxsize,
         )
@@ -113,17 +115,19 @@ class MyHandler(AsyncLoggingHandler):
 ### Reserved backend names
 
 `register_backend` rejects a duplicate queue name with `ValueError` (AR-028).
-The built-in backends reserve these names, so a custom `AsyncBrokerHandler`
-subclass must not use them as its `queue_name`:
+The built-in backends register under `_`-prefixed queue keys, so a custom
+`AsyncBrokerHandler` subclass's `queue_name` can never collide with a built-in
+backend:
 
-- `"console"` — registered by `AsyncBaseHandler` when `stdout_enable=True`
-  (the default). `AsyncBrokerHandler(queue_name="console")` therefore raises at
-  construction unless you pass `stdout_enable=False`.
-- `"redis"` / `"valkey"` — registered by `AsyncRedisHandler` / `AsyncValkeyHandler`.
-- `"mqtt"` — registered by `AsyncMqttHandler`.
-- `"file"` — registered by `AsyncFileHandler` and its rotation variants.
+- `"_console"` — registered by `ConsoleHandler` (always).
+- `"_redis"` / `"_valkey"` — registered by `AsyncRedisHandler` / `AsyncValkeyHandler`.
+- `"_mqtt"` — registered by `AsyncMqttHandler`.
+- `"_file"` — registered by `AsyncFileHandler` and its rotation variants.
 
-Choose a distinct `queue_name` for a custom backend (e.g. `"postgres"`, `"http"`).
+The `_` prefix is reserved for internal use: user-supplied `queue_name` values
+never start with `_`, so any distinct name (e.g. `"postgres"`, `"http"`) is
+safe. The shutdown status text strips the `_` before rendering (e.g. "Console
+Logger has completed processing its queue.").
 
 ### Error Handler
 
@@ -135,7 +139,7 @@ def on_error(record, exc):
     print(f"Logging error: {exc}")
 
 
-handler = AsyncBaseHandler(error_handler=on_error)
+handler = ConsoleHandler(error_handler=on_error)
 ```
 
 See `examples/error_handler_and_queue_bounds.py` for a runnable example that
@@ -149,14 +153,14 @@ overload condition that triggers it.
 ### Queue Bounds and Overflow
 
 Each backend queue is **bounded** by `queue_maxsize`, a keyword-only constructor
-parameter on `AsyncLoggingHandler` and `AsyncBaseHandler` (default `10000`). It
+parameter on `AsyncLoggingHandler` and `ConsoleHandler` (default `10000`). It
 is validated to a positive int via `validate_queue_maxsize` (invalid values
 raise `ValueError`), stored as `self.queue_maxsize`, and applied to every
 backend queue the handler registers — the console queue and, for broker
 handlers, the broker queue.
 
 ```python
-handler = AsyncBaseHandler(queue_maxsize=5000)
+handler = ConsoleHandler(queue_maxsize=5000)
 ```
 
 The overflow policy is **drop + report**. When the shared ingress is full at
@@ -177,18 +181,16 @@ Every handler builds a frozen dataclass `self.config` from its explicit
 constructor keyword arguments (defined in `src/scietex/logging/config.py`).
 `LoggingConfig` is the **single runtime source of truth**: handlers read
 `self.config.*` at work time, and the flat attributes each handler exposes —
-`queue_maxsize`, `stdout_enable`, `error_handler` — are read-only `@property`
+`queue_maxsize`, `error_handler` — are read-only `@property`
 aliases over `self.config`, so there is no parallel state to drift.
 
 - `LoggingConfig` — shared machinery options for every handler:
-  `service_name`, `instance_id`, `error_handler`, `queue_maxsize`,
-  `stdout_enable`, and `backend_config` (the backend-specific config, or `None`
-  for the pure-machinery/console-only handlers). `instance_id` (default `"1"`)
-  is the canonical identity field; the numeric `worker_id` field is a deprecated
-  alias kept for backward compatibility. `backend_config` is typed
+  `error_handler`, `queue_maxsize`, and `backend_config` (the
+  backend-specific config, or `None` for the pure-machinery/console-only
+  handlers). `backend_config` is typed
   `RedisConfig | ValkeyConfig | MqttConfig | None` — a real union, not `Any`.
 - `RedisConfig` — Redis connection settings. It mirrors the full plain-option
-  surface of `redis.Redis` (34 fields: `host`/`port`/`db` plus `username`,
+  surface of `redis.Redis` (32 fields: `host`/`port`/`db` plus `username`,
   `password`, socket/ssl/encoding/retry/health-check/client-name/protocol
   options), so a `redis_config` dict carrying legitimate client options is
   accepted rather than rejected. Stored as `self.config.backend_config` on
@@ -299,13 +301,13 @@ You can use Python's standard `logging.Formatter` with custom formats:
 
 ```python
 import logging
-from scietex.logging import AsyncBaseHandler
+from scietex.logging import ConsoleHandler
 
 formatter = logging.Formatter(
     fmt="%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ"
 )
 
-handler = AsyncBaseHandler()
+handler = ConsoleHandler()
 handler.setFormatter(formatter)
 ```
 
@@ -331,24 +333,28 @@ For a runnable example of customizing `ScietexFormatter` and applying it with
 `setFormatter`, see `examples/custom_formatter.py`.
 
 (formatter-scope)=
-### Formatter scope: console output only
+### Formatter scope: console and file output only
 
 A formatter — whether injected via the `formatter=` constructor keyword or
-applied later with `setFormatter` — affects **console (stdout) output only**.
-It does **not** affect broker payloads.
+applied later with `setFormatter` — affects **console (stdout) and file output
+only**. It is accepted only by `ConsoleHandler` and `AsyncFileHandler` (and its
+rotation variants), which render text through it.
 
-Broker backends (`AsyncRedisHandler`, `AsyncValkeyHandler`, and any
-`AsyncBrokerHandler` subclass) build their wire record from the handler's
-`service_name`/`instance_id` config and the log record directly, producing a
-fixed schema (`level`, `message`, `name`, `time`). That payload is **invariant**
-under `setFormatter`/`formatter=`, so the broker output is deterministic and
+Broker handlers (`AsyncRedisHandler`, `AsyncValkeyHandler`, `AsyncMqttHandler`,
+and any `AsyncBrokerHandler` subclass) do **not** accept a `formatter=` keyword
+— passing one raises `TypeError`. They build their wire record from the log
+record directly — its `name` field is the record's logger name (`record.name`) —
+producing a fixed schema (`level`, `message`, `name`, `time`). That payload is
+**invariant** under `setFormatter`, so the broker output is deterministic and
 independent of any formatter you install.
 
 Consequences to be aware of:
 
-- On a broker handler, a custom formatter changes console output only when
-  `stdout_enable=True` (the console sink the broker inherits by default). With
-  `stdout_enable=False` the formatter has no visible effect at all.
+- On a broker handler, `setFormatter` (inherited from the stdlib `logging.Handler`)
+  sets an unused attribute — it has **no visible effect** on broker output.
+  Broker handlers no longer register a console sink, and the broker builds its
+  payload independently of the formatter. Console output requires adding a
+  `ConsoleHandler` to the logger, with the formatter installed there.
 - If you need to change what a broker backend sends, that is a property of the
   backend's `send_message` implementation, not of the formatter.
 
@@ -366,18 +372,16 @@ copy.copy(record)`) or avoid mutating it.
 
 ```python
 import logging
-from scietex.logging import AsyncBaseHandler, ScietexFormatter
+from scietex.logging import ConsoleHandler, ScietexFormatter
 
 logger = logging.getLogger("MyAsyncLogger")
 logger.setLevel(logging.DEBUG)
 
 formatter = ScietexFormatter(
-    service_name="MyService",
-    instance_id="web-1",
-    fmt="%(asctime)s - %(levelname)s - [%(worker_name)s] - %(message)s",
+    fmt="%(asctime)s - %(levelname)s - [%(name)s] - %(message)s",
 )
 
-handler = AsyncBaseHandler()
+handler = ConsoleHandler()
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 ```

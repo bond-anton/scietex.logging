@@ -7,7 +7,7 @@ import threading
 import pytest
 
 from scietex.logging.async_logging_handler import BackendDrainResult, DrainStatus
-from scietex.logging.console_backend import ConsoleBackend
+from scietex.logging.backend.console import ConsoleBackend
 
 
 def _make_record(message: str = "test message") -> logging.LogRecord:
@@ -121,9 +121,9 @@ async def test_report_status_queues_synthetic_records(capsys):
     worker = asyncio.create_task(backend._worker())
 
     results = [
-        BackendDrainResult(name="console", status=DrainStatus.COMPLETED),
-        BackendDrainResult(name="redis", status=DrainStatus.COMPLETED),
-        BackendDrainResult(name="valkey", status=DrainStatus.TIMEOUT),
+        BackendDrainResult(name="_console", status=DrainStatus.COMPLETED),
+        BackendDrainResult(name="_redis", status=DrainStatus.COMPLETED),
+        BackendDrainResult(name="_valkey", status=DrainStatus.TIMEOUT),
         BackendDrainResult(name="broker", status=DrainStatus.ERROR, error=RuntimeError("boom")),
     ]
     await backend.report_status(results)
@@ -152,7 +152,7 @@ async def test_drain_returns_console_completed_result():
     await backend.queue.put(_make_record("drain me"))
     result = await backend.drain(timeout=5)
 
-    assert result.name == "console"
+    assert result.name == "_console"
     assert result.status is DrainStatus.COMPLETED
 
     running_event.clear()
@@ -169,7 +169,7 @@ async def test_drain_reports_timeout_when_queue_not_drained():
 
     result = await backend.drain(timeout=0.01)
 
-    assert result.name == "console"
+    assert result.name == "_console"
     assert result.status is DrainStatus.TIMEOUT
 
 

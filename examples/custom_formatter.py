@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from scietex.logging import AsyncBaseHandler, ScietexFormatter
+from scietex.logging import ConsoleHandler, ScietexFormatter
 
 
 async def main():
@@ -11,22 +11,21 @@ async def main():
     logger = logging.getLogger("FormatterLogger")
     logger.setLevel(logging.DEBUG)
 
-    handler = AsyncBaseHandler(service_name="FormatterService", instance_id="1")
+    handler = ConsoleHandler()
     logger.addHandler(handler)
 
     # The "|" separators and the non-ISO datefmt are the two visible changes this
     # formatter introduces relative to the handler's default ScietexFormatter.
+    # %(name)s renders the record's logger name, which carries the identity now.
     formatter = ScietexFormatter(
-        service_name="FormatterService",
-        instance_id="1",
-        fmt="%(asctime)s | %(levelname)s | [%(worker_name)s] | %(message)s",
+        fmt="%(asctime)s | %(levelname)s | [%(name)s] | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     # setFormatter replaces the handler's formatter for the console (stdout)
-    # sink only. Broker backends build their payloads from the handler's
-    # service_name/instance_id config and the record directly, so they are
-    # invariant under setFormatter. This example uses AsyncBaseHandler, whose
-    # only sink is the console, so the custom layout appears in its output.
+    # sink only. Broker handlers no longer accept a formatter at all — their
+    # payloads are built from the record directly (including record.name). This
+    # example uses ConsoleHandler, whose only sink is the console, so the
+    # custom layout appears in its output.
     handler.setFormatter(formatter)
 
     await handler.start_logging()

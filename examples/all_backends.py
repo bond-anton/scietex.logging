@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from scietex.logging import AsyncBaseHandler, AsyncRedisHandler, AsyncValkeyHandler
+from scietex.logging import AsyncRedisHandler, AsyncValkeyHandler, ConsoleHandler
 
 
 async def main():
@@ -11,27 +11,19 @@ async def main():
     logger = logging.getLogger("AllBackendsLogger")
     logger.setLevel(logging.DEBUG)
 
-    console_handler = AsyncBaseHandler(service_name="AllService", instance_id="1")
+    console_handler = ConsoleHandler()
     redis_handler = AsyncRedisHandler(
         stream_name="all_backends_stream",
-        service_name="AllService",
-        instance_id="2",
         redis_config={"host": "localhost", "port": 6379, "db": 0},
-        stdout_enable=False,
     )
     valkey_handler = AsyncValkeyHandler(
         stream_name="all_backends_stream",
-        service_name="AllService",
-        instance_id="3",
         valkey_config={"addresses": [("localhost", 6379)]},
-        stdout_enable=False,
     )
     logger.addHandler(console_handler)
     logger.addHandler(redis_handler)
     logger.addHandler(valkey_handler)
 
-    # Only the console handler keeps stdout_enable=True; the broker handlers disable
-    # it so each record is emitted to the console once rather than three times.
     await console_handler.start_logging()
     await redis_handler.start_logging()
     await valkey_handler.start_logging()

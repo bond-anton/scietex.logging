@@ -25,7 +25,7 @@ run. The table maps each example to the installation it needs.
 
 | Example | What it teaches | Needs a server |
 | --- | --- | --- |
-| [basic_console_logging.py](./basic_console_logging.py) | Minimal console logging with `AsyncBaseHandler` | No |
+| [basic_console_logging.py](./basic_console_logging.py) | Minimal console logging with `ConsoleHandler` | No |
 | [redis_logging.py](./redis_logging.py) | Log to a Redis stream with `AsyncRedisHandler` | Redis |
 | [valkey_logging.py](./valkey_logging.py) | Log to a Valkey stream with `AsyncValkeyHandler` | Valkey |
 | [mqtt_logging.py](./mqtt_logging.py) | Log to an MQTT topic with `AsyncMqttHandler` | MQTT broker |
@@ -34,7 +34,7 @@ run. The table maps each example to the installation it needs.
 | [console_and_redis_logging.py](./console_and_redis_logging.py) | Console and Redis handlers on one logger | Redis |
 | [custom_formatter.py](./custom_formatter.py) | Customize `ScietexFormatter` and apply it with `setFormatter` | No |
 | [error_handler_and_queue_bounds.py](./error_handler_and_queue_bounds.py) | `error_handler` callback and `queue_maxsize` drop-and-report overflow | No |
-| [custom_backend.py](./custom_backend.py) | Subclass `AsyncBrokerHandler` into an in-memory backend (`stdout_enable=False`) | No |
+| [custom_backend.py](./custom_backend.py) | Subclass `AsyncBrokerHandler` into an in-memory backend | No |
 | [pure_machinery_handler.py](./pure_machinery_handler.py) | Subclass `AsyncLoggingHandler` directly and register a backend | No |
 | [restartable_lifecycle.py](./restartable_lifecycle.py) | Start/stop cycles, idempotent stop, double-start `RuntimeError`, `stop_logging(timeout)` | No |
 | [all_backends.py](./all_backends.py) | Console, Redis, and Valkey simultaneously with explicit configs | Redis + Valkey |
@@ -52,8 +52,8 @@ a server (`redis_logging.py`, `valkey_logging.py`, `mqtt_logging.py`,
 `injected_client.py`, `console_and_redis_logging.py`, `all_backends.py`) assume
 Redis, Valkey, and/or an MQTT broker are running locally on the default host and
 port. To point at a remote host, edit the `redis_config` dict (Redis), the
-`valkey_config` `GlideClientConfiguration` (Valkey), or the `mqtt_config` dict
-(MQTT) inside the script before running.
+`valkey_config` dict (Valkey), or the `mqtt_config` dict (MQTT) inside the script
+before running.
 
 ## Lifecycle
 
