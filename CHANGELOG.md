@@ -61,6 +61,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that reads `handler.log_queues["console"]` or a drain result's `.name` — those
   keys are now `"_console"` etc. The shutdown status text (e.g. "Console Logger
   has completed processing its queue.") is unchanged.
+- **File backend owns its worker**: `FileBackend` now owns its worker and the
+  full file lifecycle (lazy open, rollover, close-in-finally), mirroring
+  `ConsoleBackend`. The four near-identical worker loops previously duplicated
+  across `AsyncFileHandler` and its rotation variants are collapsed into one
+  unified `FileBackend._worker`, with the rotation logic carried by
+  `RotatingFileBackend`/`TimedRotatingFileBackend`/`WatchedFileBackend`. The
+  handler classes are now thin constructor wrappers. Behavior and the public
+  handler signatures are unchanged.
+- **Shared `_QueueBackend` base**: the drain/status-reporting machinery
+  (`drain`, `report_status`, `_status_record`, the `worker` property) is
+  extracted from `ConsoleBackend` and `FileBackend` into a shared internal
+  `_QueueBackend` base (`backend/_base.py`). `client_config` and a
+  `_config_dict()` helper are likewise consolidated onto `AsyncBrokerHandler`.
+- **`config.iso_timestamp()` helper**: the ISO-8601 UTC timestamp derivation is
+  single-sourced into `config.iso_timestamp(created)`; `JsonFormatter`,
+  `ScietexFormatter`, and the broker wire payload all use it.
+- **`BackendDrainResult.display_name`**: drain results carry an optional
+  `display_name` so shutdown-status records use an explicit label instead of
+  deriving one from the queue-name constant. TIMEOUT/ERROR status text now
+  capitalizes consistently (e.g. "Timeout while waiting for Valkey logger ...").
 
 ### Fixed
 
