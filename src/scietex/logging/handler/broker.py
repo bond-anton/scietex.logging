@@ -2,14 +2,14 @@
 
 import abc
 import asyncio
+import dataclasses
 import logging
 import random
 from collections.abc import Callable
-from datetime import datetime, timezone
 from typing import Any
 
 from ..async_logging_handler import AsyncLoggingHandler, BackendDrainResult, DrainStatus
-from ..config import MqttConfig, RedisConfig, ValkeyConfig, level_abbreviation
+from ..config import MqttConfig, RedisConfig, ValkeyConfig, iso_timestamp, level_abbreviation
 
 # Connect-retry backoff (AR-022). A fixed 1s retry would spam the error channel
 # ~3600x/hour during a prolonged outage. Consecutive connect() failures sleep a
@@ -38,6 +38,10 @@ class AsyncBrokerHandler(AsyncLoggingHandler, abc.ABC):
     Attributes:
         queue_name (str): The name of the queue for the handler.
         client (Any | None): The client for sending logs to broker, or None if not connected.
+        backend_config (RedisConfig | ValkeyConfig | MqttConfig | None): The typed
+            backend-specific config, owned by this handler; None for an injected client.
+        client_config (dict): Read-only asdict view of ``backend_config``; ``{}``
+            when no config is set (injected client).
         _owns_client (bool): True when the handler built its own client and must
             close it; False when an external client was injected.
         _injected_client (Any | None): The externally-managed client, when one was
@@ -74,7 +78,8 @@ class AsyncBrokerHandler(AsyncLoggingHandler, abc.ABC):
             queue_maxsize (int): Maximum number of records each backend queue can hold.
                 Defaults to 10000.
             backend_config (RedisConfig | ValkeyConfig | MqttConfig | None): Backend-specific config
-                attached by concrete broker subclasses. Defaults to None.
+                attached by concrete broker subclasses, stored as ``self.backend_config``
+                (broker-owned, not forwarded to the base). Defaults to None.
             client (Any | None): An externally-managed broker client to use instead of
                 building one in ``connect()``. When provided, the handler never closes
                 it — the caller owns its lifetime and recovery. Mutually exclusive with
@@ -92,13 +97,13 @@ class AsyncBrokerHandler(AsyncLoggingHandler, abc.ABC):
         super().__init__(
             error_handler=error_handler,
             queue_maxsize=queue_maxsize,
-            backend_config=backend_config,
         )
         if client is not None and backend_config is not None:
             raise ValueError(
                 "client and backend_config are mutually exclusive: pass an injected "
                 "client OR a backend config for the handler to build its own, not both."
             )
+        self.backend_config: RedisConfig | ValkeyConfig | MqttConfig | None = backend_config
         self.queue_name: str = queue_name
         self.client: Any | None = None
         self._owns_client: bool = client is None
@@ -111,6 +116,13 @@ class AsyncBrokerHandler(AsyncLoggingHandler, abc.ABC):
             self._worker,
             self.drain,
         )
+
+    @property
+    def client_config(self) -> dict:
+        """Read-only view of the backend config as a dict (backward compat)."""
+        if self.backend_config is None:
+            return {}
+        return dataclasses.asdict(self.backend_config)
 
     @abc.abstractmethod
     async def connect(self) -> None:
@@ -159,6 +171,15 @@ class AsyncBrokerHandler(AsyncLoggingHandler, abc.ABC):
             None
         """
         ...
+
+    def _config_dict(self) -> dict:
+        """Return the backend config as a dict, or raise if none (injected client)."""
+        if self.backend_config is None:
+            raise RuntimeError(
+                f"{type(self).__name__}.connect() called with no backend_config; "
+                "an injected-client handler must not build its own connection."
+            )
+        return dataclasses.asdict(self.backend_config)
 
     async def _connect(self) -> None:
         """Establish the broker client, honoring injected-client ownership.
@@ -228,7 +249,7 @@ class AsyncBrokerHandler(AsyncLoggingHandler, abc.ABC):
                     "level": level,
                     "message": record.getMessage(),
                     "name": name,
-                    "time": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
+                    "time": iso_timestamp(record.created),
                 }
                 try:
                     await self.send_message(log_entry)

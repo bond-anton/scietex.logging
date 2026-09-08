@@ -7,10 +7,8 @@ try:
 except ImportError as e:
     raise ImportError(optional_dependency_error("redis", "redis"), name="redis") from e
 
-import dataclasses
 import logging
 from collections.abc import Callable
-from typing import cast
 
 from ..async_logging_handler import _QUEUE_REDIS
 from .broker import AsyncBrokerHandler
@@ -54,7 +52,7 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             redis_config (dict, optional): Configuration dictionary for Redis connection.
                 Defaults to {"host": "localhost", "port": 6379, "db": 0}. Keys are
                 converted into a typed ``RedisConfig`` stored as
-                ``self.config.backend_config``, which is the single source passed to
+                ``self.backend_config``, which is the single source passed to
                 ``redis.Redis`` by ``connect()``. Mutually exclusive with ``client``.
             client (redis.Redis | None): An externally-managed Redis client to use
                 instead of building one in ``connect()``. When provided, the handler
@@ -92,16 +90,11 @@ class AsyncRedisHandler(AsyncBrokerHandler):
         )
         self.stream_name = stream_name
 
-    @property
-    def client_config(self) -> dict:
-        """Read-only view of the backend config as a dict (backward compat)."""
-        return dataclasses.asdict(cast(RedisConfig, self.config.backend_config))
-
     async def connect(self) -> None:
         """
         Connect to Redis asynchronously.
 
-        Builds the client from ``self.config.backend_config`` (the typed
+        Builds the client from ``self.backend_config`` (the typed
         ``RedisConfig``, the single source of truth), honoring the user's
         ``decode_responses`` value rather than forcing it True. A ping probes
         connectivity before the client is considered connected.
@@ -110,7 +103,7 @@ class AsyncRedisHandler(AsyncBrokerHandler):
             None
         """
         if self.client is None:
-            cfg = dataclasses.asdict(cast(RedisConfig, self.config.backend_config))
+            cfg = self._config_dict()
             client = await redis.Redis(**cfg)
             try:
                 await client.ping()

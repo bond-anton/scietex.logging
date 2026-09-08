@@ -75,8 +75,8 @@ def test_mqtt_config_is_typed_and_validated():
         topic="s",
         mqtt_config={"host": "example.com", "port": 8883},
     )
-    assert handler.config.backend_config.host == "example.com"
-    assert handler.config.backend_config.port == 8883
+    assert handler.backend_config.host == "example.com"
+    assert handler.backend_config.port == 8883
     # client_config is a read-only asdict view of the typed config.
     assert handler.client_config == asdict(MqttConfig(host="example.com", port=8883))
 
@@ -84,8 +84,8 @@ def test_mqtt_config_is_typed_and_validated():
 def test_mqtt_config_defaults():
     """No mqtt_config defaults to a localhost:1883 MqttConfig."""
     handler = AsyncMqttHandler(topic="s")
-    assert handler.config.backend_config.host == "localhost"
-    assert handler.config.backend_config.port == 1883
+    assert handler.backend_config.host == "localhost"
+    assert handler.backend_config.port == 1883
     assert handler.client_config["host"] == "localhost"
     assert handler.client_config["port"] == 1883
 

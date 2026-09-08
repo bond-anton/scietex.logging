@@ -1,7 +1,6 @@
 """Tests for the typed configuration objects (AR-008)."""
 
 import logging
-import typing
 
 import pytest
 
@@ -10,6 +9,7 @@ from scietex.logging.config import (
     MqttConfig,
     RedisConfig,
     ValkeyConfig,
+    iso_timestamp,
     level_abbreviation,
     optional_dependency_error,
     validate_queue_maxsize,
@@ -20,7 +20,11 @@ def test_logging_config_defaults():
     cfg = LoggingConfig()
     assert cfg.error_handler is None
     assert cfg.queue_maxsize == 10000
-    assert cfg.backend_config is None
+
+
+def test_logging_config_has_only_machinery_fields():
+    """backend_config is broker-owned; LoggingConfig keeps only the machinery options."""
+    assert set(LoggingConfig.__dataclass_fields__) == {"error_handler", "queue_maxsize"}
 
 
 def test_logging_config_is_frozen():
@@ -62,12 +66,6 @@ def test_redis_config_accepts_full_client_option_surface():
     assert cfg.health_check_interval == 30
     assert cfg.decode_responses is True
     assert cfg.client_name == "my-client"
-
-
-def test_backend_config_is_a_union_not_any():
-    """LoggingConfig.backend_config is typed as a union of the backend configs, not Any."""
-    hints = typing.get_type_hints(LoggingConfig)
-    assert hints["backend_config"] == RedisConfig | ValkeyConfig | MqttConfig | None
 
 
 def test_valkey_config_defaults():
@@ -170,6 +168,12 @@ def test_level_abbreviation_lives_in_config():
     assert level_abbreviation(logging.ERROR) == "ERR"
     assert level_abbreviation(logging.CRITICAL) == "CRT"
     assert level_abbreviation(999) == "999"
+
+
+def test_iso_timestamp_returns_iso8601_utc():
+    """iso_timestamp is importable from the neutral config leaf (AR-007)."""
+    assert iso_timestamp(0) == "1970-01-01T00:00:00+00:00"
+    assert iso_timestamp(1234567890.5).endswith("+00:00")
 
 
 @pytest.mark.parametrize(

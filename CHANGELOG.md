@@ -35,6 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AsyncFileHandler` (and its rotation variants) accept it, each owning its own
   `self.formatter` (default `ScietexFormatter`). Broker wire payloads are built
   from the record directly and were never affected by the formatter.
+- **`LoggingConfig.backend_config`**: the `backend_config` field is removed from
+  `LoggingConfig`, and the `backend_config=` keyword is removed from the
+  pure-machinery base `AsyncLoggingHandler.__init__`. Passing `backend_config=`
+  to `AsyncLoggingHandler` or `ConsoleHandler` now raises `TypeError`. Broker
+  handlers (`AsyncBrokerHandler`, `AsyncRedisHandler`, `AsyncValkeyHandler`,
+  `AsyncMqttHandler`) still accept `backend_config=` and now store the typed
+  config as their own `self.backend_config` attribute (broker-owned, no longer
+  forwarded to the base).
 
 ### Changed
 
@@ -53,6 +61,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that reads `handler.log_queues["console"]` or a drain result's `.name` — those
   keys are now `"_console"` etc. The shutdown status text (e.g. "Console Logger
   has completed processing its queue.") is unchanged.
+
+### Fixed
+
+- **Injected-client `client_config`**: reading `client_config` on a broker
+  handler constructed with an injected `client=` (and no config dict) now
+  returns `{}` instead of raising `TypeError` from `dataclasses.asdict(None)`.
 
 ## [1.8.0] - 2026-09-07
 

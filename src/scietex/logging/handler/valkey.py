@@ -7,10 +7,8 @@ try:
 except ImportError as e:
     raise ImportError(optional_dependency_error("valkey-glide", "valkey"), name="glide") from e
 
-import dataclasses
 import logging
 from collections.abc import Callable
-from typing import cast
 
 from ..async_logging_handler import _QUEUE_VALKEY
 from .broker import AsyncBrokerHandler
@@ -55,7 +53,7 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
                 Keys mirror ``GlideClientConfiguration``'s scalar plain options; ``addresses``
                 is a list of ``(host, port)`` tuples and defaults to ``[("localhost", 6379)]``.
                 The dict is converted into a typed ``ValkeyConfig`` stored as
-                ``self.config.backend_config``, which ``connect()`` translates into a
+                ``self.backend_config``, which ``connect()`` translates into a
                 ``GlideClientConfiguration``; keys left ``None`` let glide apply its own
                 defaults. Defaults to ``{}``. Mutually exclusive with ``client``.
             client (Any | None): An externally-managed Valkey client to use instead of
@@ -92,16 +90,11 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
         )
         self.stream_name = stream_name
 
-    @property
-    def client_config(self) -> dict:
-        """Read-only view of the backend config as a dict (backward compat)."""
-        return dataclasses.asdict(cast(ValkeyConfig, self.config.backend_config))
-
     async def connect(self) -> None:
         """
         Connect to Valkey asynchronously.
 
-        Builds the client from ``self.config.backend_config`` (the typed
+        Builds the client from ``self.backend_config`` (the typed
         ``ValkeyConfig``, the single source of truth). ``addresses`` entries are
         ``(host, port)`` tuples converted to ``NodeAddress`` objects, and fields
         left ``None`` are dropped so glide applies its own defaults. A failed
@@ -111,7 +104,7 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
             None
         """
         if self.client is None:
-            cfg = dataclasses.asdict(cast(ValkeyConfig, self.config.backend_config))
+            cfg = self._config_dict()
             addresses = cfg.pop("addresses", None)
             if not addresses:
                 node_addresses = [NodeAddress()]
@@ -124,12 +117,12 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
                 credentials = ServerCredentials(password=password, username=username)
             kwargs = {k: v for k, v in cfg.items() if v is not None}
             if credentials is None:
-                client_config = GlideClientConfiguration(node_addresses, **kwargs)
+                glide_config = GlideClientConfiguration(node_addresses, **kwargs)
             else:
-                client_config = GlideClientConfiguration(
+                glide_config = GlideClientConfiguration(
                     node_addresses, credentials=credentials, **kwargs
                 )
-            self.client = await GlideClient.create(client_config)
+            self.client = await GlideClient.create(glide_config)
 
     async def disconnect(self) -> None:
         """

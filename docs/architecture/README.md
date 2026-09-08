@@ -24,7 +24,7 @@ machinery is separated from the sinks:
 - **Valkey** (streams) — optional, requires the `valkey-glide` package.
 - **MQTT** (topic) — optional, requires the `aiomqtt` package.
 
-The package is small: ~3000 lines of source across 13 modules under
+The package is small: ~3000 lines of source across 14 modules under
 `src/scietex/logging/`.
 
 ## Document Index

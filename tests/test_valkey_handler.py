@@ -100,7 +100,7 @@ def test_valkey_config_is_typed():
         stream_name="s",
         valkey_config={"addresses": [("example.com", 7000)]},
     )
-    assert handler.config.backend_config.addresses == [("example.com", 7000)]
+    assert handler.backend_config.addresses == [("example.com", 7000)]
     # client_config is a read-only asdict view of the typed config.
     assert handler.client_config["addresses"] == [("example.com", 7000)]
 
@@ -108,7 +108,7 @@ def test_valkey_config_is_typed():
 def test_valkey_config_defaults():
     """No valkey_config defaults to a localhost:6379 ValkeyConfig."""
     handler = AsyncValkeyHandler(stream_name="s")
-    assert handler.config.backend_config.addresses == [("localhost", 6379)]
+    assert handler.backend_config.addresses == [("localhost", 6379)]
     assert handler.client_config["addresses"] == [("localhost", 6379)]
 
 
@@ -126,7 +126,7 @@ async def test_valkey_connect_translates_config_to_glide(monkeypatch):
         stream_name="s",
         valkey_config={"addresses": [("localhost", 6379)], "request_timeout": 100},
     )
-    assert handler.config.backend_config.request_timeout == 100
+    assert handler.backend_config.request_timeout == 100
     await handler.connect()
     config = captured["config"]
     assert isinstance(config, GlideClientConfiguration)

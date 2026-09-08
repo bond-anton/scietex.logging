@@ -7,6 +7,7 @@ import os
 
 import pytest
 
+from scietex.logging.backend.file import FileBackend
 from scietex.logging.formatter.json import JsonFormatter
 from scietex.logging.handler.file import (
     AsyncFileHandler,
@@ -38,6 +39,11 @@ async def test_file_handler_registers_file_backend(tmp_path):
     assert "_file" in handler.log_queues
     assert handler._file_backend is not None
     assert handler.log_queues["_file"] is handler._file_backend.queue
+    # The registered worker factory is the backend's own worker, so the backend
+    # owns the file lifecycle (queue + worker + drain) — mirroring ConsoleHandler.
+    (worker_factory,) = handler.log_worker_factories
+    assert worker_factory.__self__ is handler._file_backend
+    assert worker_factory.__func__ is FileBackend._worker
 
     await handler.stop_logging()
 
@@ -172,7 +178,7 @@ async def test_rotating_handler_rolls_over_off_the_loop_thread(tmp_path):
     loop_thread = threading.current_thread().name
     write_threads: list[str] = []
 
-    original_open = handler._open_stream
+    original_open = handler._file_backend._open_stream
 
     def recording_open():
         inner = original_open()
@@ -196,7 +202,7 @@ async def test_rotating_handler_rolls_over_off_the_loop_thread(tmp_path):
 
         return RecordingStream()
 
-    handler._open_stream = recording_open
+    handler._file_backend._open_stream = recording_open
     await handler.start_logging()
 
     logger = logging.getLogger("RotatingOffLoopLogger")
@@ -267,7 +273,7 @@ async def test_rotating_handler_cancelled_no_write_after_close(tmp_path):
     )
     await handler.start_logging()
 
-    original_open = handler._open_stream
+    original_open = handler._file_backend._open_stream
     state = {"write_started": threading.Event(), "write_finished": threading.Event()}
 
     class SlowStream:
@@ -292,7 +298,7 @@ async def test_rotating_handler_cancelled_no_write_after_close(tmp_path):
     def slow_open():
         return SlowStream(original_open())
 
-    handler._open_stream = slow_open
+    handler._file_backend._open_stream = slow_open
     logger = logging.getLogger("RotCancelLogger")
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
@@ -308,7 +314,7 @@ async def test_rotating_handler_cancelled_no_write_after_close(tmp_path):
 
     assert state["write_finished"].is_set(), "in-flight write was lost"
     assert "cancel me" in path.read_text()
-    assert handler._stream is None  # closed cleanly
+    assert handler._file_backend._stream is None  # closed cleanly
 
 
 @pytest.mark.asyncio
@@ -347,7 +353,7 @@ async def test_timed_rotating_handler_writes_off_the_loop_thread(tmp_path):
     loop_thread = threading.current_thread().name
     write_threads: list[str] = []
 
-    original_open = handler._open_stream
+    original_open = handler._file_backend._open_stream
 
     def recording_open():
         inner = original_open()
@@ -365,7 +371,7 @@ async def test_timed_rotating_handler_writes_off_the_loop_thread(tmp_path):
 
         return RecordingStream()
 
-    handler._open_stream = recording_open
+    handler._file_backend._open_stream = recording_open
     await handler.start_logging()
 
     logger = logging.getLogger("TimedOffLoopLogger")
@@ -404,7 +410,7 @@ async def test_timed_rotating_handler_rolls_over_and_orders(tmp_path):
         await asyncio.sleep(0.01)
 
     # Force the next write to roll over by moving rolloverAt into the past.
-    handler._rotator.rolloverAt = int(time.time()) - 1
+    handler._file_backend._rotator.rolloverAt = int(time.time()) - 1
     logger.info("second message")
     await handler.stop_logging()
 
@@ -429,7 +435,7 @@ async def test_timed_rotating_handler_cancelled_no_write_after_close(tmp_path):
     )
     await handler.start_logging()
 
-    original_open = handler._open_stream
+    original_open = handler._file_backend._open_stream
     state = {"write_started": threading.Event(), "write_finished": threading.Event()}
 
     class SlowStream:
@@ -454,7 +460,7 @@ async def test_timed_rotating_handler_cancelled_no_write_after_close(tmp_path):
     def slow_open():
         return SlowStream(original_open())
 
-    handler._open_stream = slow_open
+    handler._file_backend._open_stream = slow_open
     logger = logging.getLogger("TimedCancelLogger")
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
@@ -470,7 +476,7 @@ async def test_timed_rotating_handler_cancelled_no_write_after_close(tmp_path):
 
     assert state["write_finished"].is_set(), "in-flight write was lost"
     assert "cancel me" in path.read_text()
-    assert handler._stream is None  # closed cleanly
+    assert handler._file_backend._stream is None  # closed cleanly
 
 
 @pytest.mark.asyncio
@@ -499,7 +505,7 @@ async def test_watched_file_handler_writes_off_the_loop_thread(tmp_path):
     loop_thread = threading.current_thread().name
     write_threads: list[str] = []
 
-    original_open = handler._open_stream
+    original_open = handler._file_backend._open_stream
 
     def recording_open():
         inner = original_open()
@@ -517,7 +523,7 @@ async def test_watched_file_handler_writes_off_the_loop_thread(tmp_path):
 
         return RecordingStream()
 
-    handler._open_stream = recording_open
+    handler._file_backend._open_stream = recording_open
     await handler.start_logging()
 
     logger = logging.getLogger("WatchedOffLoopLogger")
@@ -576,7 +582,7 @@ async def test_watched_handler_cancelled_no_write_after_close(tmp_path):
     )
     await handler.start_logging()
 
-    original_open = handler._open_stream
+    original_open = handler._file_backend._open_stream
     state = {"write_started": threading.Event(), "write_finished": threading.Event()}
 
     class SlowStream:
@@ -601,7 +607,7 @@ async def test_watched_handler_cancelled_no_write_after_close(tmp_path):
     def slow_open():
         return SlowStream(original_open())
 
-    handler._open_stream = slow_open
+    handler._file_backend._open_stream = slow_open
     logger = logging.getLogger("WatchedCancelLogger")
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
@@ -617,7 +623,7 @@ async def test_watched_handler_cancelled_no_write_after_close(tmp_path):
 
     assert state["write_finished"].is_set(), "in-flight write was lost"
     assert "cancel me" in path.read_text()
-    assert handler._stream is None  # closed cleanly
+    assert handler._file_backend._stream is None  # closed cleanly
 
 
 @pytest.mark.asyncio
@@ -666,7 +672,7 @@ async def test_cancelled_worker_closes_stream_after_inflight_write(tmp_path):
     await handler.start_logging()
 
     # Make the stream's write block so we can cancel the worker mid-write.
-    original_open = handler._open_stream
+    original_open = handler._file_backend._open_stream
     state = {"write_started": threading.Event(), "write_finished": threading.Event()}
 
     class SlowStream:
@@ -691,7 +697,7 @@ async def test_cancelled_worker_closes_stream_after_inflight_write(tmp_path):
     def slow_open():
         return SlowStream(original_open())
 
-    handler._open_stream = slow_open
+    handler._file_backend._open_stream = slow_open
     logger = logging.getLogger("CancelFileLogger")
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
@@ -710,7 +716,7 @@ async def test_cancelled_worker_closes_stream_after_inflight_write(tmp_path):
 
     assert state["write_finished"].is_set(), "in-flight write was lost"
     assert "cancel me" in path.read_text()
-    assert handler._stream is None  # closed cleanly
+    assert handler._file_backend._stream is None  # closed cleanly
 
 
 @pytest.mark.asyncio

@@ -234,7 +234,7 @@ def test_valkey_client_only_no_error():
     )
     assert handler._owns_client is False
     assert handler.client is client
-    assert handler.config.backend_config is None
+    assert handler.backend_config is None
 
 
 def test_redis_client_and_config_raise():
@@ -259,7 +259,7 @@ def test_redis_client_only_no_error():
     )
     assert handler._owns_client is False
     assert handler.client is client
-    assert handler.config.backend_config is None
+    assert handler.backend_config is None
 
 
 def test_mqtt_client_and_config_raise():
@@ -284,4 +284,25 @@ def test_mqtt_client_only_no_error():
     )
     assert handler._owns_client is False
     assert handler.client is client
-    assert handler.config.backend_config is None
+    assert handler.backend_config is None
+
+
+def test_valkey_injected_client_config_is_empty():
+    """An injected-client Valkey handler exposes client_config == {}, not a TypeError."""
+    valkey = pytest.importorskip("scietex.logging.handler.valkey")
+    handler = valkey.AsyncValkeyHandler(stream_name="s", client=object())
+    assert handler.client_config == {}
+
+
+def test_redis_injected_client_config_is_empty():
+    """An injected-client Redis handler exposes client_config == {}, not a TypeError."""
+    redis_mod = pytest.importorskip("scietex.logging.handler.redis")
+    handler = redis_mod.AsyncRedisHandler(stream_name="s", client=object())
+    assert handler.client_config == {}
+
+
+def test_mqtt_injected_client_config_is_empty():
+    """An injected-client MQTT handler exposes client_config == {}, not a TypeError."""
+    mqtt_mod = pytest.importorskip("scietex.logging.handler.mqtt")
+    handler = mqtt_mod.AsyncMqttHandler(topic="s", client=object())
+    assert handler.client_config == {}

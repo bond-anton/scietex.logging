@@ -9,7 +9,7 @@ do, why it is significant, and related files.
 
 ## 1. `AsyncLoggingHandler` — the shared machinery core
 
-**Location.** `src/scietex/logging/async_logging_handler.py` (`AsyncLoggingHandler`, 556-line module).
+**Location.** `src/scietex/logging/async_logging_handler.py` (`AsyncLoggingHandler`, 552-line module).
 
 **What it appears to do.** One class owns the stdlib `logging.Handler`
 integration (`emit`), the async queue/event machinery, worker task lifecycle,
@@ -31,7 +31,7 @@ central structural decision of the package.
 
 ## 2. `stop_logging` — coordinator-owned drain via per-backend hooks
 
-**Location.** `AsyncLoggingHandler.stop_logging`, `async_logging_handler.py:404-522`.
+**Location.** `AsyncLoggingHandler.stop_logging`, `async_logging_handler.py:400-518`.
 
 **What it appears to do.** Clears the accept event, then schedules every
 registered `drain` hook **concurrently** via `asyncio.gather` under one shared
@@ -40,7 +40,7 @@ registration order. After every drain concludes, it invokes each registered
 status reporter with the collected results. Finally it clears the running
 event, gathers worker tasks, resets `log_workers_tasks`, and clears any records
 still queued after the drain window and worker teardown via `get_nowait()` +
-`task_done()` (`async_logging_handler.py:505-513`) — undelivered records are
+`task_done()` (`async_logging_handler.py:501-509`) — undelivered records are
 dropped, not replayed on the next start (AR-020).
 
 **Why significant.** Shutdown is now generic — no queue-name special-casing.
@@ -57,8 +57,8 @@ worth confirming for new backends.
 
 ## 3. Worker lifecycle — restartable via worker factories
 
-**Location.** `AsyncLoggingHandler.__init__` (`async_logging_handler.py:140`),
-`start_logging` (`async_logging_handler.py:274`), `stop_logging`.
+**Location.** `AsyncLoggingHandler.__init__` (`async_logging_handler.py:141`),
+`start_logging` (`async_logging_handler.py:270`), `stop_logging`.
 
 **What it appears to do.** Worker *factories* (zero-argument callables returning
 a fresh coroutine) are registered in `__init__` by each backend and appended to
@@ -79,8 +79,8 @@ boundary that makes the lifecycle restartable.
 
 ## 4. `emit` — thread-safe ingress write + bridge fan-out
 
-**Location.** `AsyncLoggingHandler.emit`, `async_logging_handler.py:312-364`;
-`_bridge_loop`, `async_logging_handler.py:366-402`.
+**Location.** `AsyncLoggingHandler.emit`, `async_logging_handler.py:308-360`;
+`_bridge_loop`, `async_logging_handler.py:362-398`.
 
 **What it appears to do.** Writes the record to the shared thread-safe
 `queue.Queue` ingress via `put_nowait`, then wakes the bridge with
@@ -101,10 +101,10 @@ the `scieetex.logging` module logger.
 ## 5. Bounded queues with drop + report overflow
 
 **Location.** `queue.Queue(maxsize=queue_maxsize)` ingress construction in
-`async_logging_handler.py:303`; `asyncio.Queue(maxsize=...)` construction in
-`backend/console.py:99` and `handler/broker.py:110`; the `except
-queue.Full` branch in `emit` (`async_logging_handler.py:346`) and the `except
-asyncio.QueueFull` branch in the bridge (`async_logging_handler.py:399`).
+`async_logging_handler.py:299`; `asyncio.Queue(maxsize=...)` construction in
+`backend/_base.py:112` and `handler/broker.py:115`; the `except
+queue.Full` branch in `emit` (`async_logging_handler.py:342`) and the `except
+asyncio.QueueFull` branch in the bridge (`async_logging_handler.py:395`).
 
 **What it appears to do.** Every backend queue is bounded by `queue_maxsize`
 (default 10000), set on `AsyncLoggingHandler`/`ConsoleHandler` and stored as
@@ -140,7 +140,7 @@ outcomes as a post-drain observer rather than by drain order. The console worker
 reads the handler's formatter dynamically through a `formatter_provider`
 callable (`lambda: self.formatter` from `handler/console.py:61`) and routes
 format/write failures through its own `error_handler` channel
-(`backend/console.py:148`), so a broken stdout or buggy formatter cannot
+(`backend/console.py:114`), so a broken stdout or buggy formatter cannot
 silently kill the console worker (AR-021/AR-030).
 
 **Why significant.** The console backend is a **standalone** peer backend: it is
@@ -148,10 +148,11 @@ registered by `ConsoleHandler` the same way the file backend is registered by
 `AsyncFileHandler` and a broker backend is registered by `AsyncBrokerHandler`.
 Console output is no longer an auxiliary output attached to broker/file
 handlers — a handler emits only to the backend it registers, so a logger that
-needs console output attaches a `ConsoleHandler`. The file sink (`FileBackend`,
-registered by `AsyncFileHandler`) is a **symmetric peer** to console — same
-queue + worker + drain + `report_status` shape, writing to a file handle
-instead of `sys.stdout` — so the peer-backend pattern now has two local-sink
+needs console output attaches a `ConsoleHandler`. The file sink (`FileBackend`
+and its rotation subclasses, registered by `AsyncFileHandler` and its variants)
+is a **symmetric peer** to console — same queue + worker + drain +
+`report_status` shape, additionally owning the entire file lifecycle (lazy open,
+write, close-in-finally) — so the peer-backend pattern now has two local-sink
 instances plus the broker backends.
 
 **Related.** `overview.md`, `data-flow.md` Flow 3, `backend/file.py`.
@@ -176,7 +177,7 @@ is an **intentional, documented adapter difference**: the abstract
 `{level, message, name, time}`, and each concrete adapter translates it to the
 argument shape its client expects. No uniform client wrapper was added. All
 concrete `send_message` implementations raise `RuntimeError` when `self.client
-is None` (`handler/redis.py:140-141`, `handler/valkey.py:153-154`,
+is None` (`handler/redis.py:133-134`, `handler/valkey.py:146-147`,
 `handler/mqtt.py`) rather than silently no-oping, so an unconnected send
 surfaces as a failure (AR-034). The file handlers (`AsyncFileHandler` and its
 rotation variants) are **not** broker backends — they subclass `AsyncLoggingHandler`
@@ -250,10 +251,10 @@ gracefully for local runs without a broker.
 
 ## 11. Formatter copies the record; broker dict built independently
 
-**Location.** `ScietexFormatter.format`, `formatter/scietex.py:65-86`.
+**Location.** `ScietexFormatter.format`, `formatter/scietex.py:63-84`.
 
 **What it appears to do.** `format` first copies the record
-(`record = copy.copy(record)` at `formatter/scietex.py:80`), then overwrites
+(`record = copy.copy(record)` at `formatter/scietex.py:78`), then overwrites
 `record.levelname` (the abbreviation) on the **copy** before delegating to the
 parent formatter. The caller's shared `LogRecord` is never mutated.
 
@@ -263,22 +264,22 @@ multiple queues, and each backend's worker formats the same record. Because
 backends. The broker worker additionally computes its dict fields
 **independently** — `level = level_abbreviation(record.levelno)`,
 `name = record.name`, and
-`time = datetime.fromtimestamp(record.created, timezone.utc).isoformat()`
-(`handler/broker.py:225-232`) — from the record itself rather than
+`time = iso_timestamp(record.created)`
+(`handler/broker.py:246-253`) — from the record itself rather than
 from formatter-mutated attributes, so the broker wire format is invariant under
 `setFormatter` (broker handlers do not accept a `formatter=` keyword at all) and
 there is **no implicit ordering dependency** between
 formatting and dict-building. `level_abbreviation` itself now lives in
-`config.py` (`config.py:172-190`) and is imported by the broker from `.config`
+`config.py` (`config.py:170-188`) and is imported by the broker from `.config`
 (`handler/broker.py:12`), not from the formatter module (AR-026).
 
-**Related.** `data-flow.md` Flow 2; `handler/broker.py:225-232`.
+**Related.** `data-flow.md` Flow 2; `handler/broker.py:246-253`.
 
 ---
 
 ## 12. `AsyncBrokerHandler._worker` — connection + drain coupling
 
-**Location.** `handler/broker.py:187-261`.
+**Location.** `handler/broker.py:208-282`.
 
 **What it appears to do.** The worker calls `connect()` once at start, then
 loops draining the queue and calling `send_message`, then `disconnect()` at
@@ -287,7 +288,7 @@ capped-exponential-backoff delay, and retries **without dequeuing** the record.
 The delay doubles from a 0.5s base up to a 30s cap with ±20% jitter (module
 constants `_CONNECT_RETRY_BASE`/`_CONNECT_RETRY_CAP`/`_CONNECT_RETRY_JITTER` at
 `handler/broker.py:19-21`), and a successful connect resets it to base
-(`handler/broker.py:214`) — AR-022. On a `send_message()` failure it
+(`handler/broker.py:235`) — AR-022. On a `send_message()` failure it
 reports via the error channel, tears the client down (`disconnect()`, with a
 `self.client = None` fallback if that raises) so the next iteration reconnects,
 and acknowledges the record via `task_done()` in a `finally`.
@@ -309,8 +310,8 @@ the client.
 
 ## 13. Synchronous blocking file I/O in the worker
 
-**Location.** `backend/file.py` (`FileBackend._worker`) and `handler/file.py`
-(`AsyncFileHandler._worker`).
+**Location.** `backend/file.py` (`FileBackend._worker` and the rotation
+subclasses `RotatingFileBackend`/`TimedRotatingFileBackend`/`WatchedFileBackend`).
 
 **What it appears to do.** Historically the file worker wrote each formatted
 record to the file handle with a **synchronous** `write()` + `flush()` call,
@@ -329,4 +330,4 @@ Teardown submits the stream close to the *same* executor and calls
 `docs/ROADMAP.md` "1.x — Async redesign of Console and File backends".
 
 **Related.** `docs/ROADMAP.md`; `backend/console.py` (same executor offload);
-`backend/file.py`, `handler/file.py`, `_executor.py`.
+`backend/file.py`, `_executor.py`.

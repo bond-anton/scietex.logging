@@ -4,11 +4,10 @@ Module with custom logging formatters.
 
 import copy
 import logging
-from datetime import datetime, timezone
 
 # Imported from the shared stdlib-only leaf (AR-026); also re-exported here for
 # backward compatibility with callers that import it from the formatter module.
-from ..config import level_abbreviation
+from ..config import iso_timestamp, level_abbreviation
 
 
 class ScietexFormatter(logging.Formatter):
@@ -58,8 +57,7 @@ class ScietexFormatter(logging.Formatter):
                  no datefmt is specified.
         """
         if datefmt is None:
-            dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
-            return dt.isoformat()
+            return iso_timestamp(record.created)
         return super().formatTime(record, datefmt)
 
     def format(self, record: logging.LogRecord) -> str:

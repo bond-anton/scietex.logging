@@ -7,16 +7,17 @@ direction, not an exhaustive list of third-party packages.
 
 ```
 formatter/scietex.py      (imports: config.py)
-formatter/json.py         (no intra-package imports)
+formatter/json.py         (imports: config.py)
 config.py                 (no intra-package imports)
 _executor.py              (no intra-package imports; provides _WriteExecutor)
 async_logging_handler.py  (imports: config.py; no formatter dep)
+backend/_base.py          (imports: async_logging_handler.py, config.py)
 
    ▲ imports AsyncLoggingHandler
-   ├── backend/console.py    (imports ConsoleBackend, _WriteExecutor)
-   ├── backend/file.py       (imports FileBackend, _WriteExecutor)
+   ├── backend/console.py    (imports _QUEUE_CONSOLE, _WriteExecutor; extends _QueueBackend)
+   ├── backend/file.py       (imports _QUEUE_FILE, _WriteExecutor; extends _QueueBackend)
    ├── handler/console.py    (extends AsyncLoggingHandler; registers console backend; imports ScietexFormatter)
-   ├── handler/file.py       (extends AsyncLoggingHandler; registers "_file" backend; imports _WriteExecutor, ScietexFormatter)
+   ├── handler/file.py       (extends AsyncLoggingHandler; registers "_file" backend; imports ScietexFormatter)
    └── handler/broker.py     (extends AsyncLoggingHandler; abstract broker base)
           ▲ extends AsyncBrokerHandler
           ├── handler/redis.py
@@ -27,11 +28,12 @@ __init__.py  (public API)
 ```
 
 Direction is strictly **one-way, top-down** (no cycles): `config` is the shared
-leaf; `async_logging_handler` depends only on `config`, while the console/file
-handlers additionally import `formatter/scietex`; `backend/console`,
-`backend/file`, `handler/console`, `handler/file`, and `handler/broker` extend or
-import the base; concrete backends extend the broker base; `__init__` re-exports
-everything.
+leaf; `async_logging_handler` depends only on `config`, while `backend/_base`
+depends on `async_logging_handler` and `config`; `backend/console` and
+`backend/file` extend `_QueueBackend` (from `backend/_base`) and import the
+queue-name constants; the console/file handlers additionally import
+`formatter/scietex`; concrete backends extend the broker base; `__init__`
+re-exports everything.
 
 ## Core → infrastructure dependencies
 
@@ -51,7 +53,7 @@ backend or third-party client.
 - **Concrete file handler** (`AsyncFileHandler` + rotation variants) →
   core + file peer; registers the `"_file"` backend. No third-party runtime deps.
 - **Broker abstraction** (`AsyncBrokerHandler`) → core; stdlib
-  `asyncio`, `datetime`. No third-party runtime deps.
+  `asyncio`, `dataclasses`, `logging`, `random`. No third-party runtime deps.
 - **Concrete backends** (`AsyncRedisHandler`, `AsyncValkeyHandler`,
   `AsyncMqttHandler`) → broker abstraction + their respective third-party
   clients (`redis`, `glide`, `aiomqtt`).
@@ -69,17 +71,21 @@ stdlib-only peers, so they carry no optional dependency.
   `validate_queue_maxsize`); no formatter import.
 - `handler/console.py` → `formatter/scietex.py` (constructs `ScietexFormatter`).
 - `handler/file.py` → `formatter/scietex.py` (constructs `ScietexFormatter`).
-- `backend/console.py` → `async_logging_handler.py` (imports `BackendDrainResult`,
-  `DrainStatus` for shutdown-status reporting) and `_executor.py` (imports
-  `_WriteExecutor` to offload the blocking stdout write).
-- `backend/file.py` → `async_logging_handler.py` (imports `BackendDrainResult`,
-  `DrainStatus` for shutdown-status reporting) and `_executor.py` (imports
-  `_WriteExecutor` to offload the blocking stream write).
+- `backend/_base.py` → `async_logging_handler.py` (imports `BackendDrainResult`,
+  `DrainStatus` for shutdown-status reporting) and `config.py` (imports
+  `report_error` for the shared error channel).
+- `backend/console.py` → `async_logging_handler.py` (imports `_QUEUE_CONSOLE`),
+  `_executor.py` (imports `_WriteExecutor` to offload the blocking stdout write),
+  and `backend/_base.py` (extends `_QueueBackend`).
+- `backend/file.py` → `async_logging_handler.py` (imports `_QUEUE_FILE`),
+  `_executor.py` (imports `_WriteExecutor` to offload the blocking stream write),
+  and `backend/_base.py` (extends `_QueueBackend`).
 - `handler/console.py` → `async_logging_handler.py` (inheritance) and
   `backend/console.py` (registers the console backend).
-- `handler/file.py` → `async_logging_handler.py` (inheritance), `backend/file.py`
-  (registers the `"_file"` backend), and `_executor.py` (imports `_WriteExecutor`
-  for the worker's write unit and close-on-executor teardown).
+- `handler/file.py` → `async_logging_handler.py` (inheritance) and `backend/file.py`
+  (registers the `"_file"` backend). The `_WriteExecutor` used for the worker's
+  write unit and close-on-executor teardown lives inside `backend/file.py`, not
+  the handler.
 - `handler/broker.py` → `async_logging_handler.py` (inheritance + reuse of
   queues/events/workers) and `config.py` (`level_abbreviation`).
 - `handler/redis.py`, `handler/valkey.py`, `handler/mqtt.py` →
@@ -122,7 +128,7 @@ None detected. The import graph is acyclic and strictly layered.
 
 | Module | Third-party dep | Optional? |
 |---|---|---|
-| `_executor.py`, `async_logging_handler.py`, `handler/console.py`, `backend/console.py`, `backend/file.py`, `handler/file.py`, `formatter/scietex.py`, `formatter/json.py`, `handler/broker.py` | none | — |
+| `_executor.py`, `async_logging_handler.py`, `handler/console.py`, `backend/_base.py`, `backend/console.py`, `backend/file.py`, `handler/file.py`, `formatter/scietex.py`, `formatter/json.py`, `handler/broker.py` | none | — |
 | `handler/redis.py` | `redis>=5.0.0` | yes (`[redis]`) |
 | `handler/valkey.py` | `valkey-glide~=2.5.0` | yes (`[valkey]`) |
 | `handler/mqtt.py` | `aiomqtt~=2.5.0` | yes (`[mqtt]`) |

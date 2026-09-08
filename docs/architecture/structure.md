@@ -26,12 +26,13 @@ scietex.logging/
 | `__init__.py` | Public API. Re-exports `ConsoleHandler`, `AsyncBrokerHandler`, `AsyncLoggingHandler`, `AsyncFileHandler`, `AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`, `AsyncWatchedFileHandler`, `ConsoleBackend`, `FileBackend`, `JsonFormatter`, `ScietexFormatter`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler`; defines `__version__ = "2.0.0"`. |
 | `_executor.py` | `_WriteExecutor` — private single-thread executor helper offloading blocking write I/O off the event loop (lazy-create / run / `shutdown(wait=True)`). |
 | `async_logging_handler.py` | `AsyncLoggingHandler` — pure shared async machinery (queues/events/workers, `register_backend`, `start_logging`/`emit`/`stop_logging`, error channel); no sink of its own. |
-| `backend/console.py` | `ConsoleBackend` — the console (stdout) sink as a peer backend (queue + worker + drain hook). |
-| `backend/file.py` | `FileBackend` — the file sink as a peer backend (queue + worker + drain hook), cloned from `ConsoleBackend` but writing to a `stream_provider()`-supplied file object. |
+| `backend/_base.py` | `_QueueBackend` — internal shared queue/drain/status-reporting base (`worker` property, `drain`, `report_status`, `_report_error`) plus the `_status_record` helper, inherited by both peer backends. |
+| `backend/console.py` | `ConsoleBackend` — the console (stdout) sink as a peer backend (its own `_worker`/`_write_stdout` on top of `_QueueBackend`). |
+| `backend/file.py` | `FileBackend` — the file sink as a peer backend (its own `_worker`/`_open_stream`/`_close_stream`/`_write_record` + entire file lifecycle on top of `_QueueBackend`), plus the rotation subclasses `RotatingFileBackend` / `TimedRotatingFileBackend` / `WatchedFileBackend`. |
 | `handler/console.py` | `ConsoleHandler` — thin concrete subclass of `AsyncLoggingHandler` that registers the console backend as a peer unconditionally. |
 | `handler/file.py` | `AsyncFileHandler` — concrete subclass of `AsyncLoggingHandler` that registers the `"_file"` backend; plus rotation variants `AsyncRotatingFileHandler` / `AsyncTimedRotatingFileHandler` / `AsyncWatchedFileHandler` subclassing it. |
 | `formatter/scietex.py` | `ScietexFormatter` (`logging.Formatter` subclass) + `level_abbreviation` helper. |
-| `formatter/json.py` | `JsonFormatter` (`logging.Formatter` subclass) emitting single-line NDJSON. |
+| `formatter/json.py` | `JsonFormatter` (`logging.Formatter` subclass) emitting single-line NDJSON; imports `iso_timestamp` from `config.py`. |
 | `config.py` | Typed config objects (`LoggingConfig`, `RedisConfig`, `ValkeyConfig`, `MqttConfig`) + `validate_queue_maxsize` / `level_abbreviation` / `optional_dependency_error` / `report_error` helpers. Stdlib-only leaf module. |
 | `handler/broker.py` | `AsyncBrokerHandler` — abstract broker backend base (registers queue + worker; connect/disconnect/send_message contract). |
 | `handler/redis.py` | `AsyncRedisHandler` — Redis stream backend via `redis.asyncio`. |
@@ -43,14 +44,15 @@ scietex.logging/
 
 ```
 formatter/scietex.py      → config.py
-formatter/json.py         (no intra-package imports)
+formatter/json.py         → config.py
 config.py               (no intra-package imports)
 _executor.py            (no intra-package imports)
 async_logging_handler.py → config.py
-backend/console.py       → async_logging_handler.py, _executor.py
-backend/file.py          → async_logging_handler.py, config.py, _executor.py
+backend/_base.py         → async_logging_handler.py, config.py
+backend/console.py       → async_logging_handler.py, _executor.py, backend/_base.py
+backend/file.py          → async_logging_handler.py, _executor.py, backend/_base.py
 handler/console.py       → async_logging_handler.py, backend/console.py, formatter/scietex.py
-handler/file.py          → backend/file.py, async_logging_handler.py, _executor.py, formatter/scietex.py
+handler/file.py          → backend/file.py, async_logging_handler.py, formatter/scietex.py
 handler/broker.py        → async_logging_handler.py, config.py
 handler/redis.py         → handler/broker.py, config.py
 handler/valkey.py        → handler/broker.py, config.py
@@ -80,7 +82,7 @@ everything.
 | `test_config.py` | `LoggingConfig` / `RedisConfig` / `ValkeyConfig` / `MqttConfig`, `validate_queue_maxsize`, `optional_dependency_error`. |
 | `test_formatter.py` | `level_abbreviation`, `ScietexFormatter.formatTime` (ISO UTC), `format` (level abbrev + `%(name)s` logger name). |
 | `test_console_backend.py` | `ConsoleBackend` queue/worker/drain and shutdown-status reporting. |
-| `test_file_backend.py` | `FileBackend` queue/worker/drain, dynamic stream provider, and shutdown-status reporting. |
+| `test_file_backend.py` | `FileBackend` + rotation subclasses: queue/worker/drain, file lifecycle, record-copy guard, and shutdown-status reporting. |
 | `test_json_formatter.py` | `JsonFormatter` single-line JSON output, extra flattening, exception handling, self-copying. |
 | `test_file_handler.py` | `AsyncFileHandler` + rotation variants: file writes, append, JSON formatter, injected file-like, rollover. |
 | `test_queue_bounds.py` | Bounded-queue overflow policy (drop + report). |

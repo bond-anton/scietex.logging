@@ -52,7 +52,7 @@ handler = AsyncRedisHandler(
 - `stream_name`: The Redis stream name (required)
 - `redis_config`: Dictionary with Redis connection parameters (accepted for
   backward compatibility). It is converted into a typed `RedisConfig` stored as
-  `self.config.backend_config`; unknown keys in the dict raise `TypeError`.
+  `self.backend_config`; unknown keys in the dict raise `TypeError`.
   - `host`: Redis server host (default: "localhost")
   - `port`: Redis server port (default: 6379)
   - `db`: Redis database number (default: 0)
@@ -92,7 +92,7 @@ handler = AsyncValkeyHandler(stream_name="my_log_stream")
   `GlideClientConfiguration`'s scalar plain options: `addresses` plus `username`,
   `password`, `use_tls`, `request_timeout`, `database_id`, `client_name`,
   `inflight_requests_limit`, `client_az`, `lazy_connect`, `read_only`) stored as
-  `self.config.backend_config`. `connect()` reads that typed config (the single
+  `self.backend_config`. `connect()` reads that typed config (the single
   source of truth), translating it into a `GlideClientConfiguration` and dropping
   `None`-valued fields so glide applies its own defaults. The scalar `username`
   and `password` fields are combined into a glide `ServerCredentials` and passed
@@ -132,7 +132,7 @@ handler = AsyncMqttHandler(topic="my/log/topic")
 - `topic`: The MQTT topic to which log records are published (required).
 - `mqtt_config`: Dictionary with MQTT connection parameters (accepted for
   backward compatibility). It is converted into a typed `MqttConfig` stored as
-  `self.config.backend_config`; unknown keys in the dict raise `TypeError`.
+  `self.backend_config`; unknown keys in the dict raise `TypeError`.
   `MqttConfig` mirrors `aiomqtt.Client`'s scalar plain options:
   - `host`: MQTT broker host (default: "localhost")
   - `port`: MQTT broker port (default: 1883)

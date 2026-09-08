@@ -323,6 +323,12 @@ def test_unknown_kwarg_raises_type_error_on_console_handler():
         ConsoleHandler(unknown_kwarg=True)
 
 
+def test_console_handler_rejects_backend_config():
+    """ConsoleHandler (pure machinery) no longer accepts a broker-only backend_config."""
+    with pytest.raises(TypeError):
+        ConsoleHandler(backend_config=object())
+
+
 def test_console_handler_always_registers_console_backend():
     """ConsoleHandler unconditionally registers the console backend."""
     handler = ConsoleHandler()

@@ -1,6 +1,7 @@
 # Roadmap
 
-Planned direction for `scietex.logging`. Current stable release: **2.0.0**.
+Planned direction for `scietex.logging`. In-development version: **2.0.0**
+(not yet released).
 
 The 1.x public API (`__all__` surface and constructor signatures) has grown
 additively through the 1.x line (client injection, MQTT backend, file sinks,
@@ -160,17 +161,19 @@ the loop-independent `emit` work above.
   console decoupled into a dedicated `ConsoleHandler`. Layer-specific params
   (`client`, file params, broker dict configs) are now correctly scoped to
   their layer.
-- **Residual:** `backend_config` is still accepted by the base
-  (`async_logging_handler.py:145`) and stored on `config` without the base
-  reading it — the only readers are the broker subclasses. It persists because
-  the base is the single seam that assembles the frozen `LoggingConfig`, of
-  which `backend_config` is a field. `error_handler`/`queue_maxsize` are still
-  re-declared across the concrete constructors (forwarding boilerplate, not a
-  layer leak).
+- **Residual (resolved in 2.0.0):** `backend_config` was still accepted by the
+  base (`async_logging_handler.py:145`) and stored on `config` without the base
+  reading it — the only readers were the broker subclasses. In 2.0.0 it was
+  removed from the base constructor and from `LoggingConfig`; broker handlers
+  now store the typed config as their own `backend_config` attribute (AR-004).
+  The remaining forwarding boilerplate is the re-declared
+  `error_handler`/`queue_maxsize` across the concrete constructors (boilerplate,
+  not a layer leak).
 - **Decision:** a single `LoggingConfig`-accepting constructor was evaluated and
   rejected — it moves the boilerplate without removing it and degrades
   ergonomics for the common `ConsoleHandler()` case. The base's `backend_config`
-  is an accepted, documented forwarding seam. **No further 2.0 work required.**
+  seam was removed in 2.0.0 (broker handlers own their config). **No further
+  work required.**
 
 ### Open question 3 — Formatter scope on broker handlers (resolved in 2.0.0)
 

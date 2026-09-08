@@ -2,6 +2,8 @@
 
 **scietex.logging** is an asynchronous logging package designed for high-performance applications that require non-blocking logging. It uses `asyncio` to manage log message queues and provides multiple backends, such as console, file, Redis, Valkey, and MQTT logging, allowing for easy extension to other logging targets.
 
+**Built on the standard `logging` module.** `scietex.logging` is not a replacement for Python's standard `logging` — it *extends* it. Every handler subclasses `logging.Handler` (through `AsyncLoggingHandler`), so handlers attach to ordinary loggers with `logger.addHandler(handler)` and receive records through the normal `logging` pipeline (`logger.info(...)` → `emit()`). Formatters subclass `logging.Formatter`. Standard levels, `logger.setLevel()`, `logger.addHandler()`, `logger.removeHandler()`, and `logging.shutdown()` all work unchanged, and you can mix `scietex.logging` handlers with standard-library handlers on the same logger. The only difference is that `scietex.logging` handlers process records asynchronously instead of synchronously in the calling thread.
+
 ## Features
 
 - **Asynchronous Logging**: Log messages are queued and handled asynchronously, reducing impact on application performance.

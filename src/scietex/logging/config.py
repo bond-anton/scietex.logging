@@ -3,7 +3,7 @@
 This module is the neutral leaf of the package: it hosts the configuration
 dataclasses (``LoggingConfig``, ``RedisConfig``, ``ValkeyConfig``, ``MqttConfig``) alongside the
 cross-module helpers ``validate_queue_maxsize``, ``level_abbreviation``,
-``optional_dependency_error``, and ``report_error``. It imports only the
+``iso_timestamp``, ``optional_dependency_error``, and ``report_error``. It imports only the
 standard library, so formatter and broker handlers can depend on it without
 creating an import cycle.
 """
@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 # The single module logger used by report_error below, so every reporting
 # component logs delivery failures to the same "scietex.logging" channel.
@@ -30,13 +31,10 @@ class LoggingConfig:
     Attributes:
         error_handler (Callable | None): Delivery-error callback ``(record, exc)``.
         queue_maxsize (int): Bound for every backend queue (default 10000).
-        backend_config (RedisConfig | ValkeyConfig | MqttConfig | None): Backend-specific
-            config, or None for the console/file handlers.
     """
 
     error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None
     queue_maxsize: int = 10000
-    backend_config: RedisConfig | ValkeyConfig | MqttConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -188,6 +186,20 @@ def level_abbreviation(log_level: int) -> str:
         logging.CRITICAL: "CRT",
     }
     return level_map.get(log_level, f"{log_level:03d}")
+
+
+def iso_timestamp(created: float) -> str:
+    """
+    Format a record's creation time as an ISO-8601 UTC string.
+
+    Args:
+        created (float): The ``LogRecord.created`` POSIX timestamp (seconds since
+            the Unix epoch).
+
+    Returns:
+        str: An ISO-8601 timestamp string with the UTC offset (``+00:00``).
+    """
+    return datetime.fromtimestamp(created, tz=timezone.utc).isoformat()
 
 
 def optional_dependency_error(module_name: str, extra: str) -> str:

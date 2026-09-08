@@ -87,9 +87,9 @@ def test_redis_config_is_typed_and_validated():
         stream_name="s",
         redis_config={"host": "example.com", "port": 7000, "db": 2},
     )
-    assert handler.config.backend_config.host == "example.com"
-    assert handler.config.backend_config.port == 7000
-    assert handler.config.backend_config.db == 2
+    assert handler.backend_config.host == "example.com"
+    assert handler.backend_config.port == 7000
+    assert handler.backend_config.db == 2
     # client_config is a read-only asdict view of the typed config.
     assert handler.client_config == asdict(RedisConfig(host="example.com", port=7000, db=2))
 
@@ -111,9 +111,9 @@ def test_redis_config_accepts_valid_extra_options():
             "ssl": True,
         },
     )
-    assert handler.config.backend_config.host == "example.com"
-    assert handler.config.backend_config.password == "secret"
-    assert handler.config.backend_config.ssl is True
+    assert handler.backend_config.host == "example.com"
+    assert handler.backend_config.password == "secret"
+    assert handler.backend_config.ssl is True
     # client_config is a read-only asdict view of the typed config.
     assert handler.client_config == asdict(
         RedisConfig(host="example.com", port=7000, db=2, password="secret", ssl=True)

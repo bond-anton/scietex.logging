@@ -17,9 +17,6 @@ from typing import Any
 
 from .config import (
     LoggingConfig,
-    MqttConfig,
-    RedisConfig,
-    ValkeyConfig,
     report_error,
     validate_queue_maxsize,
 )
@@ -41,18 +38,22 @@ class BackendDrainResult:
         name (str): The backend's queue name (e.g. "_redis", "_valkey").
         status (DrainStatus): How the drain concluded.
         error (BaseException | None): The exception, when status is ERROR.
+        display_name (str | None): Optional user-visible label for the
+            backend (e.g. "Redis"). When None, shutdown-status text falls
+            back to deriving a label from ``name`` (AR-008).
     """
 
     name: str
     status: DrainStatus
     error: BaseException | None = None
+    display_name: str | None = None
 
 
 # Built-in backend queue names are namespaced with a leading underscore so a
 # user-supplied ``queue_name`` can never collide with a backend the handlers
 # register themselves (ROADMAP open question 6). The underscore is stripped only
-# where the name becomes user-visible shutdown-status text (see the backend
-# ``_status_record`` helpers).
+# in the ``_status_record`` FALLBACK path — when a drain result carries no
+# explicit ``display_name`` — not as the primary naming source (AR-008).
 _QUEUE_CONSOLE = "_console"
 _QUEUE_FILE = "_file"
 _QUEUE_REDIS = "_redis"
@@ -142,14 +143,12 @@ class AsyncLoggingHandler(logging.Handler):
         *,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         queue_maxsize: int = 10000,
-        backend_config: RedisConfig | ValkeyConfig | MqttConfig | None = None,
     ) -> None:
         """
         Initialize the asynchronous logging handler machinery.
 
         Assembles the single ``LoggingConfig`` that governs this handler at work
-        time. ``backend_config`` is forwarded by the broker subclasses; the base
-        stores it on ``config`` without acting on it.
+        time.
 
         Args:
             error_handler (callable, optional): Callback invoked with
@@ -160,8 +159,6 @@ class AsyncLoggingHandler(logging.Handler):
                 hold. When a queue is full, `emit` drops the record and reports it
                 through the error channel instead of blocking. Defaults to 10000.
                 Must be a positive int; invalid values raise ``ValueError``.
-            backend_config (RedisConfig | ValkeyConfig | MqttConfig | None): Backend-specific
-                config attached by broker subclasses. Defaults to None.
 
         Raises:
             TypeError: If an unknown keyword argument is passed.
@@ -170,7 +167,6 @@ class AsyncLoggingHandler(logging.Handler):
         self.config = LoggingConfig(
             error_handler=error_handler,
             queue_maxsize=validate_queue_maxsize(queue_maxsize),
-            backend_config=backend_config,
         )
         self.logging_accept_event = asyncio.Event()  # Indicates if logging accepting events
         self.logging_running_event = asyncio.Event()  # Indicates if logging is running

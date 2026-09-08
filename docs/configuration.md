@@ -126,8 +126,11 @@ backend:
 
 The `_` prefix is reserved for internal use: user-supplied `queue_name` values
 never start with `_`, so any distinct name (e.g. `"postgres"`, `"http"`) is
-safe. The shutdown status text strips the `_` before rendering (e.g. "Console
-Logger has completed processing its queue.").
+safe. For shutdown status text, the built-in peer backends (console and file)
+pass an explicit display name (e.g. "Console", "File") rather than deriving it
+from the queue key; the `_`-strip is only a fallback applied when a drain
+result carries no explicit display name (broker handlers and custom backends),
+e.g. "Console Logger has completed processing its queue.".
 
 ### Error Handler
 
@@ -185,21 +188,20 @@ constructor keyword arguments (defined in `src/scietex/logging/config.py`).
 aliases over `self.config`, so there is no parallel state to drift.
 
 - `LoggingConfig` — shared machinery options for every handler:
-  `error_handler`, `queue_maxsize`, and `backend_config` (the
-  backend-specific config, or `None` for the pure-machinery/console-only
-  handlers). `backend_config` is typed
-  `RedisConfig | ValkeyConfig | MqttConfig | None` — a real union, not `Any`.
+  `error_handler` and `queue_maxsize`. It carries no broker-specific config:
+  each broker handler stores its typed config as its own `backend_config`
+  attribute (see below).
 - `RedisConfig` — Redis connection settings. It mirrors the full plain-option
   surface of `redis.Redis` (32 fields: `host`/`port`/`db` plus `username`,
   `password`, socket/ssl/encoding/retry/health-check/client-name/protocol
   options), so a `redis_config` dict carrying legitimate client options is
-  accepted rather than rejected. Stored as `self.config.backend_config` on
+  accepted rather than rejected. Stored as `self.backend_config` on
   `AsyncRedisHandler`.
 - `ValkeyConfig` — Valkey connection settings. It mirrors
   `GlideClientConfiguration`'s scalar plain options (`addresses` plus `use_tls`,
   `request_timeout`, `database_id`, `client_name`, `inflight_requests_limit`,
   `client_az`, `lazy_connect`, `read_only`); enum- and object-valued options are
-  intentionally not modeled. Stored as `self.config.backend_config` on
+  intentionally not modeled. Stored as `self.backend_config` on
   `AsyncValkeyHandler`.
 - `MqttConfig` — MQTT connection settings. It mirrors `aiomqtt.Client`'s scalar
   plain options (`host`, `port`, `username`, `password`, `identifier`,
@@ -207,14 +209,14 @@ aliases over `self.config`, so there is no parallel state to drift.
   object-valued expert options (`will`, `tls_context`, `tls_params`,
   `properties`, `logger`) are intentionally not modeled. `host` is the common
   connection field (consistent with `RedisConfig`) and is translated to
-  aiomqtt's `hostname` kwarg by `connect()`. Stored as `self.config.backend_config`
+  aiomqtt's `hostname` kwarg by `connect()`. Stored as `self.backend_config`
   on `AsyncMqttHandler`.
 
 The handler constructors **no longer accept `**kwargs`**. Unknown or typo'd
 keyword arguments now raise `TypeError` at construction time instead of being
 silently swallowed. `AsyncRedisHandler` converts its `redis_config` dict into a
 typed `RedisConfig`; keys outside the modeled option surface still raise
-`TypeError`. `connect()` reads `self.config.backend_config` — the single source
+`TypeError`. `connect()` reads `self.backend_config` — the single source
 of truth — rather than a parallel raw dict; `self.client_config` is a derived,
 read-only `asdict` view kept for backward compatibility. The user's
 `decode_responses` value is respected, not forced to `True`. For Valkey,

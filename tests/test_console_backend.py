@@ -134,8 +134,8 @@ async def test_report_status_queues_synthetic_records(capsys):
     # The console's own result is included alongside the other backends' outcomes.
     assert "Console Logger has completed processing its queue." in captured
     assert "Redis Logger has completed processing its queue." in captured
-    assert "Timeout while waiting for valkey logger to complete its queue." in captured
-    assert "Error while waiting for broker Logger: boom" in captured
+    assert "Timeout while waiting for Valkey logger to complete its queue." in captured
+    assert "Error while waiting for Broker Logger: boom" in captured
 
     running_event.clear()
     await worker

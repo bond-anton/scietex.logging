@@ -7,15 +7,15 @@
 
 **Processing components.**
 1. `logging` framework → `AsyncLoggingHandler.emit(record)`
-   (`async_logging_handler.py:312`, inherited by `ConsoleHandler`).
+   (`async_logging_handler.py:308`, inherited by `ConsoleHandler`).
 2. `emit` writes the record to the shared thread-safe `_ingress` queue
    (`queue.Queue`, bounded by `queue_maxsize`), then wakes the bridge task.
-3. The bridge task (`_bridge_loop`, `async_logging_handler.py:366`) moves the
+3. The bridge task (`_bridge_loop`, `async_logging_handler.py:362`) moves the
    record from `_ingress` into the `"_console"` queue registered by
    `ConsoleHandler`.
-4. `ConsoleBackend._worker` (`backend/console.py:114`) gets the record from the
+4. `ConsoleBackend._worker` (`backend/console.py:80`) gets the record from the
    queue.
-5. `ScietexFormatter.format(record)` (`formatter/scietex.py:65`) copies the record
+5. `ScietexFormatter.format(record)` (`formatter/scietex.py:63`) copies the record
    (abbreviates `levelname`) and renders the text.
 
 **Destination.** `sys.stdout` (via `sys.stdout.write(... + "\n")` and flush).
@@ -38,21 +38,21 @@ blocks on I/O.
 2. `emit` writes the record to the shared thread-safe `_ingress`; the bridge
    task moves it into the broker queue (`"_redis"` / `"_valkey"`), registered by
    `AsyncBrokerHandler.__init__`.
-3. `AsyncBrokerHandler._worker` (`handler/broker.py:187`) gets the
+3. `AsyncBrokerHandler._worker` (`handler/broker.py:208`) gets the
    record, calls `connect()` on first entry, and builds a **dict** log entry:
    `{"level": level_abbreviation(record.levelno), "message": record.getMessage(),
    "name": record.name,
-   "time": datetime.fromtimestamp(record.created, timezone.utc).isoformat()}`.
+   "time": iso_timestamp(record.created)`.
    `level` is computed via `level_abbreviation(record.levelno)` (imported from
    `config.py`); `name` and `time` are derived from the record directly, not
    from the formatter.
 4. `send_message(log_entry)` dispatches to the concrete backend:
-   - Redis: `client.xadd(stream_name, record)` (`handler/redis.py:130`).
-   - Valkey: `client.xadd(stream_name, record.items())` (`handler/valkey.py:142`).
+   - Redis: `client.xadd(stream_name, record)` (`handler/redis.py:123`).
+   - Valkey: `client.xadd(stream_name, record.items())` (`handler/valkey.py:135`).
    Each raises `RuntimeError` when the client is not connected (AR-034).
 5. On worker exit, `disconnect()` closes the client. A failed `connect()` is
    retried with capped exponential backoff (0.5s base doubling to a 30s cap with
-   ±20% jitter, `handler/broker.py:19-21,198-214`) — AR-022.
+   ±20% jitter, `handler/broker.py:19-21,224-235`) — AR-022.
 
 **Destination.** Redis stream / Valkey stream (external server).
 
@@ -83,7 +83,7 @@ the runnable two-handler variant.
 ## Flow 4: Shutdown / drain (control flow)
 
 **Source.** Host application calls `await handler.stop_logging(timeout=5.0)`
-(`async_logging_handler.py:404`).
+(`async_logging_handler.py:400`).
 
 **Processing.**
 1. `logging_accept_event.clear()` — stops `emit` from enqueuing new records.
@@ -101,8 +101,8 @@ the runnable two-handler variant.
 4. After every drain concludes, invoke each registered status reporter with the
    collected results. The console backend is registered as a status reporter
    (`handler/console.py:72`), so `ConsoleBackend.report_status(results)`
-   (`backend/console.py:191`) enqueues synthetic INFO/ERROR status records for
-   every backend's drain outcome.
+   (inherited from `_QueueBackend`, `backend/_base.py:163`) enqueues synthetic
+   INFO/ERROR status records for every backend's drain outcome.
 5. `logging_running_event.clear()` — signals workers to stop after draining.
 6. `await asyncio.gather(*log_workers_tasks)` — workers exit (bounded by the
    drain `timeout`; stragglers are cancelled on `asyncio.TimeoutError`).
@@ -111,7 +111,7 @@ the runnable two-handler variant.
 8. Clear any records still queued after the drain window and worker teardown:
    each backend queue is drained via `get_nowait()` + `task_done()`, and any
    leftover ingress entry (an in-flight `emit` that raced teardown) is cleared
-   (`async_logging_handler.py:505-513`). Undelivered records are **dropped, not
+   (`async_logging_handler.py:501-509`). Undelivered records are **dropped, not
    replayed**, so the next `start_logging` begins from an actually-empty queue
    (AR-020). `stop_logging` does **not** call `close()`; the handler may be
    restarted via `start_logging` on the same loop. `close()` is a separate
@@ -126,7 +126,7 @@ handler idle and restartable.
 
 - **Single record, one queue per handler.** `emit` writes one `LogRecord` into
   the shared `_ingress` once; the bridge task fans it out to every registered
-   queue in `log_queues` (`async_logging_handler.py:366`). Each built-in handler
+   queue in `log_queues` (`async_logging_handler.py:362`). Each built-in handler
   registers exactly one backend, so the queue count is 1 (console, file, or
   broker). A custom handler may register more via `register_backend`.
 - **Bounded queues with drop + report overflow.** The shared `_ingress` and
@@ -143,7 +143,8 @@ handler idle and restartable.
 - **Ordering.** Within a single queue, records are FIFO. Across queues (console
   vs broker) there is no ordering guarantee.
 - **Synthetic records during shutdown.** `ConsoleBackend.report_status`
-   (`backend/console.py:191`) injects status `LogRecord`s into the console queue
+   (inherited from `_QueueBackend`, `backend/_base.py:163`) injects status
+   `LogRecord`s into the console queue
   to report every backend's drain results — a control-flow message traveling on
   the same data path as user logs. It runs as a post-drain status reporter, so
   it observes all backends' outcomes without depending on drain order.

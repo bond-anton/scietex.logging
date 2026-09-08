@@ -7,11 +7,9 @@ try:
 except ImportError as e:
     raise ImportError(optional_dependency_error("aiomqtt", "mqtt"), name="aiomqtt") from e
 
-import dataclasses
 import json
 import logging
 from collections.abc import Callable
-from typing import cast
 
 from ..async_logging_handler import _QUEUE_MQTT
 from .broker import AsyncBrokerHandler
@@ -59,7 +57,7 @@ class AsyncMqttHandler(AsyncBrokerHandler):
             topic (str): The MQTT topic to which log records are published.
             mqtt_config (dict, optional): Configuration dictionary for the MQTT connection.
                 Defaults to {"host": "localhost", "port": 1883}. Keys are converted into a
-                typed ``MqttConfig`` stored as ``self.config.backend_config``, which is the
+                typed ``MqttConfig`` stored as ``self.backend_config``, which is the
                 single source passed to ``aiomqtt.Client`` by ``connect()``. Mutually
                 exclusive with ``client``.
             qos (int): The MQTT QoS level (0, 1, or 2) used for publication. Defaults to 0
@@ -105,16 +103,11 @@ class AsyncMqttHandler(AsyncBrokerHandler):
         self.qos = qos
         self.retain = retain
 
-    @property
-    def client_config(self) -> dict:
-        """Read-only view of the backend config as a dict (backward compat)."""
-        return dataclasses.asdict(cast(MqttConfig, self.config.backend_config))
-
     async def connect(self) -> None:
         """
         Connect to MQTT asynchronously.
 
-        Builds the client from ``self.config.backend_config`` (the typed
+        Builds the client from ``self.backend_config`` (the typed
         ``MqttConfig``, the single source of truth). ``host`` is translated to
         aiomqtt's ``hostname`` kwarg, and ``None``-valued fields are dropped so
         aiomqtt applies its own defaults. The client is entered as an async
@@ -125,7 +118,7 @@ class AsyncMqttHandler(AsyncBrokerHandler):
             None
         """
         if self.client is None:
-            cfg = dataclasses.asdict(cast(MqttConfig, self.config.backend_config))
+            cfg = self._config_dict()
             hostname = cfg.pop("host")
             kwargs = {k: v for k, v in cfg.items() if v is not None}
             client = aiomqtt.Client(hostname=hostname, **kwargs)

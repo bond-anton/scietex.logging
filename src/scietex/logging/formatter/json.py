@@ -8,7 +8,8 @@ file sinks and log aggregators that consume newline-delimited JSON (NDJSON).
 import copy
 import json
 import logging
-from datetime import datetime, timezone
+
+from ..config import iso_timestamp
 
 # The stdlib LogRecord default attribute names, captured once from a bare record.
 # JsonFormatter flattens only user-added `extra` fields, so these (plus the keys
@@ -48,7 +49,7 @@ class JsonFormatter(logging.Formatter):
         record = copy.copy(record)
 
         data: dict = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "timestamp": iso_timestamp(record.created),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),

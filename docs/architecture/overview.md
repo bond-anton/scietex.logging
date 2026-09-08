@@ -42,10 +42,11 @@ sub-packages. Architecturally it decomposes into four cooperating layers:
    `report_status` method, invoked as a post-drain status reporter).
 
 5. **File backend** — `src/scietex/logging/backend/file.py`
-   `FileBackend`. The file sink as a **peer backend**, cloned from
-   `ConsoleBackend`: it owns its queue, its worker coroutine, and its
-   shutdown-status reporting, writing to whatever `stream_provider()` returns
-   instead of `sys.stdout`.
+   `FileBackend` and its rotation subclasses `RotatingFileBackend`,
+   `TimedRotatingFileBackend`, and `WatchedFileBackend`. The file sink as a
+   **peer backend**, a true peer of `ConsoleBackend`: each owns its queue, its
+   worker coroutine, the entire file lifecycle (lazy open, write,
+   close-in-finally), and its shutdown-status reporting.
 
 6. **Concrete handler layer** — `src/scietex/logging/handler/console.py`
    `ConsoleHandler` (extends `AsyncLoggingHandler`). A thin concrete subclass
@@ -56,12 +57,13 @@ sub-packages. Architecturally it decomposes into four cooperating layers:
    raise `TypeError` instead of being silently swallowed.
 
 7. **File handler layer** — `src/scietex/logging/handler/file.py`
-   `AsyncFileHandler` (extends `AsyncLoggingHandler`). Registers the `"_file"`
-   backend as a peer, mirroring how `ConsoleHandler` registers the console
-   backend. The rotation variants `AsyncRotatingFileHandler`,
+   `AsyncFileHandler` (extends `AsyncLoggingHandler`). A thin wrapper that
+   builds the right `FileBackend` subclass via `_make_backend` and registers its
+   `queue`/`worker`/`drain` as a peer, mirroring how `ConsoleHandler` registers
+   the console backend. The rotation variants `AsyncRotatingFileHandler`,
    `AsyncTimedRotatingFileHandler`, and `AsyncWatchedFileHandler` subclass it
-   and reuse the stdlib rollover logic, driven from the worker (the sole
-   writer).
+   and build the matching backend, which reuses the stdlib rollover logic,
+   driven from the backend worker (the sole writer).
 
 8. **Broker handler layer** — `src/scietex/logging/handler/broker.py`
    `AsyncBrokerHandler` (extends `AsyncLoggingHandler`, `abc.ABC`). Registers a
@@ -102,9 +104,9 @@ per-backend worker coroutine           [consumer, async]
 ```
 
 Formatting runs on the event-loop thread; the blocking `write`/`flush` (and, for
-the rotation variants, rollover/reopen) of the Console and File workers is
+the rotation backends, rollover/reopen) of the Console and File workers is
 offloaded to a per-backend single-thread executor so a slow sink never stalls
-the loop. On teardown the file-owning workers submit their stream close to the
+the loop. On teardown the file backends submit their stream close to the
 same executor and call `shutdown(wait=True)` (no write-after-close).
 
 Key relationships:
@@ -143,14 +145,15 @@ The `examples/` directory contains runnable scripts demonstrating this
 
 - **Per-handler worker coroutines.** Each handler owns one or more worker
   coroutines, each draining one `asyncio.Queue`:
-  - `ConsoleBackend._worker` (console queue) — `backend/console.py:114`.
-  - `AsyncBrokerHandler._worker` (broker queue) — `handler/broker.py:187`.
+  - `ConsoleBackend._worker` (console queue) — `backend/console.py:80`.
+  - `FileBackend._worker` (file queue) — `backend/file.py:192`.
+  - `AsyncBrokerHandler._worker` (broker queue) — `handler/broker.py:208`.
   Workers loop while `logging_running_event` is set **or** their queue is
   non-empty, using a 1-second `asyncio.wait_for` timeout on `queue.get()`.
 - **Blocking-write offload.** The Console and File workers format on the loop
   thread, then submit the blocking `write`/`flush` (and rollover/reopen) to a
   worker-local single-thread `_WriteExecutor` (`_executor.py`) and await it. On
-  teardown the file-owning workers submit their stream close to the same
+  teardown the file backends submit their stream close to the same
   executor and `shutdown(wait=True)`, so `stop_logging` waits for any in-flight
   write — no write-after-close.
 - **Thread-safe ingress write.** `emit()` writes the record to the shared
@@ -181,4 +184,4 @@ The `examples/` directory contains runnable scripts demonstrating this
   both console and broker output attaches a `ConsoleHandler` and a broker
   handler separately.
 - **Connection lifecycle is per-worker.** The broker worker calls
-  `_connect()` on start and `_disconnect()` on exit (`handler/broker.py:163,176`).
+  `_connect()` on start and `_disconnect()` on exit (`handler/broker.py:184,197`).

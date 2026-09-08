@@ -23,8 +23,9 @@ scietex.logging/
 │   ├── async_logging_handler.py # AsyncLoggingHandler machinery base
 │   ├── config.py                # LoggingConfig, RedisConfig, ValkeyConfig, MqttConfig
 │   ├── backend/
+│   │   ├── _base.py             # _QueueBackend (shared queue/drain/status base)
 │   │   ├── console.py           # ConsoleBackend peer backend
-│   │   └── file.py              # FileBackend peer backend
+│   │   └── file.py              # FileBackend + rotation subclasses
 │   ├── formatter/
 │   │   ├── scietex.py           # ScietexFormatter
 │   │   └── json.py              # JsonFormatter (structured JSON output)
@@ -92,6 +93,7 @@ scietex.logging/
 - `AsyncTimedRotatingFileHandler` - Time-based rotating file backend (always available)
 - `AsyncWatchedFileHandler` - Watched file backend (always available)
 - `ConsoleBackend` - Console sink registered by `ConsoleHandler` (always available)
+- `FileBackend` - File sink registered by `AsyncFileHandler` (always available)
 - `JsonFormatter` - Structured JSON output formatter (always available)
 - `ScietexFormatter` - Custom formatter with 3-letter log level abbreviations and `%(name)s` logger-name identity
 - `AsyncRedisHandler` - Redis logging backend (optional, requires `[redis]` extra)
@@ -216,7 +218,7 @@ uv run ruff check .
 1. PostgreSQL support is mentioned in docs but not yet implemented (no `postgres` extra defined)
 2. The `__init__.py` imports Redis/Valkey/MQTT handlers conditionally - ensure the `[redis]`, `[valkey]`, or `[mqtt]` extras are installed
 3. `client` and a backend config (`valkey_config`/`redis_config`/`mqtt_config`/`backend_config`) are mutually exclusive — passing both raises `ValueError`. When injecting a client, omit the config dict.
-4. `"_mqtt"` is a reserved queue name (used by `AsyncMqttHandler`); custom backends must not reuse it.
+4. The built-in backends reserve the underscore-prefixed queue names `"_console"`, `"_file"`, `"_redis"`, `"_valkey"`, and `"_mqtt"` (registered by `ConsoleHandler`, `AsyncFileHandler`, `AsyncRedisHandler`, `AsyncValkeyHandler`, and `AsyncMqttHandler` respectively). Custom backends must not reuse any of them.
 5. `"_file"` is a reserved queue name (used by `AsyncFileHandler`); custom backends must not reuse it.
 
 ## Development Commands
@@ -237,7 +239,7 @@ uv run ruff format .
 
 ## Related Files
 
-- `/Users/anton/Projects/scietex.logging/README.md` - User-facing documentation
-- `/Users/anton/Projects/scietex.logging/docs/index.md` - Detailed documentation
-- `/Users/anton/Projects/scietex.logging/pyproject.toml` - Build configuration
-- `/Users/anton/Projects/scietex.logging/examples/README.md` - Example documentation
+- `/home/anton/Projects/scietex.logging/README.md` - User-facing documentation
+- `/home/anton/Projects/scietex.logging/docs/index.md` - Detailed documentation
+- `/home/anton/Projects/scietex.logging/pyproject.toml` - Build configuration
+- `/home/anton/Projects/scietex.logging/examples/README.md` - Example documentation

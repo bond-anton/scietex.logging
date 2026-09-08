@@ -10,46 +10,14 @@ way `AsyncBrokerHandler` registers its broker queue and worker.
 import asyncio
 import logging
 import sys
-from collections.abc import Callable, Coroutine
-from typing import Any
+from collections.abc import Callable
 
 from .._executor import _WriteExecutor
-from ..async_logging_handler import _QUEUE_CONSOLE, BackendDrainResult, DrainStatus
-from ..config import report_error
+from ..async_logging_handler import _QUEUE_CONSOLE
+from ._base import _QueueBackend
 
 
-def _status_record(result: BackendDrainResult) -> logging.LogRecord:
-    """
-    Build the synthetic shutdown-status record for a backend drain outcome.
-
-    Args:
-        result (BackendDrainResult): The drain outcome to report.
-
-    Returns:
-        logging.LogRecord: A record describing how the backend's queue drained.
-    """
-    display = result.name.lstrip("_")
-    if result.status is DrainStatus.COMPLETED:
-        level = logging.INFO
-        message = f"{display.capitalize()} Logger has completed processing its queue."
-    elif result.status is DrainStatus.TIMEOUT:
-        level = logging.ERROR
-        message = f"Timeout while waiting for {display} logger to complete its queue."
-    else:
-        level = logging.ERROR
-        message = f"Error while waiting for {display} Logger: {result.error}"
-    return logging.LogRecord(
-        name=f"{display.capitalize()}Logger",
-        level=level,
-        pathname=__file__,
-        lineno=0,
-        msg=message,
-        args=None,
-        exc_info=None,
-    )
-
-
-class ConsoleBackend:
+class ConsoleBackend(_QueueBackend):
     """
     Console sink for asynchronous log records.
 
@@ -62,6 +30,9 @@ class ConsoleBackend:
     records describing how each backend fared. The console is therefore a post-drain
     observer, not a drain hook that reads a shared results list mid-iteration.
 
+    The shared queue/drain/status-reporting machinery lives in `_QueueBackend`;
+    only the console-specific ``_worker``/``_write_stdout`` pair is defined here.
+
     Attributes:
         queue (asyncio.Queue[logging.LogRecord]): Queue holding records destined
             for standard output.
@@ -72,6 +43,9 @@ class ConsoleBackend:
         error_handler (Callable | None): Optional callback invoked with
             ``(record, exc)`` when a record cannot be written to standard output.
     """
+
+    _queue_name = _QUEUE_CONSOLE
+    _backend_name = "ConsoleBackend"
 
     def __init__(
         self,
@@ -96,20 +70,12 @@ class ConsoleBackend:
                 None, in which case errors are reported via the ``scietex.logging``
                 module logger.
         """
-        self.queue: asyncio.Queue[logging.LogRecord] = asyncio.Queue(maxsize=maxsize)
-        self.formatter_provider = formatter_provider
-        self.running_event = running_event
-        self.error_handler = error_handler
-
-    @property
-    def worker(self) -> Callable[[], Coroutine[Any, Any, None]]:
-        """Public worker-factory accessor for registration (AR-115).
-
-        Returns the bound ``_worker`` coroutine method so ``ConsoleHandler``
-        and custom integrators can register this backend's worker without
-        reaching into a private attribute.
-        """
-        return self._worker
+        super().__init__(
+            formatter_provider,
+            running_event,
+            maxsize=maxsize,
+            error_handler=error_handler,
+        )
 
     async def _worker(self) -> None:
         """
@@ -157,57 +123,3 @@ class ConsoleBackend:
         """Write ``text`` to standard output and flush (runs on the executor thread)."""
         sys.stdout.write(text)
         sys.stdout.flush()
-
-    def _report_error(self, record: logging.LogRecord | None, exc: Exception) -> None:
-        """Report a console delivery error through the configured error channel.
-
-        Delegates to the shared ``config.report_error`` helper (AR-108).
-        """
-        report_error("ConsoleBackend", self.error_handler, record, exc)
-
-    async def drain(self, timeout: float) -> BackendDrainResult:
-        """
-        Drain the console queue and return the outcome.
-
-        Waits for every queued record to be acknowledged by the console worker,
-        then returns a result describing how the drain concluded so the coordinator
-        can surface it to the registered status reporters.
-
-        Args:
-            timeout (float): Timeout for draining the console queue.
-
-        Returns:
-            BackendDrainResult: How the console queue drained.
-        """
-        try:
-            await asyncio.wait_for(self.queue.join(), timeout=timeout)
-        except asyncio.TimeoutError:
-            return BackendDrainResult(_QUEUE_CONSOLE, DrainStatus.TIMEOUT)
-        except Exception as exc:
-            return BackendDrainResult(_QUEUE_CONSOLE, DrainStatus.ERROR, exc)
-        else:
-            return BackendDrainResult(_QUEUE_CONSOLE, DrainStatus.COMPLETED)
-
-    async def report_status(self, results: list[BackendDrainResult]) -> None:
-        """
-        Enqueue a synthetic status record for each backend's drain outcome.
-
-        Called by the coordinator after all backends have drained, so the console
-        surfaces how every backend fared during shutdown. Status records are
-        best-effort: when the console queue is full they are dropped rather than
-        blocking shutdown on a bounded queue the worker may already be draining.
-
-        Args:
-            results (list[BackendDrainResult]): Drain outcomes from every backend.
-
-        Returns:
-            None
-        """
-        for result in results:
-            try:
-                self.queue.put_nowait(_status_record(result))
-            except asyncio.QueueFull:
-                # Status records are best-effort shutdown diagnostics. When the
-                # console queue is full, drop them rather than block shutdown on a
-                # bounded queue that the worker may already be draining.
-                pass
