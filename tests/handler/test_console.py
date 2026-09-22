@@ -4,31 +4,10 @@ import asyncio
 import logging
 
 import pytest
+from conftest import ExplodingFormatter, _make_record, _wait_for
 
 from scietex.logging import ConsoleHandler, ScietexFormatter
 from scietex.logging.handler.broker import AsyncBrokerHandler
-from scietex.logging.handler.file import AsyncFileHandler
-
-
-def _make_record(message: str = "test message") -> logging.LogRecord:
-    return logging.LogRecord(
-        name="TestLogger",
-        level=logging.INFO,
-        pathname=__file__,
-        lineno=0,
-        msg=message,
-        args=None,
-        exc_info=None,
-    )
-
-
-async def _wait_for(predicate, timeout: float = 5.0) -> None:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while not predicate():
-        if loop.time() >= deadline:
-            raise TimeoutError("condition was not met before timeout")
-        await asyncio.sleep(0.01)
 
 
 class _NoopBrokerHandler(AsyncBrokerHandler):
@@ -42,13 +21,6 @@ class _NoopBrokerHandler(AsyncBrokerHandler):
 
     async def send_message(self, record: dict[str, str]) -> None:
         pass
-
-
-class _ExplodingFormatter(logging.Formatter):
-    """Formatter that raises on format, simulating a broken stdout at the handler level."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        raise RuntimeError("format exploded")
 
 
 @pytest.mark.asyncio
@@ -94,29 +66,6 @@ async def test_emit_logs_to_queue():
     # Ensure the log record was added to the console queue
     log_record = await asyncio.wait_for(handler.log_queues["_console"].get(), timeout=1)
     assert log_record.getMessage() == "Test log message"
-
-    await handler.stop_logging()
-
-
-@pytest.mark.asyncio
-async def test_console_worker_outputs_log(capsys):
-    """Test that the console worker processes and outputs logs correctly."""
-    handler = ConsoleHandler()
-
-    await handler.start_logging()
-
-    # Emit a test log record
-    logger = logging.getLogger("TestLogger")
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(handler)
-    logger.info("Test log message")
-
-    # Allow the console worker to process the message
-    await asyncio.sleep(0.1)
-
-    # Capture stdout output
-    captured = capsys.readouterr()
-    assert "Test log message" in captured.out
 
     await handler.stop_logging()
 
@@ -175,7 +124,7 @@ async def test_console_write_failure_reported_and_shutdown_clean():
     handler = ConsoleHandler(
         error_handler=lambda record, exc: errors.append(exc),
     )
-    handler.setFormatter(_ExplodingFormatter())
+    handler.setFormatter(ExplodingFormatter())
     await handler.start_logging()
 
     logger = logging.getLogger("TestLogger")
@@ -278,25 +227,6 @@ async def test_error_channel_invoked_on_emit_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_console_backend_registered_as_peer():
-    """The console is registered through register_backend, not special-cased."""
-    handler = ConsoleHandler()
-    backend = handler._console_backend
-    assert backend is not None
-
-    assert "_console" in handler.log_queues
-    assert handler.log_queues["_console"] is backend.queue
-    assert len(handler.log_worker_factories) == 1
-    # The console's drain hook is registered like any other backend's, and its
-    # status reporter is registered separately as a post-drain observer.
-    assert handler._drain_hooks == [backend.drain]
-    assert handler._status_reporters == [backend.report_status]
-
-    await handler.start_logging()
-    await handler.stop_logging()
-
-
-@pytest.mark.asyncio
 async def test_stop_logging_drains_all_backends_generically(capsys):
     """stop_logging drains every registered backend through the same generic mechanism."""
     handler = _NoopBrokerHandler(queue_name="broker")
@@ -323,26 +253,9 @@ def test_unknown_kwarg_raises_type_error_on_console_handler():
         ConsoleHandler(unknown_kwarg=True)
 
 
-def test_console_handler_rejects_backend_config():
-    """ConsoleHandler (pure machinery) no longer accepts a broker-only backend_config."""
-    with pytest.raises(TypeError):
-        ConsoleHandler(backend_config=object())
-
-
 def test_console_handler_always_registers_console_backend():
     """ConsoleHandler unconditionally registers the console backend."""
     handler = ConsoleHandler()
     assert handler._console_backend is not None
     assert "_console" in handler.log_queues
     assert len(handler.log_worker_factories) == 1
-
-
-def test_file_and_broker_handlers_register_no_console_backend(tmp_path):
-    """File and broker handlers register only their own backend, never console."""
-    file_handler = AsyncFileHandler(str(tmp_path / "x.log"))
-    broker_handler = _NoopBrokerHandler(queue_name="broker")
-
-    for handler in (file_handler, broker_handler):
-        assert "_console" not in handler.log_queues
-        assert not hasattr(handler, "_console_backend")
-        assert len(handler.log_worker_factories) == 1

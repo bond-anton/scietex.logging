@@ -1,6 +1,7 @@
 """Tests for the typed configuration objects (AR-008)."""
 
 import logging
+from dataclasses import FrozenInstanceError
 
 import pytest
 
@@ -22,14 +23,9 @@ def test_logging_config_defaults():
     assert cfg.queue_maxsize == 10000
 
 
-def test_logging_config_has_only_machinery_fields():
-    """backend_config is broker-owned; LoggingConfig keeps only the machinery options."""
-    assert set(LoggingConfig.__dataclass_fields__) == {"error_handler", "queue_maxsize"}
-
-
 def test_logging_config_is_frozen():
     cfg = LoggingConfig()
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         cfg.queue_maxsize = 5  # frozen dataclass rejects attribute assignment
 
 

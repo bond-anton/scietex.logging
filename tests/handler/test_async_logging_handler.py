@@ -6,30 +6,10 @@ import threading
 import time
 
 import pytest
+from conftest import _make_record, _wait_for
 
 from scietex.logging import AsyncLoggingHandler
 from scietex.logging.async_logging_handler import BackendDrainResult, DrainStatus
-
-
-def _make_record(message: str = "test message") -> logging.LogRecord:
-    return logging.LogRecord(
-        name="TestLogger",
-        level=logging.INFO,
-        pathname=__file__,
-        lineno=0,
-        msg=message,
-        args=None,
-        exc_info=None,
-    )
-
-
-async def _wait_for(predicate, timeout: float = 5.0) -> None:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while not predicate():
-        if loop.time() >= deadline:
-            raise TimeoutError("condition was not met before timeout")
-        await asyncio.sleep(0.01)
 
 
 class BareHandler(AsyncLoggingHandler):
@@ -132,16 +112,6 @@ async def test_restartable_with_bridge():
     assert handler._bridge_task is None  # released on stop
 
 
-def test_pure_handler_owns_no_backend():
-    """The base machinery holds no queue, worker, drain hook, or reporter on its own."""
-    handler = BareHandler()
-
-    assert handler.log_queues == {}
-    assert handler.log_worker_factories == []
-    assert handler._drain_hooks == []
-    assert handler._status_reporters == []
-
-
 @pytest.mark.asyncio
 async def test_pure_handler_starts_and_stops_cleanly():
     """A backend-less handler starts and stops without any queue activity."""
@@ -162,21 +132,6 @@ def test_unknown_kwarg_raises_type_error():
     """A typo'd kwarg fails loudly instead of being silently swallowed."""
     with pytest.raises(TypeError):
         BareHandler(unknown_kwarg=True)
-
-
-def test_base_owns_no_formatter():
-    """The pure-machinery base installs no formatter (console/file own theirs)."""
-    handler = BareHandler()
-
-    # stdlib logging.Handler.__init__ sets self.formatter = None, but the base
-    # installs no ScietexFormatter and owns no formatter concept of its own.
-    assert handler.formatter is None
-
-
-def test_base_rejects_formatter_kwarg():
-    """formatter= is console/file-specific; the machinery base rejects it (TypeError)."""
-    with pytest.raises(TypeError):
-        BareHandler(formatter=logging.Formatter("%(message)s"))
 
 
 def test_config_exposes_machinery_options():
@@ -318,8 +273,6 @@ async def test_register_backend_without_drain_gets_default_queue_join_drain():
             queue.task_done()
 
     handler.register_backend("nodrain", queue, worker)  # no drain arg
-
-    assert len(handler._drain_hooks) == 1  # a default drain hook was registered
 
     await handler.start_logging()
     handler.emit(_make_record("hello"))

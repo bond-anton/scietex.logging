@@ -1,0 +1,434 @@
+"""Tests for AsyncFileHandler and its rotation variants."""
+
+import asyncio
+import io
+import logging
+import os
+
+import pytest
+from conftest import RecordingStream, RecordingStringIO, SlowStream
+
+from scietex.logging.formatter.json import JsonFormatter
+from scietex.logging.handler.file import (
+    AsyncFileHandler,
+    AsyncRotatingFileHandler,
+    AsyncTimedRotatingFileHandler,
+    AsyncWatchedFileHandler,
+)
+
+
+@pytest.mark.asyncio
+async def test_file_handler_writes_to_file(tmp_path):
+    """Records are formatted and written to the file."""
+    path = tmp_path / "app.log"
+    handler = AsyncFileHandler(str(path))
+    await handler.start_logging()
+
+    logger = logging.getLogger("FileTestLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("hello file")
+    await handler.stop_logging()
+
+    content = path.read_text()
+    assert "hello file" in content
+
+
+@pytest.mark.asyncio
+async def test_file_handler_appends_by_default(tmp_path):
+    """mode='a' (the default) appends to an existing file."""
+    path = tmp_path / "app.log"
+    path.write_text("preexisting\n")
+    handler = AsyncFileHandler(str(path))
+    await handler.start_logging()
+
+    logger = logging.getLogger("FileTestLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("appended")
+    await handler.stop_logging()
+
+    content = path.read_text()
+    assert content.startswith("preexisting\n")
+    assert "appended" in content
+
+
+@pytest.mark.asyncio
+async def test_file_handler_json_formatter(tmp_path):
+    """A JsonFormatter produces one JSON object per line in the file."""
+    path = tmp_path / "app.jsonl"
+    handler = AsyncFileHandler(
+        str(path),
+        formatter=JsonFormatter(),
+    )
+    await handler.start_logging()
+
+    logger = logging.getLogger("JsonFileLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("json message")
+    await handler.stop_logging()
+
+    import json
+
+    lines = [line for line in path.read_text().splitlines() if line.strip()]
+    parsed = json.loads(lines[0])
+    assert parsed["message"] == "json message"
+    assert parsed["level"] == "INFO"
+
+
+@pytest.mark.asyncio
+async def test_file_handler_injected_file_like_not_closed():
+    """An injected file-like is written to but never closed by the handler."""
+    stream = io.StringIO()
+    handler = AsyncFileHandler(
+        file=stream,
+    )
+    await handler.start_logging()
+
+    logger = logging.getLogger("InjectedFileLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("injected write")
+    await handler.stop_logging()
+
+    assert "injected write" in stream.getvalue()
+    assert not stream.closed  # the caller owns the injected file-like
+
+
+def test_file_and_filename_mutually_exclusive(tmp_path):
+    """Passing both file= and filename= raises ValueError."""
+    with pytest.raises(ValueError):
+        AsyncFileHandler(str(tmp_path / "x.log"), file=io.StringIO())
+
+
+@pytest.mark.asyncio
+async def test_rotating_file_handler_rolls_over(tmp_path):
+    """AsyncRotatingFileHandler rolls over when maxBytes is exceeded."""
+    path = tmp_path / "rot.log"
+    handler = AsyncRotatingFileHandler(
+        str(path),
+        maxBytes=100,
+        backupCount=2,
+    )
+    await handler.start_logging()
+
+    logger = logging.getLogger("RotatingLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    for i in range(50):
+        logger.info("line %d with enough padding to exceed the byte cap", i)
+    await handler.stop_logging()
+
+    # Rollover produced at least one backup file.
+    backups = [p for p in os.listdir(tmp_path) if p.startswith("rot.log.")]
+    assert len(backups) >= 1
+
+
+@pytest.mark.asyncio
+async def test_rotating_handler_backups_and_order(tmp_path):
+    """Rollover produces .1/.2 backups and preserves record ordering across files."""
+    import re
+
+    path = tmp_path / "rot.log"
+    handler = AsyncRotatingFileHandler(
+        str(path),
+        maxBytes=512,
+        backupCount=2,
+    )
+    await handler.start_logging()
+
+    logger = logging.getLogger("RotOrderLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    n = 30
+    for i in range(n):
+        logger.info("seq %03d %s", i, "p" * 80)
+    await handler.stop_logging()
+
+    def seqs(file):
+        return [int(m) for m in re.findall(r"seq (\d+)", file.read_text())]
+
+    # Rollover keeps the two most recent backups; the oldest are deleted. Collect
+    # the surviving sequence oldest-first (.2 -> .1 -> main).
+    ordered = []
+    for name in (2, 1):
+        backup = tmp_path / f"rot.log.{name}"
+        if backup.exists():
+            ordered.extend(seqs(backup))
+    ordered.extend(seqs(path))
+
+    assert (tmp_path / "rot.log.1").exists()
+    assert (tmp_path / "rot.log.2").exists()
+    # No reordering across files, and the newest record lands in the main file.
+    assert ordered == sorted(ordered)
+    assert ordered[-1] == n - 1
+
+
+@pytest.mark.asyncio
+async def test_timed_rotating_file_handler_writes(tmp_path):
+    """AsyncTimedRotatingFileHandler writes records (rollover is time-driven)."""
+    path = tmp_path / "timed.log"
+    handler = AsyncTimedRotatingFileHandler(
+        str(path),
+        when="S",
+        interval=1,
+        backupCount=2,
+    )
+    await handler.start_logging()
+
+    logger = logging.getLogger("TimedLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("timed message")
+    await handler.stop_logging()
+
+    assert "timed message" in path.read_text()
+
+
+@pytest.mark.asyncio
+async def test_timed_rotating_handler_rolls_over_and_orders(tmp_path):
+    """Timed rollover moves older records into a backup and keeps the newest in the main file."""
+    import time
+
+    path = tmp_path / "timed.log"
+    handler = AsyncTimedRotatingFileHandler(
+        str(path),
+        when="S",
+        interval=1,
+        backupCount=2,
+    )
+    await handler.start_logging()
+
+    logger = logging.getLogger("TimedRollOrderLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("first message")
+
+    # Wait until the first record has reached disk before forcing a rollover.
+    for _ in range(200):
+        if path.exists() and "first message" in path.read_text():
+            break
+        await asyncio.sleep(0.01)
+
+    # Force the next write to roll over by moving rolloverAt into the past.
+    handler._file_backend._rotator.rolloverAt = int(time.time()) - 1
+    logger.info("second message")
+    await handler.stop_logging()
+
+    backups = sorted(p for p in os.listdir(tmp_path) if p.startswith("timed.log."))
+    assert len(backups) == 1
+    assert "first message" in (tmp_path / backups[0]).read_text()
+    assert "second message" in path.read_text()
+
+
+@pytest.mark.asyncio
+async def test_watched_file_handler_writes(tmp_path):
+    """AsyncWatchedFileHandler writes records to the watched file."""
+    path = tmp_path / "watched.log"
+    handler = AsyncWatchedFileHandler(str(path))
+    await handler.start_logging()
+
+    logger = logging.getLogger("WatchedLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("watched message")
+    await handler.stop_logging()
+
+    assert "watched message" in path.read_text()
+
+
+@pytest.mark.asyncio
+async def test_watched_file_handler_reopens_replaced_file(tmp_path):
+    """An externally replaced file is detected and logging resumes to the new inode."""
+    path = tmp_path / "watched.log"
+    handler = AsyncWatchedFileHandler(
+        str(path),
+    )
+    await handler.start_logging()
+
+    logger = logging.getLogger("WatchedReopenLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("first message")
+
+    # Wait until the first record has reached disk (the watcher has stat'd the
+    # live file and recorded its dev/ino).
+    for _ in range(200):
+        if path.exists() and "first message" in path.read_text():
+            break
+        await asyncio.sleep(0.01)
+
+    # Simulate logrotate: move the file aside and create a fresh one in its place.
+    rotated = tmp_path / "watched.log.1"
+    os.rename(path, rotated)
+    path.write_text("")
+
+    logger.info("second message")
+    await handler.stop_logging()
+
+    assert "first message" in rotated.read_text()
+    assert "second message" in path.read_text()
+    assert "second message" not in rotated.read_text()
+
+
+@pytest.mark.asyncio
+async def test_file_handler_writes_off_the_event_loop_thread():
+    """An injected file-like receives writes off the loop thread and is never closed."""
+    import threading
+
+    loop_thread = threading.current_thread().name
+
+    stream = RecordingStringIO()
+    handler = AsyncFileHandler(
+        file=stream,
+    )
+    await handler.start_logging()
+
+    logger = logging.getLogger("OffLoopFileLogger")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("off loop")
+    await handler.stop_logging()
+
+    # The injected file-like survives stop (never closed by the handler), so we
+    # can inspect the thread each write ran on.
+    assert "off loop" in stream.getvalue()
+    assert stream.threads and all(t != loop_thread for t in stream.threads)
+    assert not stream.closed  # the caller owns the injected file-like
+
+
+@pytest.mark.asyncio
+async def test_file_handler_restartable_with_executor(tmp_path):
+    """A file handler survives multiple start/stop cycles with fresh executors."""
+    path = tmp_path / "app.log"
+    handler = AsyncFileHandler(str(path))
+
+    for i in range(3):
+        await handler.start_logging()
+        logger = logging.getLogger(f"RestartFileLogger{i}")
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(handler)
+        logger.info("cycle %d", i)
+        await handler.stop_logging()
+
+    content = path.read_text()
+    for i in range(3):
+        assert f"cycle {i}" in content
+
+
+@pytest.mark.parametrize(
+    ("handler_cls", "ctor_kwargs", "filename"),
+    [
+        pytest.param(AsyncFileHandler, {}, "app.log", id="file"),
+        pytest.param(
+            AsyncRotatingFileHandler,
+            {"maxBytes": 0, "backupCount": 0},
+            "rot.log",
+            id="rotating",
+        ),
+        pytest.param(
+            AsyncTimedRotatingFileHandler,
+            {"when": "S", "interval": 1, "backupCount": 0},
+            "timed.log",
+            id="timed",
+        ),
+        pytest.param(AsyncWatchedFileHandler, {}, "watched.log", id="watched"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_cancelled_worker_closes_stream_after_inflight_write(
+    tmp_path, handler_cls, ctor_kwargs, filename
+):
+    """A worker cancelled mid-write closes the stream only after the write finishes."""
+    import threading
+
+    path = tmp_path / filename
+    handler = handler_cls(str(path), **ctor_kwargs)
+    await handler.start_logging()
+
+    original_open = handler._file_backend._open_stream
+    state = {"write_started": threading.Event(), "write_finished": threading.Event()}
+
+    def slow_open():
+        return SlowStream(original_open(), state)
+
+    handler._file_backend._open_stream = slow_open
+    logger = logging.getLogger(f"Cancel{handler_cls.__name__}")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("cancel me")
+
+    # Yield to the loop until the write is in flight on the executor thread.
+    while not state["write_started"].is_set():
+        await asyncio.sleep(0.01)
+
+    # stop_logging with a tiny timeout cancels the worker mid-write; its finally
+    # must close the stream only after the in-flight write completes.
+    await handler.stop_logging(timeout=0.05)
+
+    assert state["write_finished"].is_set(), "in-flight write was lost"
+    assert "cancel me" in path.read_text()
+    assert handler._file_backend._stream is None  # closed cleanly
+
+
+@pytest.mark.parametrize(
+    ("handler_cls", "ctor_kwargs", "filename", "message_count", "expect_rollover"),
+    [
+        pytest.param(
+            AsyncRotatingFileHandler,
+            {"maxBytes": 100, "backupCount": 2},
+            "rot.log",
+            50,
+            True,
+            id="rotating",
+        ),
+        pytest.param(
+            AsyncTimedRotatingFileHandler,
+            {"when": "S", "interval": 1, "backupCount": 2},
+            "timed.log",
+            1,
+            False,
+            id="timed",
+        ),
+        pytest.param(
+            AsyncWatchedFileHandler,
+            {},
+            "watched.log",
+            1,
+            False,
+            id="watched",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_file_backend_writes_off_the_loop_thread(
+    tmp_path, handler_cls, ctor_kwargs, filename, message_count, expect_rollover
+):
+    """Writes (and, for rotating, rollover) run on the executor thread, not the loop."""
+    import threading
+
+    path = tmp_path / filename
+    handler = handler_cls(str(path), **ctor_kwargs)
+    loop_thread = threading.current_thread().name
+    write_threads: list[str] = []
+
+    original_open = handler._file_backend._open_stream
+
+    def recording_open():
+        return RecordingStream(original_open(), write_threads)
+
+    handler._file_backend._open_stream = recording_open
+    await handler.start_logging()
+
+    logger = logging.getLogger(f"OffLoop{handler_cls.__name__}")
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    for i in range(message_count):
+        logger.info("line %d with enough padding to exceed the byte cap", i)
+    await handler.stop_logging()
+
+    if expect_rollover:
+        backups = [p for p in os.listdir(tmp_path) if p.startswith(f"{filename}.")]
+        assert len(backups) >= 1
+    assert write_threads and all(t != loop_thread for t in write_threads)

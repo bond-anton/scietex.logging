@@ -94,24 +94,6 @@ async def test_valkey_handler_logs_to_stream():
     await valkey_client.close()  # Close the Valkey client connection
 
 
-def test_valkey_config_is_typed():
-    """valkey_config dict is reflected in a typed ValkeyConfig on the handler."""
-    handler = AsyncValkeyHandler(
-        stream_name="s",
-        valkey_config={"addresses": [("example.com", 7000)]},
-    )
-    assert handler.backend_config.addresses == [("example.com", 7000)]
-    # client_config is a read-only asdict view of the typed config.
-    assert handler.client_config["addresses"] == [("example.com", 7000)]
-
-
-def test_valkey_config_defaults():
-    """No valkey_config defaults to a localhost:6379 ValkeyConfig."""
-    handler = AsyncValkeyHandler(stream_name="s")
-    assert handler.backend_config.addresses == [("localhost", 6379)]
-    assert handler.client_config["addresses"] == [("localhost", 6379)]
-
-
 @pytest.mark.asyncio
 async def test_valkey_connect_translates_config_to_glide(monkeypatch):
     """connect() reads backend_config and translates it into a GlideClientConfiguration."""
@@ -178,17 +160,3 @@ async def test_valkey_connect_omits_credentials_when_unset(monkeypatch):
     config = captured["config"]
     assert isinstance(config, GlideClientConfiguration)
     assert config.credentials is None
-
-
-def test_valkey_unknown_kwarg_raises_type_error():
-    with pytest.raises(TypeError):
-        AsyncValkeyHandler(stream_name="s", unknown_kwarg=True)
-
-
-@pytest.mark.asyncio
-async def test_valkey_send_message_raises_when_not_connected():
-    """send_message() raises instead of silently acking when no client is connected (AR-034)."""
-    handler = AsyncValkeyHandler(stream_name="s")
-    record = {"level": "INF", "message": "m", "name": "n", "time": "t"}
-    with pytest.raises(RuntimeError):
-        await handler.send_message(record)

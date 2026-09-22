@@ -4,23 +4,9 @@ import json
 import logging
 import sys
 
+from conftest import _make_record
+
 from scietex.logging.formatter.json import JsonFormatter
-
-
-def _make_record(
-    message: str = "hello",
-    level: int = logging.INFO,
-    exc_info=None,
-) -> logging.LogRecord:
-    return logging.LogRecord(
-        name="TestLogger",
-        level=level,
-        pathname=__file__,
-        lineno=0,
-        msg=message,
-        args=None,
-        exc_info=exc_info,
-    )
 
 
 def test_format_emits_single_line_json():

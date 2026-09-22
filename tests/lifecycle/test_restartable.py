@@ -1,123 +1,9 @@
 """Restartability tests for the AsyncLoggingHandler start/stop lifecycle."""
 
-import asyncio
-import logging
-
 import pytest
+from conftest import FakeBrokerHandler, FlakyBrokerHandler, _make_record, _wait_for
 
 from scietex.logging import ConsoleHandler
-from scietex.logging.handler.broker import AsyncBrokerHandler
-
-
-def _make_record(message: str = "test message") -> logging.LogRecord:
-    return logging.LogRecord(
-        name="TestLogger",
-        level=logging.INFO,
-        pathname=__file__,
-        lineno=0,
-        msg=message,
-        args=None,
-        exc_info=None,
-    )
-
-
-async def _wait_for(predicate, timeout: float = 5.0) -> None:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while not predicate():
-        if loop.time() >= deadline:
-            raise TimeoutError("condition was not met before timeout")
-        await asyncio.sleep(0.01)
-
-
-class FakeBrokerHandler(AsyncBrokerHandler):
-    """Concrete broker handler recording connect/send activity for tests."""
-
-    def __init__(self, *args, **kwargs):
-        self.sent: list[dict[str, str]] = []
-        self.connect_attempts = 0
-        super().__init__(*args, **kwargs)
-
-    async def connect(self) -> None:
-        self.connect_attempts += 1
-        self.client = object()
-
-    async def disconnect(self) -> None:
-        self.client = None
-
-    async def send_message(self, record: dict[str, str]) -> None:
-        self.sent.append(record)
-
-
-class FlakyBrokerHandler(AsyncBrokerHandler):
-    """Broker whose send_message fails a fixed number of times before succeeding."""
-
-    def __init__(self, *args, **kwargs):
-        self.sent: list[dict[str, str]] = []
-        self.connect_attempts = 0
-        self.send_attempts = 0
-        self.failures_before_success = 0
-        super().__init__(*args, **kwargs)
-
-    async def connect(self) -> None:
-        self.connect_attempts += 1
-        self.client = object()
-
-    async def disconnect(self) -> None:
-        self.client = None
-
-    async def send_message(self, record: dict[str, str]) -> None:
-        self.send_attempts += 1
-        if self.send_attempts <= self.failures_before_success:
-            raise RuntimeError("broker down")
-        self.sent.append(record)
-
-
-@pytest.mark.asyncio
-async def test_console_start_stop_start_cycle(capsys):
-    """A console handler can be started, stopped, and started again on one loop."""
-    handler = ConsoleHandler()
-
-    await handler.start_logging()
-    handler.emit(_make_record("first"))
-    await handler.stop_logging()
-    assert not handler.logging_accept_event.is_set()
-    assert not handler.logging_running_event.is_set()
-    assert handler.log_queues["_console"].empty()
-
-    await handler.start_logging()
-    handler.emit(_make_record("second"))
-    await handler.stop_logging()
-
-    captured = capsys.readouterr().out
-    assert "first" in captured
-    assert "second" in captured
-    assert handler.log_queues["_console"].empty()
-
-
-@pytest.mark.asyncio
-async def test_broker_start_stop_start_cycle():
-    """Each start reconnects, and each stop disconnects and clears the client."""
-    handler = FakeBrokerHandler(
-        queue_name="broker",
-    )
-
-    await handler.start_logging()
-    handler.emit(_make_record("first"))
-    await _wait_for(lambda: len(handler.sent) == 1)
-    await handler.stop_logging(timeout=0.5)
-    assert handler.client is None
-    assert handler.connect_attempts == 1
-
-    await handler.start_logging()
-    handler.emit(_make_record("second"))
-    await _wait_for(lambda: len(handler.sent) == 2)
-    await handler.stop_logging(timeout=0.5)
-    assert handler.client is None
-    assert handler.connect_attempts == 2
-
-    assert handler.sent[0]["message"] == "first"
-    assert handler.sent[1]["message"] == "second"
 
 
 @pytest.mark.asyncio
@@ -143,6 +29,7 @@ async def test_mixed_handler_start_stop_start_cycle(capsys):
     await broker.stop_logging(timeout=1)
     await console.stop_logging()
     assert broker.client is None
+    assert broker.connect_attempts == 2
 
     captured = capsys.readouterr().out
     assert "mixed-first" in captured

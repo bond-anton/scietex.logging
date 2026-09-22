@@ -81,24 +81,6 @@ async def test_redis_handler_logs_to_stream():
     await redis_client.aclose()  # Close the Redis client connection
 
 
-def test_redis_config_is_typed_and_validated():
-    """redis_config dict is converted into a typed RedisConfig on the handler."""
-    handler = AsyncRedisHandler(
-        stream_name="s",
-        redis_config={"host": "example.com", "port": 7000, "db": 2},
-    )
-    assert handler.backend_config.host == "example.com"
-    assert handler.backend_config.port == 7000
-    assert handler.backend_config.db == 2
-    # client_config is a read-only asdict view of the typed config.
-    assert handler.client_config == asdict(RedisConfig(host="example.com", port=7000, db=2))
-
-
-def test_redis_unknown_kwarg_raises_type_error():
-    with pytest.raises(TypeError):
-        AsyncRedisHandler(stream_name="s", unknown_kwarg=True)
-
-
 def test_redis_config_accepts_valid_extra_options():
     """A redis_config dict with legitimate client options no longer raises TypeError."""
     handler = AsyncRedisHandler(
@@ -182,12 +164,3 @@ async def test_redis_connect_decode_responses_defaults_false(monkeypatch):
     handler = AsyncRedisHandler(stream_name="s")
     await handler.connect()
     assert captured["decode_responses"] is False
-
-
-@pytest.mark.asyncio
-async def test_redis_send_message_raises_when_not_connected():
-    """send_message() raises instead of silently acking when no client is connected (AR-034)."""
-    handler = AsyncRedisHandler(stream_name="s")
-    record = {"level": "INF", "message": "m", "name": "n", "time": "t"}
-    with pytest.raises(RuntimeError):
-        await handler.send_message(record)

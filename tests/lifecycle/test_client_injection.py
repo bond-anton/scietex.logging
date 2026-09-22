@@ -1,32 +1,10 @@
 """Tests for the optional client-injection seam in AsyncBrokerHandler."""
 
-import asyncio
-import logging
 
 import pytest
+from conftest import FlakyBrokerHandler, _make_record, _wait_for
 
 from scietex.logging.handler.broker import AsyncBrokerHandler
-
-
-def _make_record(message: str = "test message") -> logging.LogRecord:
-    return logging.LogRecord(
-        name="TestLogger",
-        level=logging.INFO,
-        pathname=__file__,
-        lineno=0,
-        msg=message,
-        args=None,
-        exc_info=None,
-    )
-
-
-async def _wait_for(predicate, timeout: float = 5.0) -> None:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while not predicate():
-        if loop.time() >= deadline:
-            raise TimeoutError("condition was not met before timeout")
-        await asyncio.sleep(0.01)
 
 
 class RecordingClient:
@@ -55,30 +33,6 @@ class InjectedFakeBrokerHandler(AsyncBrokerHandler):
         self.client = None
 
     async def send_message(self, record: dict[str, str]) -> None:
-        self.sent.append(record)
-
-
-class FlakyInjectedBrokerHandler(AsyncBrokerHandler):
-    """Broker whose send_message fails a fixed number of times before succeeding."""
-
-    def __init__(self, *args, **kwargs):
-        self.sent: list[dict[str, str]] = []
-        self.connect_attempts = 0
-        self.send_attempts = 0
-        self.failures_before_success = 0
-        super().__init__(*args, **kwargs)
-
-    async def connect(self) -> None:
-        self.connect_attempts += 1
-        self.client = object()
-
-    async def disconnect(self) -> None:
-        self.client = None
-
-    async def send_message(self, record: dict[str, str]) -> None:
-        self.send_attempts += 1
-        if self.send_attempts <= self.failures_before_success:
-            raise RuntimeError("broker down")
         self.sent.append(record)
 
 
@@ -146,7 +100,7 @@ async def test_injected_client_send_failure_does_not_close_or_reconnect():
     """A send failure leaves the injected client open and reused, never rebuilt."""
     client = RecordingClient()
     errors = []
-    handler = FlakyInjectedBrokerHandler(
+    handler = FlakyBrokerHandler(
         queue_name="broker",
         client=client,
         error_handler=lambda record, exc: errors.append(exc),

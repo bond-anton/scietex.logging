@@ -4,11 +4,9 @@ import asyncio
 import json
 import logging
 import socket
-from dataclasses import asdict
 
 import pytest
 
-from scietex.logging.config import MqttConfig
 from scietex.logging.handler.mqtt import AsyncMqttHandler
 
 
@@ -67,32 +65,6 @@ async def test_mqtt_handler_publishes_to_topic():
     assert payload["message"] == test_message, "Log message content mismatch."
     assert payload["level"] == "INF", "Log level mismatch."
     assert payload["name"] == service_name, "Logger name mismatch."
-
-
-def test_mqtt_config_is_typed_and_validated():
-    """mqtt_config dict is converted into a typed MqttConfig on the handler."""
-    handler = AsyncMqttHandler(
-        topic="s",
-        mqtt_config={"host": "example.com", "port": 8883},
-    )
-    assert handler.backend_config.host == "example.com"
-    assert handler.backend_config.port == 8883
-    # client_config is a read-only asdict view of the typed config.
-    assert handler.client_config == asdict(MqttConfig(host="example.com", port=8883))
-
-
-def test_mqtt_config_defaults():
-    """No mqtt_config defaults to a localhost:1883 MqttConfig."""
-    handler = AsyncMqttHandler(topic="s")
-    assert handler.backend_config.host == "localhost"
-    assert handler.backend_config.port == 1883
-    assert handler.client_config["host"] == "localhost"
-    assert handler.client_config["port"] == 1883
-
-
-def test_mqtt_unknown_kwarg_raises_type_error():
-    with pytest.raises(TypeError):
-        AsyncMqttHandler(topic="s", unknown_kwarg=True)
 
 
 @pytest.mark.asyncio
@@ -182,12 +154,3 @@ async def test_mqtt_send_message_publishes_json(monkeypatch):
     assert json.loads(published["payload"]) == record
     assert published["qos"] == 1
     assert published["retain"] is True
-
-
-@pytest.mark.asyncio
-async def test_mqtt_send_message_raises_when_not_connected():
-    """send_message() raises instead of silently acking when no client is connected (AR-034)."""
-    handler = AsyncMqttHandler(topic="s")
-    record = {"level": "INF", "message": "m", "name": "n", "time": "t"}
-    with pytest.raises(RuntimeError):
-        await handler.send_message(record)

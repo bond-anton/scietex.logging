@@ -1,52 +1,33 @@
-"""Test package version is correctly set"""
+"""Test that the package version is well-formed and single-sourced."""
 
-import unittest
+from pathlib import Path
 
-try:
-    from src.scietex.logging import __version__ as version
-except ModuleNotFoundError:
-    from scietex.logging import __version__ as version
+import tomllib
 
+from scietex.logging import __version__
 
-class TestVersion(unittest.TestCase):
-    """
-    Test version number assigned to global __version__ variable is in a correct format.
-    """
-
-    def test_check_version_numbering(self) -> None:
-        """
-        Version must be a string with the three integers separated by dot.
-        Example: `0.1.4` or `2.0.0`.
-        All three digits must not negative and must not be equal to zero at the same time.
-        """
-        # Assert version is a string.
-        self.assertTrue(isinstance(version, str))
-
-        # Assert no extra space present. Example: " 0.1.1  " is not correct, "0.1.1" is correct.
-        self.assertEqual(len(version), len(version.strip()))
-
-        # Assert all three parts are present
-        v_l = version.split(".")
-        self.assertEqual(len(v_l), 3)
-
-        # Assert no extra space present in each part.
-        # Example: "0. 1 .1" is not correct, "0.1.1" is correct
-        for i in range(3):
-            self.assertEqual(len(v_l[i]), len(v_l[i].strip()))
-
-        # Convert all parts of the version to int values
-        v_maj = int(v_l[0])
-        v_min = int(v_l[1])
-        v_patch = int(v_l[2])
-
-        # Assert all version numbers are not negative
-        self.assertTrue(v_maj >= 0)
-        self.assertTrue(v_min >= 0)
-        self.assertTrue(v_patch >= 0)
-
-        # Assert all version numbers are not equal to zero at the same time
-        self.assertTrue(v_maj + v_min + v_patch > 0)
+PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_version_is_a_nonzero_dotted_triple():
+    """__version__ is a stripped 'N.N.N' string whose parts are non-negative ints."""
+    assert isinstance(__version__, str)
+    assert __version__ == __version__.strip()
+
+    parts = __version__.split(".")
+    assert len(parts) == 3
+    major, minor, patch = (int(part) for part in parts)
+    assert all(part >= 0 for part in (major, minor, patch))
+    assert major + minor + patch > 0
+
+
+def test_version_sources_from_package_attribute():
+    """pyproject.toml declares __version__ as the dynamic version source."""
+    with PYPROJECT.open("rb") as f:
+        pyproject = tomllib.load(f)
+
+    assert "version" in pyproject["project"]["dynamic"]
+    assert (
+        pyproject["tool"]["setuptools"]["dynamic"]["version"]["attr"]
+        == "scietex.logging.__version__"
+    )

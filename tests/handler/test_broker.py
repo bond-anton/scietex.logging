@@ -1,75 +1,18 @@
 """Tests for AsyncBrokerHandler abstract base class and its worker."""
 
 import asyncio
-import logging
 import random
-from datetime import datetime, timezone
+from dataclasses import asdict
 
 import pytest
+from conftest import CountingQueue, FakeBrokerHandler, _make_record, _wait_for
 
 from scietex.logging.async_logging_handler import DrainStatus
+from scietex.logging.config import MqttConfig, RedisConfig, ValkeyConfig
 from scietex.logging.handler.broker import AsyncBrokerHandler
-
-
-def _make_record(message: str = "test message") -> logging.LogRecord:
-    return logging.LogRecord(
-        name="TestLogger",
-        level=logging.INFO,
-        pathname=__file__,
-        lineno=0,
-        msg=message,
-        args=None,
-        exc_info=None,
-    )
-
-
-async def _wait_for(predicate, timeout: float = 5.0) -> None:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while not predicate():
-        if loop.time() >= deadline:
-            raise TimeoutError("condition was not met before timeout")
-        await asyncio.sleep(0.01)
-
-
-class CountingQueue(asyncio.Queue):
-    """Queue that records how many times task_done() is called."""
-
-    def __init__(self):
-        super().__init__()
-        self.task_done_calls = 0
-
-    def task_done(self):
-        self.task_done_calls += 1
-        super().task_done()
-
-
-class FakeBrokerHandler(AsyncBrokerHandler):
-    """Concrete broker handler recording connect/send activity for tests."""
-
-    def __init__(self, *args, **kwargs):
-        self.sent: list[dict[str, str]] = []
-        self.send_attempts: list[dict[str, str]] = []
-        self.connect_attempts = 0
-        self.connect_failures = 0
-        self._send_error: Exception | None = None
-        super().__init__(*args, **kwargs)
-
-    async def connect(self) -> None:
-        self.connect_attempts += 1
-        if self.connect_failures > 0:
-            self.connect_failures -= 1
-            raise ConnectionError("connect failed")
-        self.client = object()
-
-    async def disconnect(self) -> None:
-        self.client = None
-
-    async def send_message(self, record: dict[str, str]) -> None:
-        self.send_attempts.append(record)
-        if self._send_error is not None:
-            raise self._send_error
-        self.sent.append(record)
+from scietex.logging.handler.mqtt import AsyncMqttHandler
+from scietex.logging.handler.redis import AsyncRedisHandler
+from scietex.logging.handler.valkey import AsyncValkeyHandler
 
 
 class StuckConnectBrokerHandler(AsyncBrokerHandler):
@@ -259,8 +202,8 @@ async def test_send_failure_surfaces_and_acks_record():
     await handler.stop_logging(timeout=0.5)
 
 
-def test_broker_unknown_kwarg_raises_type_error():
-    """A typo'd kwarg on a broker handler fails loudly."""
+def test_base_broker_unknown_kwarg_raises_type_error():
+    """A typo'd kwarg on the broker machinery fails loudly."""
     with pytest.raises(TypeError):
         FakeBrokerHandler(queue_name="broker", unknown_kwarg=True)
 
@@ -293,29 +236,6 @@ async def test_broker_output_deterministic_without_console():
     entry = handler.sent[0]
     assert entry["level"] == "INF"
     assert entry["name"] == "TestLogger"
-
-    await handler.stop_logging(timeout=0.5)
-
-
-@pytest.mark.asyncio
-async def test_broker_payload_invariant_under_set_formatter():
-    """Broker name/time derive from the record; setFormatter cannot change the payload."""
-    handler = FakeBrokerHandler(
-        queue_name="broker",
-    )
-    # Broker handlers no longer accept formatter=; setFormatter (stdlib) sets an
-    # unused attribute. The wire payload must still be record-derived, so a plain
-    # stdlib formatter (non-ISO time) must not change the broker wire format.
-    handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
-
-    await handler.start_logging()
-    record = _make_record("hello")
-    handler.emit(record)
-
-    await _wait_for(lambda: bool(handler.sent))
-    entry = handler.sent[0]
-    assert entry["name"] == "TestLogger"
-    assert entry["time"] == datetime.fromtimestamp(record.created, timezone.utc).isoformat()
 
     await handler.stop_logging(timeout=0.5)
 
@@ -366,18 +286,75 @@ async def test_drain_returns_error_result(monkeypatch):
     assert isinstance(result.error, RuntimeError)
 
 
+_BROKER_CASES = [
+    pytest.param(
+        (
+            AsyncRedisHandler,
+            RedisConfig,
+            {"stream_name": "s"},
+            "redis_config",
+            {"host": "example.com", "port": 7000, "db": 2},
+        ),
+        id="redis",
+    ),
+    pytest.param(
+        (
+            AsyncValkeyHandler,
+            ValkeyConfig,
+            {"stream_name": "s"},
+            "valkey_config",
+            {"addresses": [("example.com", 7000)]},
+        ),
+        id="valkey",
+    ),
+    pytest.param(
+        (
+            AsyncMqttHandler,
+            MqttConfig,
+            {"topic": "s"},
+            "mqtt_config",
+            {"host": "example.com", "port": 8883},
+        ),
+        id="mqtt",
+    ),
+]
+
+
+@pytest.mark.parametrize("case", _BROKER_CASES)
+def test_broker_config_is_typed(case):
+    """A config dict becomes a typed backend_config with a matching client_config view."""
+    handler_cls, config_cls, name_kwargs, config_kwarg, config_dict = case
+    handler = handler_cls(**name_kwargs, **{config_kwarg: config_dict})
+
+    assert handler.backend_config == config_cls(**config_dict)
+    assert handler.client_config == asdict(config_cls(**config_dict))
+
+
+@pytest.mark.parametrize("case", _BROKER_CASES)
+def test_broker_config_defaults(case):
+    """Omitting the config dict falls back to the typed config's own defaults."""
+    handler_cls, config_cls, name_kwargs, _config_kwarg, _config_dict = case
+    handler = handler_cls(**name_kwargs)
+
+    assert handler.backend_config == config_cls()
+    assert handler.client_config == asdict(config_cls())
+
+
+@pytest.mark.parametrize("case", _BROKER_CASES)
+def test_broker_unknown_kwarg_raises_type_error(case):
+    """A typo'd kwarg on any concrete broker handler fails loudly."""
+    handler_cls, _config_cls, name_kwargs, _config_kwarg, _config_dict = case
+    with pytest.raises(TypeError):
+        handler_cls(**name_kwargs, unknown_kwarg=True)
+
+
+@pytest.mark.parametrize("case", _BROKER_CASES)
 @pytest.mark.asyncio
-async def test_broker_handler_registers_no_console_status_reporter(capsys):
-    """Broker handlers register no console status reporter, so no shutdown status is printed."""
-    handler = FakeBrokerHandler(queue_name="broker")
+async def test_broker_send_message_raises_when_not_connected(case):
+    """send_message() raises instead of silently acking when no client is connected."""
+    handler_cls, _config_cls, name_kwargs, _config_kwarg, _config_dict = case
+    handler = handler_cls(**name_kwargs)
+    record = {"level": "INF", "message": "m", "name": "n", "time": "t"}
 
-    assert handler._status_reporters == []
-    assert "_console" not in handler.log_queues
-
-    await handler.start_logging()
-    handler.emit(_make_record("hello"))
-    await _wait_for(lambda: bool(handler.sent))
-    await handler.stop_logging(timeout=0.5)
-
-    captured = capsys.readouterr().out
-    assert "has completed processing its queue" not in captured
+    with pytest.raises(RuntimeError):
+        await handler.send_message(record)

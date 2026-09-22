@@ -1,53 +1,12 @@
 """Tests for the bounded queue overflow policy (AR-007)."""
 
 import asyncio
-import logging
 import queue
 
 import pytest
+from conftest import FakeBrokerHandler, _make_record, _wait_for
 
 from scietex.logging import ConsoleHandler
-from scietex.logging.handler.broker import AsyncBrokerHandler
-
-
-def _make_record(message: str = "test message") -> logging.LogRecord:
-    return logging.LogRecord(
-        name="TestLogger",
-        level=logging.INFO,
-        pathname=__file__,
-        lineno=0,
-        msg=message,
-        args=None,
-        exc_info=None,
-    )
-
-
-async def _wait_for(predicate, timeout: float = 5.0) -> None:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while not predicate():
-        if loop.time() >= deadline:
-            raise TimeoutError("condition was not met before timeout")
-        await asyncio.sleep(0.01)
-
-
-class FakeBrokerHandler(AsyncBrokerHandler):
-    """Concrete broker handler recording connect/send activity for tests."""
-
-    def __init__(self, *args, **kwargs):
-        self.sent: list[dict[str, str]] = []
-        self.connect_attempts = 0
-        super().__init__(*args, **kwargs)
-
-    async def connect(self) -> None:
-        self.connect_attempts += 1
-        self.client = object()
-
-    async def disconnect(self) -> None:
-        self.client = None
-
-    async def send_message(self, record: dict[str, str]) -> None:
-        self.sent.append(record)
 
 
 @pytest.mark.asyncio

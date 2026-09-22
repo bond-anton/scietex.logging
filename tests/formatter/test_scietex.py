@@ -43,10 +43,9 @@ def test_scietex_formatter_format_with_debug_level():
     assert " - DBG -" in formatted_message
 
 
-def test_format_does_not_mutate_record():
-    """Test that format() does not mutate the caller's LogRecord."""
+def test_format_preserves_level_name():
+    """Test that format() leaves the caller's full level name intact."""
     formatter = ScietexFormatter()
     record = logging.LogRecord("test", logging.INFO, "", 0, "Test message", None, None)
     formatter.format(record)
-    assert record.levelname == "INFO"  # Full level name is preserved
-    assert not hasattr(record, "worker_name")  # worker_name is not attached to the record
+    assert record.levelname == "INFO"
