@@ -86,10 +86,6 @@ class AsyncBrokerHandler(AsyncLoggingHandler, abc.ABC):
                 ``backend_config``. Defaults to None, in which case the handler connects
                 and disconnects on its own.
 
-        Attributes:
-            queue_name (str): The name of the queue for the handler.
-            client (Any | None): The client for sending logs to broker, or None if not connected.
-
         Raises:
             TypeError: If an unknown keyword argument is passed.
             ValueError: If both ``client`` and ``backend_config`` are provided.

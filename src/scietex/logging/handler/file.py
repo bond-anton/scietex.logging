@@ -75,8 +75,9 @@ class AsyncFileHandler(AsyncLoggingHandler):
                 with ``file``; omit it when injecting ``file=``.
             mode (str): File open mode (default "a").
             encoding (str, optional): File encoding (default None -> locale default).
-            delay (bool): If True, defer opening the file until the first write
-                (the backend worker opens it lazily). Defaults to False.
+            delay (bool): Accepted for stdlib-signature parity; the worker always
+                opens the file lazily on first write regardless of this value.
+                Defaults to False.
             errors (str, optional): Encoding error handling scheme.
             file (Any | None): An externally-managed, already-open file-like
                 object to write to. When provided, the handler never closes it —
@@ -182,12 +183,20 @@ class AsyncRotatingFileHandler(AsyncFileHandler):
                 0 disables size-based rotation (default).
             backupCount (int): Number of backup files to keep (default 0).
             encoding (str, optional): File encoding.
-            delay (bool): If True, defer opening the file until the first write.
+            delay (bool): Accepted for stdlib-signature parity; the worker always
+                opens the file lazily on first write regardless of this value.
+                Defaults to False.
             errors (str, optional): Encoding error handling scheme.
             file (Any | None): An externally-managed, already-open file-like.
             error_handler (callable, optional): Delivery-error callback.
             queue_maxsize (int): Maximum number of records each backend queue can hold.
             formatter (logging.Formatter | None): Formatter used to render records.
+                Defaults to None, in which case a default ``ScietexFormatter`` is
+                constructed.
+
+        Raises:
+            TypeError: If an unknown keyword argument is passed.
+            ValueError: If both ``file`` and ``filename`` are provided.
         """
         # Set the rotation options BEFORE super().__init__ so they are available
         # when the base __init__ calls the overridden _make_backend.
@@ -272,7 +281,9 @@ class AsyncTimedRotatingFileHandler(AsyncFileHandler):
             interval (int): Number of ``when`` units between rollovers (default 1).
             backupCount (int): Number of backup files to keep (default 0).
             encoding (str, optional): File encoding.
-            delay (bool): If True, defer opening the file until the first write.
+            delay (bool): Accepted for stdlib-signature parity; the worker always
+                opens the file lazily on first write regardless of this value.
+                Defaults to False.
             utc (bool): Use UTC for rollover time computation (default False).
             atTime: Optional rollover time of day.
             errors (str, optional): Encoding error handling scheme.
@@ -280,6 +291,12 @@ class AsyncTimedRotatingFileHandler(AsyncFileHandler):
             error_handler (callable, optional): Delivery-error callback.
             queue_maxsize (int): Maximum number of records each backend queue can hold.
             formatter (logging.Formatter | None): Formatter used to render records.
+                Defaults to None, in which case a default ``ScietexFormatter`` is
+                constructed.
+
+        Raises:
+            TypeError: If an unknown keyword argument is passed.
+            ValueError: If both ``file`` and ``filename`` are provided.
         """
         # Set the rotation options BEFORE super().__init__ so they are available
         # when the base __init__ calls the overridden _make_backend.
@@ -361,12 +378,20 @@ class AsyncWatchedFileHandler(AsyncFileHandler):
             filename (str): Path to the log file.
             mode (str): File open mode (default "a").
             encoding (str, optional): File encoding.
-            delay (bool): If True, defer opening the file until the first write.
+            delay (bool): Accepted for stdlib-signature parity; the worker always
+                opens the file lazily on first write regardless of this value.
+                Defaults to False.
             errors (str, optional): Encoding error handling scheme.
             file (Any | None): An externally-managed, already-open file-like.
             error_handler (callable, optional): Delivery-error callback.
             queue_maxsize (int): Maximum number of records each backend queue can hold.
             formatter (logging.Formatter | None): Formatter used to render records.
+                Defaults to None, in which case a default ``ScietexFormatter`` is
+                constructed.
+
+        Raises:
+            TypeError: If an unknown keyword argument is passed.
+            ValueError: If both ``file`` and ``filename`` are provided.
         """
         super().__init__(
             filename,

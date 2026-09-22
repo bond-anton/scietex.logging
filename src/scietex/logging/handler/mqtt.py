@@ -128,6 +128,12 @@ class AsyncMqttHandler(AsyncBrokerHandler):
     async def disconnect(self) -> None:
         """
         Disconnect from MQTT asynchronously.
+
+        Exits the client's async context manager to close the connection and
+        resets ``self.client`` to None.
+
+        Returns:
+            None
         """
         if self.client is not None:
             await self.client.__aexit__(None, None, None)

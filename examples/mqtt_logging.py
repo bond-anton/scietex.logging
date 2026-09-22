@@ -5,7 +5,7 @@
 import asyncio
 import logging
 
-from scietex.logging.handler.mqtt import AsyncMqttHandler
+from scietex.logging import AsyncMqttHandler
 
 
 async def main():

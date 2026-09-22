@@ -128,24 +128,16 @@ class MqttConfig:
     """Connection settings for the MQTT backend.
 
     Mirrors the scalar plain options of ``aiomqtt.Client`` so that
-    ``MqttConfig(**raw)`` never rejects a legitimate client option. ``host`` is
-    the common connection field (consistent with ``RedisConfig``) and is
-    translated to aiomqtt's ``hostname`` kwarg by ``connect()``. Object-valued
-    expert options (``will``, ``tls_context``, ``tls_params``, ``properties``,
-    ``logger``) are intentionally not modeled here.
+    ``MqttConfig(**raw)`` never rejects a legitimate client option. ``host`` and
+    ``port`` are the common connection fields (``host`` is translated to
+    aiomqtt's ``hostname`` kwarg by ``connect()``); the remaining fields are
+    optional client options passed through to ``aiomqtt.Client`` unchanged.
+    Object-valued expert options (``will``, ``tls_context``, ``tls_params``,
+    ``properties``, ``logger``) are intentionally not modeled here.
 
     Attributes:
         host (str): MQTT broker host (default "localhost").
         port (int): MQTT broker port (default 1883).
-        username (str | None): Username for authentication (default None).
-        password (str | None): Password for authentication (default None).
-        identifier (str | None): Client identifier; auto-generated if None.
-        keepalive (int | None): Keepalive interval in seconds (default None).
-        clean_session (bool | None): Whether the broker discards the session on
-            disconnect (default None -> aiomqtt default True).
-        transport (str | None): "tcp", "websockets", or "unix" (default None).
-        timeout (float | None): Default broker-communication timeout (default None).
-        tls_insecure (bool | None): Disable TLS hostname verification (default None).
     """
 
     host: str = "localhost"

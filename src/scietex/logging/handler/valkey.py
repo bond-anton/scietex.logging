@@ -56,7 +56,7 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
                 ``self.backend_config``, which ``connect()`` translates into a
                 ``GlideClientConfiguration``; keys left ``None`` let glide apply its own
                 defaults. Defaults to ``{}``. Mutually exclusive with ``client``.
-            client (Any | None): An externally-managed Valkey client to use instead of
+            client (GlideClient | None): An externally-managed Valkey client to use instead of
                 building one in ``connect()``. When provided, the handler never closes
                 it — the caller owns its lifetime and recovery. Mutually exclusive with
                 ``valkey_config``. Defaults to None.
@@ -126,7 +126,12 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
 
     async def disconnect(self) -> None:
         """
-        Disconnect Valkey asynchronously.
+        Disconnect from Valkey asynchronously.
+
+        Closes the client connection and resets ``self.client`` to None.
+
+        Returns:
+            None
         """
         if self.client is not None:
             await self.client.close()

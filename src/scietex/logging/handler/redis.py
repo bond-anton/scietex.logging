@@ -115,6 +115,11 @@ class AsyncRedisHandler(AsyncBrokerHandler):
     async def disconnect(self) -> None:
         """
         Disconnect from Redis asynchronously.
+
+        Closes the client connection and resets ``self.client`` to None.
+
+        Returns:
+            None
         """
         if self.client is not None:
             await self.client.aclose()

@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from scietex.logging.handler.valkey import AsyncValkeyHandler
+from scietex.logging import AsyncValkeyHandler
 
 
 async def main():

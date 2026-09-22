@@ -5,7 +5,7 @@
 import asyncio
 import logging
 
-from scietex.logging.handler.redis import AsyncRedisHandler
+from scietex.logging import AsyncRedisHandler
 
 
 async def main():

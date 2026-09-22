@@ -13,7 +13,7 @@ import logging
 
 from glide import GlideClient, GlideClientConfiguration, MaxId, MinId, NodeAddress
 
-from scietex.logging.handler.valkey import AsyncValkeyHandler
+from scietex.logging import AsyncValkeyHandler
 
 
 async def main():

@@ -282,6 +282,10 @@ class AsyncLoggingHandler(logging.Handler):
 
         Returns:
             None
+
+        Raises:
+            RuntimeError: If called while logging is already running, or after
+                ``close()`` (a closed handler cannot be restarted).
         """
         if self._closed:
             raise RuntimeError(
