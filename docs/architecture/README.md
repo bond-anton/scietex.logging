@@ -24,8 +24,8 @@ machinery is separated from the sinks:
 - **Valkey** (streams) — optional, requires the `valkey-glide` package.
 - **MQTT** (topic) — optional, requires the `aiomqtt` package.
 
-The package is small: ~3000 lines of source across 14 modules under
-`src/scietex/logging/`.
+The package is small: ~3000 lines of source across 19 `.py` files (16 modules
+plus 3 subpackage `__init__.py`) under `src/scietex/logging/`.
 
 ## Document Index
 
@@ -41,14 +41,16 @@ The package is small: ~3000 lines of source across 14 modules under
 
 ## Key Facts (quick reference)
 
-- **Package**: `scietex.logging`, version `2.0.0` (`src/scietex/logging/__init__.py:138`)
+- **Package**: `scietex.logging`, version `2.1.0` (`src/scietex/logging/__init__.py:138`)
 - **Python**: `>=3.10` (`pyproject.toml`)
 - **Build**: setuptools, `src/` layout; package data ships `py.typed`
 - **Runtime deps**: none (base); `redis>=5.0.0` (`[redis]`), `valkey-glide~=2.5.0` (`[valkey]`), `aiomqtt~=2.5.0` (`[mqtt]`)
 - **Public API** (`__init__.py`): `ConsoleHandler`, `AsyncBrokerHandler`,
   `AsyncFileHandler`, `AsyncLoggingHandler`, `AsyncRotatingFileHandler`,
   `AsyncTimedRotatingFileHandler`, `AsyncWatchedFileHandler`, `ConsoleBackend`,
-  `FileBackend`, `JsonFormatter`, `ScietexFormatter`;
+  `FileBackend`, `JsonFormatter`, `ScietexFormatter`, `LoggingTheme`,
+  `MonochromeTheme`, `ScietexLight`, `ScietexDark`, `Palette`, `MONOCHROME`,
+  `SCIETEX_LIGHT`, `SCIETEX_DARK`, `resolve_color`;
   `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler` added
   conditionally on successful import
 - **Class hierarchy**: `logging.Handler` → `AsyncLoggingHandler` (pure
@@ -57,6 +59,10 @@ The package is small: ~3000 lines of source across 14 modules under
   {`AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`,
   `AsyncWatchedFileHandler`}, `AsyncBrokerHandler` → {`AsyncRedisHandler`,
   `AsyncValkeyHandler`, `AsyncMqttHandler`}}
+- **Theme hierarchy**: `LoggingTheme` (binds a `Palette` to a color policy) →
+  {`MonochromeTheme`, `ScietexLight`, `ScietexDark`}; consumed by
+  `ScietexFormatter` and `ConsoleHandler` via the keyword-only `theme=` /
+  `color=` options
 - **Tests**: pytest + pytest-asyncio; Redis tests require a live server, and the
   Valkey/MQTT end-to-end tests skip when no server is reachable
 - **Tooling**: uv (lockfile), tox (format/lint/type/py314), ruff, `ty` type checker

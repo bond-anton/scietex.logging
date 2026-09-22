@@ -6,9 +6,10 @@ direction, not an exhaustive list of third-party packages.
 ## Intra-package dependency graph
 
 ```
-formatter/scietex.py      (imports: config.py)
+formatter/scietex.py      (imports: config.py, theme.py)
 formatter/json.py         (imports: config.py)
 config.py                 (no intra-package imports)
+theme.py                  (no intra-package imports)
 _executor.py              (no intra-package imports; provides _WriteExecutor)
 async_logging_handler.py  (imports: config.py; no formatter dep)
 backend/_base.py          (imports: async_logging_handler.py, config.py)
@@ -16,7 +17,7 @@ backend/_base.py          (imports: async_logging_handler.py, config.py)
    ▲ imports AsyncLoggingHandler
    ├── backend/console.py    (imports _QUEUE_CONSOLE, _WriteExecutor; extends _QueueBackend)
    ├── backend/file.py       (imports _QUEUE_FILE, _WriteExecutor; extends _QueueBackend)
-   ├── handler/console.py    (extends AsyncLoggingHandler; registers console backend; imports ScietexFormatter)
+   ├── handler/console.py    (extends AsyncLoggingHandler; registers console backend; imports ScietexFormatter, LoggingTheme, resolve_color)
    ├── handler/file.py       (extends AsyncLoggingHandler; registers "_file" backend; imports ScietexFormatter)
    └── handler/broker.py     (extends AsyncLoggingHandler; abstract broker base)
           ▲ extends AsyncBrokerHandler
@@ -27,13 +28,14 @@ backend/_base.py          (imports: async_logging_handler.py, config.py)
 __init__.py  (public API)
 ```
 
-Direction is strictly **one-way, top-down** (no cycles): `config` is the shared
-leaf; `async_logging_handler` depends only on `config`, while `backend/_base`
-depends on `async_logging_handler` and `config`; `backend/console` and
-`backend/file` extend `_QueueBackend` (from `backend/_base`) and import the
-queue-name constants; the console/file handlers additionally import
-`formatter/scietex`; concrete backends extend the broker base; `__init__`
-re-exports everything.
+Direction is strictly **one-way, top-down** (no cycles): `config` and `theme`
+are the two stdlib-only leaves; `async_logging_handler` depends only on
+`config`, while `backend/_base` depends on `async_logging_handler` and
+`config`; `backend/console` and `backend/file` extend `_QueueBackend` (from
+`backend/_base`) and import the queue-name constants; the console/file handlers
+additionally import `formatter/scietex`, and the console handler also imports
+`theme`; concrete backends extend the broker base; `__init__` re-exports
+everything.
 
 ## Core → infrastructure dependencies
 
@@ -69,8 +71,11 @@ stdlib-only peers, so they carry no optional dependency.
 
 - `async_logging_handler.py` → `config.py` (imports `LoggingConfig`,
   `validate_queue_maxsize`); no formatter import.
+- `formatter/scietex.py` → `theme.py` (imports `BOLD`, `DIM`, `MONOCHROME`,
+  `RESET`, `LoggingTheme`, `ansi_bg`, `ansi_fg`).
 - `handler/console.py` → `formatter/scietex.py` (constructs `ScietexFormatter`).
 - `handler/file.py` → `formatter/scietex.py` (constructs `ScietexFormatter`).
+- `handler/console.py` → `theme.py` (imports `LoggingTheme`, `resolve_color`).
 - `backend/_base.py` → `async_logging_handler.py` (imports `BackendDrainResult`,
   `DrainStatus` for shutdown-status reporting) and `config.py` (imports
   `report_error` for the shared error channel).
@@ -128,7 +133,7 @@ None detected. The import graph is acyclic and strictly layered.
 
 | Module | Third-party dep | Optional? |
 |---|---|---|
-| `_executor.py`, `async_logging_handler.py`, `handler/console.py`, `backend/_base.py`, `backend/console.py`, `backend/file.py`, `handler/file.py`, `formatter/scietex.py`, `formatter/json.py`, `handler/broker.py` | none | — |
+| `_executor.py`, `async_logging_handler.py`, `handler/console.py`, `backend/_base.py`, `backend/console.py`, `backend/file.py`, `handler/file.py`, `formatter/scietex.py`, `formatter/json.py`, `handler/broker.py`, `theme.py` | none | — |
 | `handler/redis.py` | `redis>=5.0.0` | yes (`[redis]`) |
 | `handler/valkey.py` | `valkey-glide~=2.5.0` | yes (`[valkey]`) |
 | `handler/mqtt.py` | `aiomqtt~=2.5.0` | yes (`[mqtt]`) |

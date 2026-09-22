@@ -15,8 +15,10 @@ extras.
 **Public interface.** `__all__ = ["ConsoleHandler", "AsyncBrokerHandler",
 "AsyncFileHandler", "AsyncLoggingHandler", "AsyncRotatingFileHandler",
 "AsyncTimedRotatingFileHandler", "AsyncWatchedFileHandler", "ConsoleBackend",
-"FileBackend", "JsonFormatter", "LoggingConfig", "MqttConfig", "RedisConfig",
-"ScietexFormatter", "ValkeyConfig"]`, extended with `"AsyncRedisHandler"`,
+"FileBackend", "JsonFormatter", "LoggingConfig", "LoggingTheme", "MONOCHROME",
+"MonochromeTheme", "MqttConfig", "Palette", "RedisConfig", "SCIETEX_DARK",
+"SCIETEX_LIGHT", "ScietexDark", "ScietexFormatter", "ScietexLight",
+"ValkeyConfig", "resolve_color"]`, extended with `"AsyncRedisHandler"`,
 `"AsyncValkeyHandler"`, and `"AsyncMqttHandler"` when their modules import
 successfully. `__version__`. The config types (`LoggingConfig`, `RedisConfig`,
 `ValkeyConfig`, `MqttConfig`) are exported alongside the handler classes and
@@ -41,23 +43,30 @@ the record's standard-library logger name (`record.name`), rendered via the
 `%(name)s` format token.
 
 **Classes / functions.**
-- `ScietexFormatter(logging.Formatter)` — `formatter/scietex.py:13`
+- `ScietexFormatter(logging.Formatter)` — `formatter/scietex.py:44`
 - `level_abbreviation(log_level: int) -> str` — defined in `config.py:170-188`,
   re-exported from `formatter/scietex.py:10` for backward compatibility (AR-026).
 
 **Public interface.**
-- `ScietexFormatter(fmt=None, datefmt=None)`
+- `ScietexFormatter(fmt=None, datefmt=None, *, theme=None, color=None)`
   - Default `fmt` = `"%(asctime)s - %(levelname)s - [%(name)s] - %(message)s"`,
     where `%(name)s` renders the record's standard-library logger name
     (`record.name`) — the sole source of identity.
-  - `formatTime(record, datefmt=None)` — ISO-8601 UTC when `datefmt` is None.
+  - `theme` / `color` (keyword-only) — `theme` is the `LoggingTheme` to apply
+    (default `MONOCHROME`); `color` is an explicit on/off override defaulting
+    to `theme.color`.
+  - `formatTime(record, datefmt=None)` — ISO-8601 UTC when `datefmt` is None;
+    when color is enabled the timestamp is wrapped in a dim ANSI sequence.
   - `format(record)` — copies the record, sets `record.levelname`
-    (abbreviation), then delegates to `logging.Formatter.format`.
+    (abbreviation), then delegates to `logging.Formatter.format`; with color
+    enabled it also paints `record.levelname`, `record.name`, and `record.msg`
+    (and clears `record.args`) on the copy.
 - `level_abbreviation` maps DEBUG/INFO/WARNING/ERROR/CRITICAL → DBG/INF/WRN/ERR/CRT;
   unknown levels → zero-padded 3-digit code.
 
 **Depends on.** stdlib `logging`, `copy`; `config` (imports `iso_timestamp`,
-`level_abbreviation`).
+`level_abbreviation`); `theme` (imports `BOLD`, `DIM`, `MONOCHROME`, `RESET`,
+`LoggingTheme`, `ansi_bg`, `ansi_fg`).
 
 **Depended on by.** `ConsoleHandler` and `AsyncFileHandler` (each constructs one
 in `__init__`); `AsyncBrokerHandler._worker` (via `level_abbreviation` from
@@ -350,14 +359,19 @@ the matching backend under the name `"_file"`).
 **Purpose.** Thin concrete subclass of `AsyncLoggingHandler` that registers the
 console backend as a peer. Public signature unchanged.
 
-**Class.** `ConsoleHandler(AsyncLoggingHandler)` — `handler/console.py:16`
+**Class.** `ConsoleHandler(AsyncLoggingHandler)` — `handler/console.py:18`
 
 **Public interface.**
-- `ConsoleHandler(*, error_handler=None, queue_maxsize=10000, formatter=None)`
+- `ConsoleHandler(*, error_handler=None, queue_maxsize=10000, formatter=None, theme=None, color=None)`
   - Builds a typed `self.config = LoggingConfig(...)`; no `**kwargs` — unknown
     keyword args raise `TypeError`. Accepts an optional `formatter=` kwarg
     (default `ScietexFormatter`), stored as `self.formatter` and passed to the
-    console backend via `formatter_provider` (AR-024).
+    console backend via `formatter_provider` (AR-024). Keyword-only `theme=`/
+    `color=` configure the default `ScietexFormatter`: when `formatter` is None
+    and `theme` is supplied, the formatter is built as
+    `ScietexFormatter(theme=theme, color=color or resolve_color(sys.stdout))`;
+    the default path (`formatter=None`, `theme=None`) builds an unthemed
+    `ScietexFormatter`. Supplying `formatter=` ignores `theme`/`color`.
   - Constructs a `ConsoleBackend` (with `formatter_provider=lambda:
     self.formatter`, `maxsize=queue_maxsize`, and
     `error_handler=self._report_error`) and registers it under the name
@@ -370,7 +384,8 @@ console backend as a peer. Public signature unchanged.
 **Key instance state.** `_console_backend` (ConsoleBackend | None).
 
 **Depends on.** `async_logging_handler.AsyncLoggingHandler`;
-`backend/console.ConsoleBackend`; `formatter/scietex.ScietexFormatter`.
+`backend/console.ConsoleBackend`; `formatter/scietex.ScietexFormatter`;
+`theme` (`LoggingTheme`, `resolve_color`).
 
 **Depended on by.** host apps using console logging; tests.
 
@@ -436,7 +451,7 @@ connect/disconnect/send_message contract concrete backends implement.
 
 **Public interface.**
 - `AsyncBrokerHandler(queue_name, *, error_handler=None, queue_maxsize=10000, backend_config=None, client=None)`
-  - Registers `log_queues[queue_name]` (a bounded `asyncio.Queue(maxsize=self.queue_maxsize)`)
+  - Registers `log_queues[queue_name]` (a bounded `asyncio.Queue(maxsize=self.config.queue_maxsize)`)
     and `self._worker` (a bound method used as a worker factory) via
     `register_backend`. No `**kwargs` — unknown keyword args raise `TypeError`.
   - `client` attribute (Any | None) — connection slot. When an external `client`

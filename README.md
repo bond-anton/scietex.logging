@@ -9,6 +9,7 @@
 - **Asynchronous Logging**: Log messages are queued and handled asynchronously, reducing impact on application performance.
 - **Loop-Independent `emit`**: `emit()` is thread-safe and may be called from any thread — including one with no running asyncio loop — so you can log from worker threads, thread pools, and callbacks without dropping records.
 - **Multiple Backends**: Supports console, file, Redis, Valkey, and MQTT logging out of the box.
+- **Themes and Color**: Opt-in ANSI color for console output via the `Palette`/`LoggingTheme` theme API — built-in `MONOCHROME`, `SCIETEX_LIGHT`, and `SCIETEX_DARK` themes plus `resolve_color` TTY auto-detection, applied through `theme=`/`color=` on `ScietexFormatter` and `ConsoleHandler`.
 - **Flexible Logging Levels**: Compatible with Python's standard logging levels (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).
 - **Optional Dependencies**: Only installs dependencies for the specific backends you need.
 
@@ -174,6 +175,32 @@ File logging needs no extra dependency. Rotation variants
 (`AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`,
 `AsyncWatchedFileHandler`) mirror the stdlib classes of the same name.
 
+### Themes and Color
+
+Console output is monochrome by default. Pass a `theme` to `ConsoleHandler` to
+colorize it, or apply a theme directly to a `ScietexFormatter`:
+
+```python
+import logging
+from scietex.logging import (
+    SCIETEX_DARK,
+    SCIETEX_LIGHT,
+    ConsoleHandler,
+    ScietexFormatter,
+)
+
+# Theme on the console handler — color is auto-detected from a TTY stdout.
+handler = ConsoleHandler(theme=SCIETEX_DARK)
+
+# Theme on the formatter — `color=True` forces color explicitly.
+formatter = ScietexFormatter(theme=SCIETEX_LIGHT, color=True)
+handler.setFormatter(formatter)
+```
+
+Color is opt-in and emits 24-bit truecolor ANSI sequences. `resolve_color`
+enables it only for a TTY `sys.stdout` (or on an explicit `FORCE_COLOR` /
+`force_color` request), so redirected and file output stay plain.
+
 ## Configuration
 
 scietex.logging is designed to allow easy configuration of additional backends and custom logging formats:
@@ -195,7 +222,7 @@ the log record directly — its `name` field is the record's logger name
 
 ## Extending scietex.logging
 
-To add support for additional logging backends, subclass `AsyncBrokerHandler` and implement `connect()`, `disconnect()`, and `send_message()` methods. `AsyncLoggingHandler` is the pure-machinery base that owns the queue/worker infrastructure but no sink of its own. `ConsoleHandler`, `AsyncFileHandler` (and its rotation variants), and `AsyncBrokerHandler` are sibling concrete handlers that each subclass `AsyncLoggingHandler` directly and register their own backend — the console, file, and message-broker sinks respectively. A handler emits only to the backend it registers, so console output requires adding a `ConsoleHandler` to the logger explicitly.
+To add support for additional logging backends, subclass `AsyncBrokerHandler` and implement `connect()`, `disconnect()`, and `send_message()` methods. `AsyncLoggingHandler` is the pure-machinery base that owns the queue/worker infrastructure but no sink of its own. `ConsoleHandler` and `AsyncFileHandler` (and its rotation variants) are the concrete handlers that each subclass `AsyncLoggingHandler` directly and register their own backend — the console and file sinks respectively. `AsyncBrokerHandler` is the abstract base for the message-broker backends (Redis, Valkey, MQTT, and custom backends); it also subclasses `AsyncLoggingHandler` directly but declares `connect()`, `disconnect()`, and `send_message()` as abstract methods, so a broker backend subclasses `AsyncBrokerHandler` rather than the base. A handler emits only to the backend it registers, so console output requires adding a `ConsoleHandler` to the logger explicitly.
 
 ### Example: Custom Database Handler
 

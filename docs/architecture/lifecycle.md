@@ -12,9 +12,11 @@ are async and must run inside an asyncio event loop.
 - Initializes empty `log_queues`, `log_worker_factories`, `_drain_hooks`,
   `_status_reporters`, `log_workers_tasks`.
 
-**`ConsoleHandler.__init__`** (`handler/console.py:28`): calls super, sets
-`self.formatter` (default `ScietexFormatter()` unless a `formatter=` is
-injected), then constructs a `ConsoleBackend` and registers it under the name
+**`ConsoleHandler.__init__`** (`handler/console.py:30`): calls super, sets
+`self.formatter` (three branches: an injected `formatter=` is used as-is; with
+`theme=None` the default `ScietexFormatter()` is built unthemed; with a `theme=`
+it builds `ScietexFormatter(theme=theme, color=color or resolve_color(sys.stdout))`),
+then constructs a `ConsoleBackend` and registers it under the name
 `"_console"` via `register_backend` (queue + worker factory + drain hook), and
 registers the console's `report_status` as a status reporter via
 `register_status_reporter`.
@@ -198,7 +200,7 @@ moved across loops. To log on a different loop, construct a fresh handler.
 | client connection (`client`) | `connect()` (worker start) | handler instance | `disconnect()` (worker exit) |
 | file handle (`_stream`) | worker first write (lazy open) | backend instance | worker `finally` — `_close_stream` submitted to the write executor, then `shutdown(wait=True)` |
 | write executor (`_WriteExecutor`) | worker run (lazy, first write) | worker-local (not the handler) | worker `finally` — `shutdown(wait=True)` |
-| formatter | `__init__` (console/file handlers only) | handler instance | — |
+| formatter | `__init__` (console/file handlers only; optional `theme`/`color` bound here) | handler instance | — |
 
 The `client connection` row above holds only for a **self-managed** client (one
 built by the handler's own `connect()`). An **injected** client is owned by the

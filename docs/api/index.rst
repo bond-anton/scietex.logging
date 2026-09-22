@@ -8,3 +8,4 @@ This section documents the public API of ``scietex.logging``.
 
    handlers
    config
+   themes

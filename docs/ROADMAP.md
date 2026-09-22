@@ -1,7 +1,7 @@
 # Roadmap
 
-Planned direction for `scietex.logging`. In-development version: **2.0.0**
-(not yet released).
+Planned direction for `scietex.logging`. Current version: **2.1.0**
+(released).
 
 The 1.x public API (`__all__` surface and constructor signatures) has grown
 additively through the 1.x line (client injection, MQTT backend, file sinks,
@@ -218,3 +218,19 @@ the loop-independent `emit` work above.
   the `ScietexFormatter` signature — a hard public-API breaking change. It lands
   in 2.0.0 alongside AR-116 (which also reshapes the constructor surface), so
   all constructor churn lands in one breaking release.
+
+---
+
+## 2.1 — Themes and color
+
+**Status:** Implemented in 2.1.0.
+
+Console output gained an opt-in color subsystem. A frozen `Palette` dataclass
+holds per-element hex color slots; a `LoggingTheme` binds a `Palette` to a color
+policy; and the built-in `MonochromeTheme`, `ScietexLight`, and `ScietexDark`
+themes are exposed as the `MONOCHROME`, `SCIETEX_LIGHT`, and `SCIETEX_DARK`
+singletons. `resolve_color(stream, *, color, force_color, no_color)` decides
+whether ANSI is emitted (TTY detection on `sys.stdout`, honoring `FORCE_COLOR` /
+`NO_COLOR`). Color is applied through keyword-only `theme=`/`color=` parameters
+on `ScietexFormatter` and `ConsoleHandler`; with no theme (the default) output
+remains byte-for-byte identical to a plain formatter.

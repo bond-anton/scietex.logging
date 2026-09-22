@@ -10,53 +10,74 @@ calling the handler's public async methods inside an asyncio event loop.
 
 ## Major subsystems / components
 
-The package is a single Python package (`scietex.logging`) with no internal
-sub-packages. Architecturally it decomposes into four cooperating layers:
+The package is a top-level Python package (`scietex.logging`) with three
+internal sub-packages (`backend/`, `formatter/`, `handler/`), each carrying its
+own `__init__.py`. Architecturally it decomposes into the following cooperating
+subsystems:
 
 1. **Public API surface** — `src/scietex/logging/__init__.py`
-   Re-exports the handler classes and formatter; defines `__version__`.
-   Conditionally imports the Redis/Valkey handlers so the base package works
-   without optional dependencies.
+   Re-exports the handler classes, formatters, and theme types; defines
+   `__version__`. Conditionally imports the Redis/Valkey handlers so the base
+   package works without optional dependencies.
 
 2. **Formatter layer** — `src/scietex/logging/formatter/scietex.py` and
    `src/scietex/logging/formatter/json.py`
    `ScietexFormatter` (a `logging.Formatter`). Abbreviates levels to 3-letter
    codes and emits ISO-8601 UTC timestamps; identity is the record's
    standard-library logger name (`record.name`), rendered via the `%(name)s`
-   format token. The `level_abbreviation` helper it uses now lives in
+   format token. Color is opt-in: passing a `theme` (a `LoggingTheme`) with
+   `color=True` paints the level abbreviation, logger name, message, and
+   timestamp with the theme's ANSI palette; the default (`theme=None`) output is
+   monochrome. The `level_abbreviation` helper it uses now lives in
    `config.py` (the neutral leaf) and is re-exported here for backward
    compatibility (AR-026). `JsonFormatter` (a `logging.Formatter`) renders each
    record as a single-line JSON object (NDJSON). Both are stdlib-only.
 
-3. **Machinery base layer** — `src/scietex/logging/async_logging_handler.py`
+3. **Theme subsystem** — `src/scietex/logging/theme.py`
+   `Palette` (a frozen dataclass of per-element hex color slots), `LoggingTheme`
+   (a named `Palette` bound to a color on/off policy), and the built-in themes
+   `MonochromeTheme` / `ScietexLight` / `ScietexDark` (plus their singletons
+   `MONOCHROME` / `SCIETEX_LIGHT` / `SCIETEX_DARK`), along with the ANSI helpers
+   (`RESET`/`BOLD`/`DIM`, `ansi_fg`/`ansi_bg`) and `resolve_color` (TTY
+   auto-detection with `FORCE_COLOR`/`NO_COLOR`/explicit overrides). A
+   stdlib-only neutral leaf (imports only `logging`, `os`, `dataclasses`), so
+   the formatter and console handler can depend on it without an import cycle.
+   Color is strictly opt-in and never auto-enabled for redirected or file
+   output.
+
+4. **Machinery base layer** — `src/scietex/logging/async_logging_handler.py`
    `AsyncLoggingHandler` (a `logging.Handler`). Pure shared machinery with **no
    sink of its own**: per-backend `asyncio.Queue`s, the accept/running
    `asyncio.Event`s, worker task lifecycle, the error channel, and a generic
    `register_backend(name, queue, worker, drain)` mechanism. Concrete handlers
    register their own backends on top of it.
 
-4. **Console backend** — `src/scietex/logging/backend/console.py`
+5. **Console backend** — `src/scietex/logging/backend/console.py`
    `ConsoleBackend`. The console (stdout) sink as a **peer backend**: it owns
    its queue, its worker coroutine, and its shutdown-status reporting (the
    synthetic "… has completed processing its queue." records live in its
    `report_status` method, invoked as a post-drain status reporter).
 
-5. **File backend** — `src/scietex/logging/backend/file.py`
+6. **File backend** — `src/scietex/logging/backend/file.py`
    `FileBackend` and its rotation subclasses `RotatingFileBackend`,
    `TimedRotatingFileBackend`, and `WatchedFileBackend`. The file sink as a
    **peer backend**, a true peer of `ConsoleBackend`: each owns its queue, its
    worker coroutine, the entire file lifecycle (lazy open, write,
    close-in-finally), and its shutdown-status reporting.
 
-6. **Concrete handler layer** — `src/scietex/logging/handler/console.py`
+7. **Concrete handler layer** — `src/scietex/logging/handler/console.py`
    `ConsoleHandler` (extends `AsyncLoggingHandler`). A thin concrete subclass
-   that registers the console backend as a peer unconditionally.
+   that registers the console backend as a peer unconditionally. Accepts
+   keyword-only `theme=`/`color=` options: when no `formatter=` is supplied it
+   builds the default `ScietexFormatter` with the requested theme (three
+   branches — injected formatter, plain unthemed default, or themed with
+   `color or resolve_color(sys.stdout)`).
    Public constructor signatures are unchanged, but `**kwargs` is gone: each
    handler builds a typed `self.config` (`LoggingConfig` etc., from
    `config.py`) from its explicit keyword args, and unknown/typo'd kwargs now
    raise `TypeError` instead of being silently swallowed.
 
-7. **File handler layer** — `src/scietex/logging/handler/file.py`
+8. **File handler layer** — `src/scietex/logging/handler/file.py`
    `AsyncFileHandler` (extends `AsyncLoggingHandler`). A thin wrapper that
    builds the right `FileBackend` subclass via `_make_backend` and registers its
    `queue`/`worker`/`drain` as a peer, mirroring how `ConsoleHandler` registers
@@ -65,13 +86,13 @@ sub-packages. Architecturally it decomposes into four cooperating layers:
    and build the matching backend, which reuses the stdlib rollover logic,
    driven from the backend worker (the sole writer).
 
-8. **Broker handler layer** — `src/scietex/logging/handler/broker.py`
+9. **Broker handler layer** — `src/scietex/logging/handler/broker.py`
    `AsyncBrokerHandler` (extends `AsyncLoggingHandler`, `abc.ABC`). Registers a
    generic "message broker" backend via `register_backend`: a named queue, a
    client connection slot, and an abstract `connect` / `disconnect` /
    `send_message` contract that concrete backends implement.
 
-9. **Concrete broker backends**
+10. **Concrete broker backends**
    - `src/scietex/logging/handler/redis.py` — `AsyncRedisHandler` writes to a
      Redis stream via `redis.asyncio`.
    - `src/scietex/logging/handler/valkey.py` — `AsyncValkeyHandler` writes to
@@ -139,7 +160,8 @@ module docstring in `__init__.py`) is:
 
 The `examples/` directory contains runnable scripts demonstrating this
 (`basic_console_logging.py`, `redis_logging.py`, `valkey_logging.py`,
-`mqtt_logging.py`, `file_logging.py`, `console_and_redis_logging.py`).
+`mqtt_logging.py`, `file_logging.py`, `console_and_redis_logging.py`,
+`custom_palette.py`, `scietex_color_theme.py`).
 
 ## Important runtime processes
 

@@ -15,13 +15,17 @@
    `ConsoleHandler`.
 4. `ConsoleBackend._worker` (`backend/console.py:80`) gets the record from the
    queue.
-5. `ScietexFormatter.format(record)` (`formatter/scietex.py:63`) copies the record
-   (abbreviates `levelname`) and renders the text.
+5. `ScietexFormatter.format(record)` (`formatter/scietex.py:113`) copies the record
+   (abbreviates `levelname`) and renders the text; when color is enabled it
+   paints the level abbreviation, logger name, and message with the theme's
+   palette before delegating to the parent formatter.
 
 **Destination.** `sys.stdout` (via `sys.stdout.write(... + "\n")` and flush).
 
 **Transformations.** `LogRecord` → formatted string. Level int → 3-letter
-abbreviation; timestamp → ISO-8601 UTC; logger name rendered via `%(name)s`.
+abbreviation; timestamp → ISO-8601 UTC; logger name rendered via `%(name)s`;
+optionally, the level abbreviation, logger name, message, and timestamp are
+painted with ANSI color from the configured theme.
 
 **Async boundary.** A thread-safe stdlib `queue.Queue` ingress between `emit`
 (sync producer, any thread) and the bridge task, then the `asyncio.Queue`
@@ -100,7 +104,7 @@ the runnable two-handler variant.
    registered.
 4. After every drain concludes, invoke each registered status reporter with the
    collected results. The console backend is registered as a status reporter
-   (`handler/console.py:72`), so `ConsoleBackend.report_status(results)`
+   (`handler/console.py:93`), so `ConsoleBackend.report_status(results)`
    (inherited from `_QueueBackend`, `backend/_base.py:163`) enqueues synthetic
    INFO/ERROR status records for every backend's drain outcome.
 5. `logging_running_event.clear()` — signals workers to stop after draining.
