@@ -6,11 +6,13 @@ top of the queue/worker machinery in AsyncLoggingHandler.
 """
 
 import logging
+import sys
 from collections.abc import Callable
 
 from ..async_logging_handler import _QUEUE_CONSOLE, AsyncLoggingHandler
 from ..backend.console import ConsoleBackend
 from ..formatter.scietex import ScietexFormatter
+from ..theme import LoggingTheme, resolve_color
 
 
 class ConsoleHandler(AsyncLoggingHandler):
@@ -31,6 +33,8 @@ class ConsoleHandler(AsyncLoggingHandler):
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         queue_maxsize: int = 10000,
         formatter: logging.Formatter | None = None,
+        theme: LoggingTheme | None = None,
+        color: bool | None = None,
     ) -> None:
         """
         Initialize the asynchronous console logging handler.
@@ -44,10 +48,16 @@ class ConsoleHandler(AsyncLoggingHandler):
                 hold. Defaults to 10000.
             formatter (logging.Formatter | None): Formatter used to render records.
                 Defaults to None, in which case a default ``ScietexFormatter`` is
-                constructed.
-
-        Attributes:
-            error_handler (callable | None): Callback for reporting delivery errors.
+                constructed. When supplied, it is used as-is and ``theme``/``color``
+                are ignored.
+            theme (LoggingTheme | None): Color theme applied to the default
+                ``ScietexFormatter``. Only consulted when ``formatter`` is None and
+                ``theme`` is not None; the default path (``formatter=None``,
+                ``theme=None``) builds an unthemed ``ScietexFormatter`` with no
+                color.
+            color (bool | None): Explicit color on/off override for the default
+                ``ScietexFormatter``. When None and ``theme`` is supplied, color is
+                auto-detected from ``sys.stdout`` via ``resolve_color``.
 
         Raises:
             TypeError: If an unknown keyword argument is passed.
@@ -56,7 +66,15 @@ class ConsoleHandler(AsyncLoggingHandler):
             error_handler=error_handler,
             queue_maxsize=queue_maxsize,
         )
-        self.formatter = formatter if formatter is not None else ScietexFormatter()
+        if formatter is not None:
+            self.formatter = formatter
+        elif theme is None:
+            self.formatter = ScietexFormatter()
+        else:
+            self.formatter = ScietexFormatter(
+                theme=theme,
+                color=color if color is not None else resolve_color(sys.stdout),
+            )
         self._console_backend = ConsoleBackend(
             lambda: self.formatter,
             self.logging_running_event,

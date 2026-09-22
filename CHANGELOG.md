@@ -5,6 +5,39 @@ All notable changes to `scietex.logging` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-09-22
+
+### Added
+
+- **`theme` module**: a stdlib-only neutral leaf (`scietex.logging.theme`)
+  providing the color/theme API. `Palette` is a frozen dataclass of brand and
+  per-level colors with a `level_color(levelno)` lookup; `LoggingTheme` binds a
+  `Palette` to a name and color policy. Concrete themes `MonochromeTheme`,
+  `ScietexLight`, and `ScietexDark` are provided alongside the singletons
+  `MONOCHROME`, `SCIETEX_LIGHT`, and `SCIETEX_DARK`. ANSI helpers (`ansi_fg`,
+  `ansi_bg`, `RESET`, `BOLD`, `DIM`) and `resolve_color()` (TTY detection plus
+  `FORCE_COLOR`/`NO_COLOR`/explicit overrides) round out the module. Colors are
+  emitted as 24-bit truecolor SGR sequences to reproduce the exact brand
+  palette (yellow `#FFDB1C`, dark gray `#31313B`, black `#1F202A`).
+- **Color support in `ScietexFormatter`**: new keyword-only `theme` and `color`
+  arguments. `theme=None` (default) keeps byte-for-byte monochrome output;
+  supplying a theme with `color=True` paints the level abbreviation (bold +
+  level color, with a background on CRITICAL), the logger name, the message, and
+  a dim timestamp.
+- **`theme`/`color` on `ConsoleHandler`**: new keyword-only arguments. An
+  explicit `formatter=` still wins; `theme=None` keeps the plain default
+  formatter; a supplied theme auto-detects color from `sys.stdout` via
+  `resolve_color`.
+- **`from_textual_theme` converter**: `scietex.logging.theme_textual` converts a
+  Textual theme into a `LoggingTheme` without a runtime Textual dependency
+  (the theme is read duck-typed). Base slots map directly; derived slots are
+  reproduced with the ported CIE-Lab math in `_color.py`. ANSI themes require an
+  explicit `ansi_palette`.
+- **Package exports**: `Palette`, `LoggingTheme`, `MonochromeTheme`,
+  `ScietexLight`, `ScietexDark`, `MONOCHROME`, `SCIETEX_LIGHT`, `SCIETEX_DARK`,
+  `resolve_color`, and `from_textual_theme` are re-exported from the package
+  root.
+
 ## [2.0.0] - 2026-09-08
 
 ### Removed

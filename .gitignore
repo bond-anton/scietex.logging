@@ -13,3 +13,7 @@ uv.lock
 /.vscode
 /build
 /docs/_build/
+
+# Example run artifacts
+/json.log
+/plain.log

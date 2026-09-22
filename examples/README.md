@@ -15,10 +15,11 @@ run. The table maps each example to the installation it needs.
 
 | Installation | Examples |
 | --- | --- |
-| Base package only | `basic_console_logging.py`, `file_logging.py`, `custom_formatter.py`, `error_handler_and_queue_bounds.py`, `custom_backend.py`, `pure_machinery_handler.py`, `restartable_lifecycle.py` |
+| Base package only | `basic_console_logging.py`, `file_logging.py`, `custom_formatter.py`, `scietex_color_theme.py`, `custom_palette.py`, `error_handler_and_queue_bounds.py`, `custom_backend.py`, `pure_machinery_handler.py`, `restartable_lifecycle.py` |
 | `scietex.logging[redis]` | `redis_logging.py`, `console_and_redis_logging.py`, `all_backends.py` |
 | `scietex.logging[valkey]` | `valkey_logging.py`, `injected_client.py`, `all_backends.py` |
 | `scietex.logging[mqtt]` | `mqtt_logging.py` |
+| `scietex.logging[test]` (Textual) | `textual_log_viewer.py` |
 | `scietex.logging[all]` (or `uv sync --all-extras`) | everything |
 
 ## Example Index
@@ -33,10 +34,13 @@ run. The table maps each example to the installation it needs.
 | [injected_client.py](./injected_client.py) | Inject an externally-managed Valkey client the handler never closes | Valkey |
 | [console_and_redis_logging.py](./console_and_redis_logging.py) | Console and Redis handlers on one logger | Redis |
 | [custom_formatter.py](./custom_formatter.py) | Customize `ScietexFormatter` and apply it with `setFormatter` | No |
+| [scietex_color_theme.py](./scietex_color_theme.py) | Built-in `SCIETEX_LIGHT` and `SCIETEX_DARK` color themes on `ConsoleHandler` | No |
+| [custom_palette.py](./custom_palette.py) | Define a custom `Palette` and wrap it in a `LoggingTheme` | No |
 | [error_handler_and_queue_bounds.py](./error_handler_and_queue_bounds.py) | `error_handler` callback and `queue_maxsize` drop-and-report overflow | No |
 | [custom_backend.py](./custom_backend.py) | Subclass `AsyncBrokerHandler` into an in-memory backend | No |
 | [pure_machinery_handler.py](./pure_machinery_handler.py) | Subclass `AsyncLoggingHandler` directly and register a backend | No |
 | [restartable_lifecycle.py](./restartable_lifecycle.py) | Start/stop cycles, idempotent stop, double-start `RuntimeError`, `stop_logging(timeout)` | No |
+| [textual_log_viewer.py](./textual_log_viewer.py) | Route the async machinery into a Textual TUI via a custom backend, register the Scietex themes as Textual themes, and follow the active theme with `from_textual_theme` | No |
 | [all_backends.py](./all_backends.py) | Console, Redis, and Valkey simultaneously with explicit configs | Redis + Valkey |
 
 ## Running the Examples
@@ -54,6 +58,12 @@ Redis, Valkey, and/or an MQTT broker are running locally on the default host and
 port. To point at a remote host, edit the `redis_config` dict (Redis), the
 `valkey_config` dict (Valkey), or the `mqtt_config` dict (MQTT) inside the script
 before running.
+
+`textual_log_viewer.py` needs the Textual extra, so run it with:
+
+```commandline
+uv run --extra test python examples/textual_log_viewer.py
+```
 
 ## Lifecycle
 

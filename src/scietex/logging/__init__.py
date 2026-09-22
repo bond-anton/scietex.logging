@@ -135,7 +135,7 @@ behaviors.
 
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 from .async_logging_handler import AsyncLoggingHandler
 from .backend import ConsoleBackend, FileBackend
@@ -149,6 +149,18 @@ from .handler import (
     AsyncWatchedFileHandler,
     ConsoleHandler,
 )
+from .theme import (
+    MONOCHROME,
+    SCIETEX_DARK,
+    SCIETEX_LIGHT,
+    LoggingTheme,
+    MonochromeTheme,
+    Palette,
+    ScietexDark,
+    ScietexLight,
+    resolve_color,
+)
+from .theme_textual import from_textual_theme
 
 __all__ = [
     "AsyncBrokerHandler",
@@ -160,12 +172,22 @@ __all__ = [
     "ConsoleBackend",
     "ConsoleHandler",
     "FileBackend",
+    "from_textual_theme",
     "JsonFormatter",
     "LoggingConfig",
+    "LoggingTheme",
+    "MONOCHROME",
+    "MonochromeTheme",
     "MqttConfig",
+    "Palette",
     "RedisConfig",
+    "SCIETEX_DARK",
+    "SCIETEX_LIGHT",
+    "ScietexDark",
     "ScietexFormatter",
+    "ScietexLight",
     "ValkeyConfig",
+    "resolve_color",
 ]
 
 try:
