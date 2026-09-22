@@ -23,7 +23,7 @@ scietex.logging/
 
 | Module | Responsibility |
 |---|---|
-| `__init__.py` | Public API. Re-exports `ConsoleHandler`, `AsyncBrokerHandler`, `AsyncLoggingHandler`, `AsyncFileHandler`, `AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`, `AsyncWatchedFileHandler`, `ConsoleBackend`, `FileBackend`, `JsonFormatter`, `ScietexFormatter`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler`; defines `__version__ = "2.0.0"`. |
+| `__init__.py` | Public API. Re-exports `ConsoleHandler`, `AsyncBrokerHandler`, `AsyncLoggingHandler`, `AsyncFileHandler`, `AsyncRotatingFileHandler`, `AsyncTimedRotatingFileHandler`, `AsyncWatchedFileHandler`, `ConsoleBackend`, `FileBackend`, `JsonFormatter`, `ScietexFormatter`, `LoggingTheme`, `MonochromeTheme`, `ScietexLight`, `ScietexDark`, `Palette`, `MONOCHROME`, `SCIETEX_LIGHT`, `SCIETEX_DARK`, `resolve_color`, `from_textual_theme`; conditionally adds `AsyncRedisHandler` / `AsyncValkeyHandler` / `AsyncMqttHandler`; defines `__version__ = "2.1.0"`. |
 | `_executor.py` | `_WriteExecutor` — private single-thread executor helper offloading blocking write I/O off the event loop (lazy-create / run / `shutdown(wait=True)`). |
 | `async_logging_handler.py` | `AsyncLoggingHandler` — pure shared async machinery (queues/events/workers, `register_backend`, `start_logging`/`emit`/`stop_logging`, error channel); no sink of its own. |
 | `backend/_base.py` | `_QueueBackend` — internal shared queue/drain/status-reporting base (`worker` property, `drain`, `report_status`, `_report_error`) plus the `_status_record` helper, inherited by both peer backends. |
@@ -31,9 +31,12 @@ scietex.logging/
 | `backend/file.py` | `FileBackend` — the file sink as a peer backend (its own `_worker`/`_open_stream`/`_close_stream`/`_write_record` + entire file lifecycle on top of `_QueueBackend`), plus the rotation subclasses `RotatingFileBackend` / `TimedRotatingFileBackend` / `WatchedFileBackend`. |
 | `handler/console.py` | `ConsoleHandler` — thin concrete subclass of `AsyncLoggingHandler` that registers the console backend as a peer unconditionally. |
 | `handler/file.py` | `AsyncFileHandler` — concrete subclass of `AsyncLoggingHandler` that registers the `"_file"` backend; plus rotation variants `AsyncRotatingFileHandler` / `AsyncTimedRotatingFileHandler` / `AsyncWatchedFileHandler` subclassing it. |
-| `formatter/scietex.py` | `ScietexFormatter` (`logging.Formatter` subclass) + `level_abbreviation` helper. |
+| `formatter/scietex.py` | `ScietexFormatter` (`logging.Formatter` subclass) + `level_abbreviation` helper; paints ANSI color via a `LoggingTheme` (keyword-only `theme`/`color` options). |
 | `formatter/json.py` | `JsonFormatter` (`logging.Formatter` subclass) emitting single-line NDJSON; imports `iso_timestamp` from `config.py`. |
 | `config.py` | Typed config objects (`LoggingConfig`, `RedisConfig`, `ValkeyConfig`, `MqttConfig`) + `validate_queue_maxsize` / `level_abbreviation` / `optional_dependency_error` / `report_error` helpers. Stdlib-only leaf module. |
+| `theme.py` | `Palette` / `LoggingTheme` / `MonochromeTheme` / `ScietexLight` / `ScietexDark` + ANSI helpers (`RESET`/`BOLD`/`DIM`, `ansi_fg`/`ansi_bg`) + `resolve_color`. Stdlib-only neutral leaf (imports only `logging`, `os`, `dataclasses`). |
+| `theme_textual.py` | `from_textual_theme` — converts a Textual theme into a `LoggingTheme` (duck-typed, no runtime Textual dependency); base slots map directly, derived slots use the ported CIE-Lab math. |
+| `_color.py` | Private `Color` value object + CIE-Lab math, ported verbatim from Textual; backs the derived-slot conversion in `theme_textual.py`. Stdlib-only. |
 | `handler/broker.py` | `AsyncBrokerHandler` — abstract broker backend base (registers queue + worker; connect/disconnect/send_message contract). |
 | `handler/redis.py` | `AsyncRedisHandler` — Redis stream backend via `redis.asyncio`. |
 | `handler/valkey.py` | `AsyncValkeyHandler` — Valkey stream backend via `valkey-glide`. |
@@ -43,15 +46,18 @@ scietex.logging/
 ### Module dependency graph (imports)
 
 ```
-formatter/scietex.py      → config.py
+formatter/scietex.py      → config.py, theme.py
 formatter/json.py         → config.py
 config.py               (no intra-package imports)
+theme.py                (no intra-package imports)
+theme_textual.py          → theme.py, _color.py
+_color.py               (no intra-package imports)
 _executor.py            (no intra-package imports)
 async_logging_handler.py → config.py
 backend/_base.py         → async_logging_handler.py, config.py
 backend/console.py       → async_logging_handler.py, _executor.py, backend/_base.py
 backend/file.py          → async_logging_handler.py, _executor.py, backend/_base.py
-handler/console.py       → async_logging_handler.py, backend/console.py, formatter/scietex.py
+handler/console.py       → async_logging_handler.py, backend/console.py, formatter/scietex.py, theme.py
 handler/file.py          → backend/file.py, async_logging_handler.py, formatter/scietex.py
 handler/broker.py        → async_logging_handler.py, config.py
 handler/redis.py         → handler/broker.py, config.py
@@ -84,6 +90,7 @@ everything.
 | `test_console_backend.py` | `ConsoleBackend` queue/worker/drain and shutdown-status reporting. |
 | `test_file_backend.py` | `FileBackend` + rotation subclasses: queue/worker/drain, file lifecycle, record-copy guard, and shutdown-status reporting. |
 | `test_json_formatter.py` | `JsonFormatter` single-line JSON output, extra flattening, exception handling, self-copying. |
+| `test_theme.py` | `Palette` / `LoggingTheme` / `MonochromeTheme` / `ScietexLight` / `ScietexDark`, `resolve_color` TTY/env precedence, and the `ansi_fg`/`ansi_bg` helpers; `ScietexFormatter` color painting. |
 | `test_file_handler.py` | `AsyncFileHandler` + rotation variants: file writes, append, JSON formatter, injected file-like, rollover. |
 | `test_queue_bounds.py` | Bounded-queue overflow policy (drop + report). |
 | `test_restartable_lifecycle.py` | Multiple start/stop cycles on the same event loop. |
@@ -113,20 +120,27 @@ containers but **not** a Valkey one.
 | `mqtt_logging.py` | MQTT topic logging. |
 | `console_and_redis_logging.py` | Two handlers (console + Redis) on one logger. |
 | `custom_formatter.py` | Using a custom formatter. |
+| `scietex_color_theme.py` | Built-in `SCIETEX_LIGHT` / `SCIETEX_DARK` color themes on `ConsoleHandler`. |
+| `custom_palette.py` | Custom `Palette` wrapped in a `LoggingTheme` and applied via `theme=`. |
 | `error_handler_and_queue_bounds.py` | Error handler callback and bounded-queue overflow behavior. |
 | `custom_backend.py` | Implementing a custom broker backend. |
 | `pure_machinery_handler.py` | Using `AsyncLoggingHandler` machinery directly. |
 | `restartable_lifecycle.py` | Multiple start/stop cycles on the same event loop. |
 | `all_backends.py` | Console + Redis + Valkey together. |
 | `injected_client.py` | Injecting an app-owned Valkey client into `AsyncValkeyHandler`. |
+| `textual_log_viewer.py` | Routing the async machinery into a Textual TUI via a custom backend, registering the Scietex themes as Textual themes, and following the active theme with `from_textual_theme`. |
 
 ## Docs: `docs/`
 
-User-facing guides: `index.md` (overview/quick start), `configuration.md`,
-`backends.md`, `advanced.md` (custom backends), `examples.md`. These describe
+User-facing guides: `index.md` (landing page), `getting-started/`
+(`installation.md`, `quickstart.md`), `guide/` (`lifecycle.md`,
+`configuration.md`, `formatters.md`, `themes.md`, `custom-backends.md`),
+`backends/` (`index.md` plus one page per backend), `examples.md`, and
+`api/themes.rst` (theme reference). `backends.md` is a redirect stub kept for
+URL stability. These describe
 intended usage; the architecture map is code-derived and may differ from the
-docs where docs are aspirational (e.g. `advanced.md` shows a PostgreSQL
-backend that is not implemented).
+docs where docs are aspirational (e.g. `guide/custom-backends.md` shows a
+PostgreSQL backend that is not implemented).
 
 ## Notable boundaries
 
@@ -136,7 +150,8 @@ backend that is not implemented).
   imports so the base package imports cleanly without extras. This is the main
   seam between "core" and "optional backends".
 - **Extension boundary.** `AsyncBrokerHandler` is the intended extension point
-  for new backends (per `__init__.py` docstring and `docs/advanced.md`): a
+  for new backends (per `__init__.py` docstring and
+  `docs/guide/custom-backends.md`): a
   subclass supplies `connect`, `disconnect`, `send_message`.
 - **Stdlib boundary.** The package integrates with the standard `logging`
   framework only through `logging.Handler` (via `emit`) and `logging.Formatter`

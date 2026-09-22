@@ -108,8 +108,8 @@ asyncio.QueueFull` branch in the bridge (`async_logging_handler.py:395`).
 
 **What it appears to do.** Every backend queue is bounded by `queue_maxsize`
 (default 10000), set on `AsyncLoggingHandler`/`ConsoleHandler` and stored as
-`self.queue_maxsize`. `ConsoleBackend` builds `asyncio.Queue(maxsize=maxsize)`;
-`AsyncBrokerHandler` builds `asyncio.Queue(maxsize=self.queue_maxsize)`.
+`self.config.queue_maxsize`. `ConsoleBackend` builds `asyncio.Queue(maxsize=maxsize)`;
+`AsyncBrokerHandler` builds `asyncio.Queue(maxsize=self.config.queue_maxsize)`.
 
 **Why significant.** The overflow policy is **drop + report**: when the shared
 ingress is full at emit time, `emit` drops the record and routes a `queue.Full`
@@ -133,15 +133,19 @@ console queue is full so shutdown never deadlocks on a bounded queue.
 (registers the console backend).
 
 **What it appears to do.** `ConsoleHandler` registers its own `ConsoleBackend`
-(queue + worker) unconditionally. `stop_logging` drains each backend (collecting
-its returned result) and then invokes the console's `report_status` as a status
-reporter with the full results list, so the console reports the other backends'
-outcomes as a post-drain observer rather than by drain order. The console worker
-reads the handler's formatter dynamically through a `formatter_provider`
-callable (`lambda: self.formatter` from `handler/console.py:61`) and routes
-format/write failures through its own `error_handler` channel
-(`backend/console.py:114`), so a broken stdout or buggy formatter cannot
-silently kill the console worker (AR-021/AR-030).
+(queue + worker) unconditionally. It accepts keyword-only `theme=`/`color=`
+options: when no `formatter=` is supplied it builds the default
+`ScietexFormatter` with the requested theme (three branches — injected
+formatter, plain unthemed default, or themed with
+`color or resolve_color(sys.stdout)`). `stop_logging` drains each backend
+(collecting its returned result) and then invokes the console's `report_status`
+as a status reporter with the full results list, so the console reports the
+other backends' outcomes as a post-drain observer rather than by drain order.
+The console worker reads the handler's formatter dynamically through a
+`formatter_provider` callable (`lambda: self.formatter` from
+`handler/console.py:82`) and routes format/write failures through its own
+`error_handler` channel (`backend/console.py:114`), so a broken stdout or buggy
+formatter cannot silently kill the console worker (AR-021/AR-030).
 
 **Why significant.** The console backend is a **standalone** peer backend: it is
 registered by `ConsoleHandler` the same way the file backend is registered by
@@ -184,15 +188,15 @@ rotation variants) are **not** broker backends — they subclass `AsyncLoggingHa
 directly and register a `FileBackend`, so they do not participate in this
 `connect`/`disconnect`/`send_message` contract at all.
 
-**Related.** `components.md`; `docs/advanced.md` (custom backend examples);
-`handler/file.py`.
+**Related.** `components.md`; `docs/guide/custom-backends.md` (custom backend
+examples); `handler/file.py`.
 
 ---
 
 ## 8. Optional-dependency guard duplication
 
 **Location.** `handler/redis.py:5-8`, `handler/valkey.py:5-8`, and the guarded
-imports in `__init__.py:171-193`.
+imports in `__init__.py:191-213`.
 
 **What it appears to do.** Each backend module hard-imports its client and
 raises a descriptive `ImportError`; `__init__.py` wraps each import in
@@ -251,12 +255,14 @@ gracefully for local runs without a broker.
 
 ## 11. Formatter copies the record; broker dict built independently
 
-**Location.** `ScietexFormatter.format`, `formatter/scietex.py:63-84`.
+**Location.** `ScietexFormatter.format`, `formatter/scietex.py:113-150`.
 
 **What it appears to do.** `format` first copies the record
-(`record = copy.copy(record)` at `formatter/scietex.py:78`), then overwrites
+(`record = copy.copy(record)` at `formatter/scietex.py:130`), then overwrites
 `record.levelname` (the abbreviation) on the **copy** before delegating to the
-parent formatter. The caller's shared `LogRecord` is never mutated.
+parent formatter. When color is enabled it also paints `record.levelname`,
+`record.name`, and `record.msg` on the copy (and sets `record.args = None`).
+The caller's shared `LogRecord` is never mutated.
 
 **Why significant.** `LogRecord`s are shared objects: `emit` fans one record to
 multiple queues, and each backend's worker formats the same record. Because

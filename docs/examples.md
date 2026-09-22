@@ -1,274 +1,11 @@
 # Examples
 
-This document provides links to all example scripts in the `examples/` directory.
-The examples progress from the happy path to advanced capabilities. Every example
-follows the same lifecycle: create a logger, add a handler, start the logging
-worker, log messages, then stop the worker.
-
-## Example Scripts
-
-### Basic Console Logging
-
-**File**: `examples/basic_console_logging.py`
-
-Demonstrates asynchronous console logging using `ConsoleHandler`.
-
-**Usage**:
-```bash
-uv run python examples/basic_console_logging.py
-```
-
-**Key Features**:
-- Default console logging
-- Multiple log levels
-- Logger-name identification via `record.name`
-
----
-
-### Redis Logging
-
-**File**: `examples/redis_logging.py`
-
-Demonstrates logging to a Redis stream using `AsyncRedisHandler`.
-
-**Usage**:
-```bash
-uv run python examples/redis_logging.py
-```
-
-**Dependencies**:
-- Redis must be running locally or configure remote connection
-
-**Key Features**:
-- Redis stream integration
-- Logger-name identification via `record.name`
-- Error and info logging
-
----
-
-### Valkey Logging
-
-**File**: `examples/valkey_logging.py`
-
-Demonstrates logging to a Valkey stream using `AsyncValkeyHandler`.
-
-**Usage**:
-```bash
-uv run python examples/valkey_logging.py
-```
-
-**Dependencies**:
-- Valkey must be running locally or configure remote connection
-
-**Key Features**:
-- Valkey stream integration
-- Logger-name identification via `record.name`
-- Error and info logging
-
----
-
-### MQTT Logging
-
-**File**: `examples/mqtt_logging.py`
-
-Demonstrates publishing log records to an MQTT topic using `AsyncMqttHandler`.
-
-**Usage**:
-```bash
-uv run python examples/mqtt_logging.py
-```
-
-**Dependencies**:
-- An MQTT broker must be running locally or configure remote connection
-
-**Key Features**:
-- MQTT topic publishing
-- Logger-name identification via `record.name`
-- Error and info logging
-
----
-
-### File Logging
-
-**File**: `examples/file_logging.py`
-
-Demonstrates writing log records to plain-text and JSON files using
-`AsyncFileHandler` and `JsonFormatter`.
-
-**Usage**:
-```bash
-uv run python examples/file_logging.py
-```
-
-**Key Features**:
-- Plain-text file output
-- JSON output via `JsonFormatter` (one JSON object per line)
-
----
-
-### Console and Redis Logging
-
-**File**: `examples/console_and_redis_logging.py`
-
-Demonstrates using both console and Redis logging simultaneously.
-
-**Usage**:
-```bash
-uv run python examples/console_and_redis_logging.py
-```
-
-**Dependencies**:
-- Redis must be running locally or configure remote connection
-
-**Key Features**:
-- Multiple handlers on same logger
-- Console output (stdout)
-- Redis stream logging
-
----
-
-### Custom Formatter
-
-**File**: `examples/custom_formatter.py`
-
-Demonstrates customizing `ScietexFormatter` with a custom `fmt` and `datefmt`,
-then applying it to a handler with `setFormatter`.
-
-**Usage**:
-```bash
-uv run python examples/custom_formatter.py
-```
-
-**Key Features**:
-- Custom `fmt` and `datefmt` on `ScietexFormatter`
-- `handler.setFormatter()` replaces the formatter for the handler's console/file sink
-
----
-
-### Error Handler and Queue Bounds
-
-**File**: `examples/error_handler_and_queue_bounds.py`
-
-Demonstrates a bounded queue with drop-and-report overflow: a small
-`queue_maxsize` combined with an `error_handler` callback that reports records
-dropped when the queue is full.
-
-**Usage**:
-```bash
-uv run python examples/error_handler_and_queue_bounds.py
-```
-
-**Key Features**:
-- `queue_maxsize` bounds the backend queue
-- `error_handler` callback reports dropped records
-- Non-blocking `emit` under overload
-
----
-
-### Custom Backend
-
-**File**: `examples/custom_backend.py`
-
-Demonstrates subclassing `AsyncBrokerHandler` into an in-memory backend that
-appends records to a list, with no external service required.
-
-**Usage**:
-```bash
-uv run python examples/custom_backend.py
-```
-
-**Key Features**:
-- Subclass `AsyncBrokerHandler` and implement `connect`, `disconnect`, `send_message`
-- Broker-only handler with no external service
-
----
-
-### Pure Machinery Handler
-
-**File**: `examples/pure_machinery_handler.py`
-
-Demonstrates subclassing `AsyncLoggingHandler` directly (no console sink) and
-registering a custom backend with `register_backend`.
-
-**Usage**:
-```bash
-uv run python examples/pure_machinery_handler.py
-```
-
-**Key Features**:
-- Subclass `AsyncLoggingHandler` directly
-- `register_backend` adds a custom queue/worker/drain backend
-- No console sink
-
----
-
-### Restartable Lifecycle
-
-**File**: `examples/restartable_lifecycle.py`
-
-Demonstrates the handler lifecycle in depth: start/stop cycles, idempotent
-stop, double-start `RuntimeError`, and `stop_logging(timeout)`.
-
-**Usage**:
-```bash
-uv run python examples/restartable_lifecycle.py
-```
-
-**Key Features**:
-- Start/stop/restart cycles
-- Idempotent `stop_logging`
-- Double-start raises `RuntimeError`
-- `stop_logging(timeout)` drain timeout
-
----
-
-### All Backends
-
-**File**: `examples/all_backends.py`
-
-Demonstrates console, Redis, and Valkey backends on a single logger
-simultaneously, with explicit `redis_config`/`valkey_config`.
-
-**Usage**:
-```bash
-uv run python examples/all_backends.py
-```
-
-**Dependencies**:
-- Redis and Valkey must be running locally or configure remote connection
-
-**Key Features**:
-- Console, Redis, and Valkey on one logger
-- Explicit `redis_config` and `valkey_config`
-
----
-
-### Injected Client
-
-**File**: `examples/injected_client.py`
-
-Demonstrates injecting an app-owned `GlideClient` into `AsyncValkeyHandler` via
-the `client=` keyword, so the handler never builds or closes its own connection.
-
-**Usage**:
-```bash
-uv run python examples/injected_client.py
-```
-
-**Dependencies**:
-- Valkey must be running locally or configure remote connection
-
-**Key Features**:
-- App-owned `GlideClient` injected into `AsyncValkeyHandler`
-- Handler never closes the injected client
-- Host reads the stream back with the still-open client after `stop_logging`,
-  then closes it itself
-
----
-
-## Running Examples
-
-All examples can be run with `uv`:
+The `examples/` directory contains runnable scripts that progress from the happy
+path to advanced capabilities. Every example follows the same lifecycle: create a
+logger, add a handler, start the logging worker, log messages, then stop the
+worker.
+
+## Running examples
 
 ```bash
 # Install dependencies
@@ -278,28 +15,65 @@ uv sync --all-extras
 uv run python examples/example_name.py
 ```
 
-## Example Code Structure
+## Example index
 
-Each example follows this pattern:
+| Example | File | Backend / feature |
+|---|---|---|
+| Basic Console Logging | `examples/basic_console_logging.py` | `ConsoleHandler`, multiple levels |
+| File Logging | `examples/file_logging.py` | `AsyncFileHandler`, plain text + JSON |
+| Redis Logging | `examples/redis_logging.py` | `AsyncRedisHandler` |
+| Valkey Logging | `examples/valkey_logging.py` | `AsyncValkeyHandler` |
+| MQTT Logging | `examples/mqtt_logging.py` | `AsyncMqttHandler` |
+| Console and Redis | `examples/console_and_redis_logging.py` | Multiple handlers on one logger |
+| All Backends | `examples/all_backends.py` | Console + Redis + Valkey, explicit configs |
+| Injected Client | `examples/injected_client.py` | `client=` injection (app-owned `GlideClient`) |
+| Custom Formatter | `examples/custom_formatter.py` | `ScietexFormatter` with custom `fmt`/`datefmt` |
+| Scietex Color Theme | `examples/scietex_color_theme.py` | Built-in `SCIETEX_LIGHT`/`SCIETEX_DARK` |
+| Custom Palette | `examples/custom_palette.py` | Custom `Palette` + `LoggingTheme` |
+| Error Handler and Queue Bounds | `examples/error_handler_and_queue_bounds.py` | `queue_maxsize` + `error_handler` |
+| Custom Backend | `examples/custom_backend.py` | Subclass `AsyncBrokerHandler` |
+| Pure Machinery Handler | `examples/pure_machinery_handler.py` | Subclass `AsyncLoggingHandler` directly |
+| Restartable Lifecycle | `examples/restartable_lifecycle.py` | Start/stop/restart, timeouts |
+| Textual Log Viewer | `examples/textual_log_viewer.py` | Textual TUI via `register_backend` |
 
-1. Create logger and set level
-2. Initialize handler(s)
-3. Add handler(s) to logger
-4. Start logging worker
-5. Log messages
-6. Stop logging worker
+## Server-backed examples
 
-## Customizing Examples
+Redis, Valkey, MQTT, and the multi-backend examples need a running server:
+
+- **Redis** — `redis_logging.py`, `console_and_redis_logging.py`,
+  `all_backends.py`
+- **Valkey** — `valkey_logging.py`, `all_backends.py`, `injected_client.py`
+- **MQTT** — `mqtt_logging.py`
+
+The remaining examples run with no external service.
+
+## Textual Log Viewer
+
+`examples/textual_log_viewer.py` routes the async logging machinery into a
+Textual TUI. A custom backend (`TextualLogHandler`, built on the public
+`register_backend` API) forwards records into a `RichLog` widget, the Scietex
+themes are registered as Textual themes, and the app follows the active theme —
+Scietex themes are used directly, others are converted with `from_textual_theme`.
+
+```bash
+uv run --extra test python examples/textual_log_viewer.py
+```
+
+Keys: `g` toggles the log generator, `t` cycles themes, `q` quits.
+
+See {doc}`guide/textual` for a walkthrough of the embedding pattern.
+
+## Customizing examples
 
 Modify examples to explore features:
 
-- Change the logger name passed to `logging.getLogger`
-- Adjust log levels
-- Configure custom formatters (`custom_formatter.py`)
+- Change the logger name passed to `logging.getLogger`.
+- Adjust log levels.
+- Configure custom formatters (`custom_formatter.py`).
 - Add an `error_handler` callback and tune `queue_maxsize`
-  (`error_handler_and_queue_bounds.py`)
+  (`error_handler_and_queue_bounds.py`).
 - Build a custom backend by subclassing `AsyncBrokerHandler`
   (`custom_backend.py`) or `AsyncLoggingHandler` directly
-  (`pure_machinery_handler.py`)
-- Restart a handler across start/stop cycles (`restartable_lifecycle.py`)
-- Add additional backends
+  (`pure_machinery_handler.py`).
+- Restart a handler across start/stop cycles (`restartable_lifecycle.py`).
+- Add additional backends.
