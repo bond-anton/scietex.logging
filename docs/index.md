@@ -88,7 +88,6 @@ guide/custom-backends
 :caption: Backends
 
 backends/index
-backends
 ```
 
 ```{toctree}

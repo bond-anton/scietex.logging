@@ -136,8 +136,7 @@ User-facing guides: `index.md` (landing page), `getting-started/`
 (`installation.md`, `quickstart.md`), `guide/` (`lifecycle.md`,
 `configuration.md`, `formatters.md`, `themes.md`, `custom-backends.md`),
 `backends/` (`index.md` plus one page per backend), `examples.md`, and
-`api/themes.rst` (theme reference). `backends.md` is a redirect stub kept for
-URL stability. These describe
+`api/themes.rst` (theme reference). These describe
 intended usage; the architecture map is code-derived and may differ from the
 docs where docs are aspirational (e.g. `guide/custom-backends.md` shows a
 PostgreSQL backend that is not implemented).
