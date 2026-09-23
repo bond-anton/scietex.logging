@@ -135,7 +135,7 @@ behaviors.
 
 """
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 from .async_logging_handler import AsyncLoggingHandler
 from .backend import ConsoleBackend, FileBackend

@@ -1,6 +1,6 @@
 # Roadmap
 
-Planned direction for `scietex.logging`. Current version: **2.1.0**
+Planned direction for `scietex.logging`. Current version: **2.2.0**
 (released).
 
 The 1.x public API (`__all__` surface and constructor signatures) has grown

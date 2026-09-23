@@ -52,7 +52,7 @@ blocks on I/O.
    from the formatter.
 4. `send_message(log_entry)` dispatches to the concrete backend:
    - Redis: `client.xadd(stream_name, record)` (`handler/redis.py:123`).
-   - Valkey: `client.xadd(stream_name, record.items())` (`handler/valkey.py:135`).
+   - Valkey: `client.xadd(stream_name, record.items())` (`handler/valkey.py:171`).
    Each raises `RuntimeError` when the client is not connected (AR-034).
 5. On worker exit, `disconnect()` closes the client. A failed `connect()` is
    retried with capped exponential backoff (0.5s base doubling to a 30s cap with
@@ -104,7 +104,7 @@ the runnable two-handler variant.
    registered.
 4. After every drain concludes, invoke each registered status reporter with the
    collected results. The console backend is registered as a status reporter
-   (`handler/console.py:93`), so `ConsoleBackend.report_status(results)`
+   (`handler/console.py:90`), so `ConsoleBackend.report_status(results)`
    (inherited from `_QueueBackend`, `backend/_base.py:163`) enqueues synthetic
    INFO/ERROR status records for every backend's drain outcome.
 5. `logging_running_event.clear()` — signals workers to stop after draining.

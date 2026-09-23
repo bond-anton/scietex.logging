@@ -18,6 +18,8 @@ async def main():
     mqtt_handler = AsyncMqttHandler(
         topic="example/log/topic",
         mqtt_config={"host": "localhost", "port": 1883},
+        # Discard undelivered log messages after one hour (MQTT 5).
+        message_expiry=3600,
     )
     logger.addHandler(mqtt_handler)
 

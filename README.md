@@ -107,7 +107,7 @@ import asyncio
 # Set up logger and Valkey handler
 logger = logging.getLogger("MyAsyncLogger")
 logger.setLevel(logging.DEBUG)
-handler = AsyncValkeyHandler(stream_name="my_log_stream")
+handler = AsyncValkeyHandler(stream_name="my_log_stream", stream_maxlen=1000)
 logger.addHandler(handler)
 
 
@@ -131,7 +131,7 @@ import asyncio
 # Set up logger and MQTT handler
 logger = logging.getLogger("MyAsyncLogger")
 logger.setLevel(logging.DEBUG)
-handler = AsyncMqttHandler(topic="my/log/topic")
+handler = AsyncMqttHandler(topic="my/log/topic", message_expiry=3600)
 logger.addHandler(handler)
 
 

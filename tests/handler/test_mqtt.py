@@ -140,11 +140,12 @@ async def test_mqtt_send_message_publishes_json(monkeypatch):
     published = {}
 
     class FakeClient:
-        async def publish(self, topic, payload, *, qos, retain):
+        async def publish(self, topic, payload, *, qos, retain, properties=None):
             published["topic"] = topic
             published["payload"] = payload
             published["qos"] = qos
             published["retain"] = retain
+            published["properties"] = properties
 
     handler = AsyncMqttHandler(topic="logs", qos=1, retain=True)
     handler.client = FakeClient()
@@ -154,3 +155,21 @@ async def test_mqtt_send_message_publishes_json(monkeypatch):
     assert json.loads(published["payload"]) == record
     assert published["qos"] == 1
     assert published["retain"] is True
+    assert published["properties"] is None
+
+
+@pytest.mark.asyncio
+async def test_mqtt_send_message_with_expiry_sets_property():
+    """send_message() attaches MessageExpiryInterval when message_expiry is set."""
+    published = {}
+
+    class FakeClient:
+        async def publish(self, topic, payload, *, qos, retain, properties=None):
+            published["properties"] = properties
+
+    handler = AsyncMqttHandler(topic="logs", message_expiry=3600)
+    handler.client = FakeClient()
+    await handler.send_message({"message": "m"})
+    properties = published["properties"]
+    assert properties is not None
+    assert properties.MessageExpiryInterval == 3600

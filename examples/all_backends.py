@@ -19,6 +19,7 @@ async def main():
     valkey_handler = AsyncValkeyHandler(
         stream_name="all_backends_stream",
         valkey_config={"addresses": [("localhost", 6379)]},
+        stream_maxlen=1000,
     )
     logger.addHandler(console_handler)
     logger.addHandler(redis_handler)

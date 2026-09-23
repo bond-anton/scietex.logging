@@ -12,6 +12,7 @@ from glide import (
     MinId,
     NodeAddress,
     ServerCredentials,
+    StreamAddOptions,
 )
 
 from scietex.logging import (
@@ -160,3 +161,38 @@ async def test_valkey_connect_omits_credentials_when_unset(monkeypatch):
     config = captured["config"]
     assert isinstance(config, GlideClientConfiguration)
     assert config.credentials is None
+
+
+@pytest.mark.asyncio
+async def test_valkey_send_message_without_maxlen_omits_options(monkeypatch):
+    """send_message() calls xadd with no options when stream_maxlen is unset."""
+    captured = {}
+
+    class FakeClient:
+        async def xadd(self, key, values, options=None):
+            captured["key"] = key
+            captured["values"] = values
+            captured["options"] = options
+
+    handler = AsyncValkeyHandler(stream_name="logs", client=FakeClient())
+    await handler.send_message({"message": "hi"})
+    assert captured["key"] == "logs"
+    assert captured["options"] is None
+
+
+@pytest.mark.asyncio
+async def test_valkey_send_message_with_maxlen_trims_approximately(monkeypatch):
+    """send_message() passes an approximate MAXLEN trim when stream_maxlen is set."""
+    captured = {}
+
+    class FakeClient:
+        async def xadd(self, key, values, options=None):
+            captured["options"] = options
+
+    handler = AsyncValkeyHandler(stream_name="logs", client=FakeClient(), stream_maxlen=500)
+    await handler.send_message({"message": "hi"})
+    options = captured["options"]
+    assert isinstance(options, StreamAddOptions)
+    assert options.trim is not None
+    assert options.trim.threshold == 500
+    assert options.trim.exact is False

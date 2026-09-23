@@ -51,6 +51,7 @@ AsyncMqttHandler(
     client=None,
     error_handler=None,
     queue_maxsize=10000,
+    message_expiry=None,
 )
 ```
 
@@ -63,6 +64,7 @@ AsyncMqttHandler(
 | `client` | `aiomqtt.Client \| None` | `None` | Externally-managed client. Mutually exclusive with `mqtt_config`. |
 | `error_handler` | `Callable \| None` | `None` | Delivery-error callback. |
 | `queue_maxsize` | `int` | `10000` | Bound for the MQTT queue. |
+| `message_expiry` | `int \| None` | `None` | MQTT 5 message-expiry interval in seconds, attached to every publish as the `MessageExpiryInterval` property. `None` leaves messages without an expiry. |
 
 Passing both `client` and `mqtt_config` raises `ValueError`.
 
@@ -125,6 +127,11 @@ across broker backends).
 
 - **Wire format.** Each record is published as a JSON payload built from the
   record directly (broker handlers do not accept `formatter=`).
+- **Message expiry.** With `message_expiry` set, every publish carries the MQTT 5
+  `MessageExpiryInterval` property, so the broker discards an undelivered log
+  message after that many seconds. This is the MQTT analogue of the Valkey
+  backend's `stream_maxlen`: it bounds how long stale log messages can linger on
+  the broker. Leave it `None` for messages that never expire.
 - **Reconnect.** On a dropped connection the handler retries with exponential
   backoff — base `0.5s`, capped at `30.0s`, with `0.2` jitter. A successful
   connect resets the backoff counter.

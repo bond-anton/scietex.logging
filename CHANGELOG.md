@@ -5,6 +5,25 @@ All notable changes to `scietex.logging` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-09-23
+
+### Added
+
+- **`stream_maxlen` on `AsyncValkeyHandler`**: new keyword-only argument
+  (default `None`). When set, every `XADD` carries an approximate
+  `MAXLEN ~ N` trim (`StreamAddOptions(trim=TrimByMaxLen(exact=False,
+  threshold=N))`), so a log stream cannot grow without bound. `None` preserves
+  the previous unbounded behavior.
+- **`message_expiry` on `AsyncMqttHandler`**: new keyword-only argument
+  (default `None`). When set, every publish carries the MQTT 5
+  `MessageExpiryInterval` property, so the broker discards undelivered log
+  messages after that window. `None` preserves the previous behavior (no
+  expiry). Requires `paho-mqtt`, which the `mqtt` extra already pulls in via
+  `aiomqtt`.
+
+Both arguments are additive and default to the previous behavior, so existing
+callers are unaffected.
+
 ## [2.1.0] - 2026-09-22
 
 ### Added

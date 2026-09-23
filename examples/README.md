@@ -28,8 +28,8 @@ run. The table maps each example to the installation it needs.
 | --- | --- | --- |
 | [basic_console_logging.py](./basic_console_logging.py) | Minimal console logging with `ConsoleHandler` | No |
 | [redis_logging.py](./redis_logging.py) | Log to a Redis stream with `AsyncRedisHandler` | Redis |
-| [valkey_logging.py](./valkey_logging.py) | Log to a Valkey stream with `AsyncValkeyHandler` | Valkey |
-| [mqtt_logging.py](./mqtt_logging.py) | Log to an MQTT topic with `AsyncMqttHandler` | MQTT broker |
+| [valkey_logging.py](./valkey_logging.py) | Log to a Valkey stream with `AsyncValkeyHandler`, bounded with `stream_maxlen` | Valkey |
+| [mqtt_logging.py](./mqtt_logging.py) | Log to an MQTT topic with `AsyncMqttHandler`, expiring with `message_expiry` | MQTT broker |
 | [file_logging.py](./file_logging.py) | Write plain-text and JSON lines to files with `AsyncFileHandler` + `JsonFormatter` | No |
 | [injected_client.py](./injected_client.py) | Inject an externally-managed Valkey client the handler never closes | Valkey |
 | [console_and_redis_logging.py](./console_and_redis_logging.py) | Console and Redis handlers on one logger | Redis |

@@ -50,6 +50,7 @@ AsyncValkeyHandler(
     client=None,
     error_handler=None,
     queue_maxsize=10000,
+    stream_maxlen=None,
 )
 ```
 
@@ -60,6 +61,7 @@ AsyncValkeyHandler(
 | `client` | `GlideClient \| None` | `None` | Externally-managed client. Mutually exclusive with `valkey_config`. |
 | `error_handler` | `Callable \| None` | `None` | Delivery-error callback. |
 | `queue_maxsize` | `int` | `10000` | Bound for the Valkey queue. |
+| `stream_maxlen` | `int \| None` | `None` | Approximate cap on retained stream entries, applied as `XADD ... MAXLEN ~ N`. `None` leaves the stream unbounded. |
 
 Passing both `client` and `valkey_config` raises `ValueError`.
 
@@ -133,6 +135,11 @@ handler.
 
 - **Wire format.** Each record becomes a stream entry; the payload is built from
   the record directly (broker handlers do not accept `formatter=`).
+- **Stream trimming.** With `stream_maxlen` set, every write trims the stream to
+  approximately that many entries (`MAXLEN ~ N`), so a long-running logger cannot
+  exhaust broker memory. The trim is approximate by design — Valkey may retain
+  slightly more than `N` entries between trims. Leave it `None` for an unbounded
+  stream.
 - **Reconnect.** On a dropped connection the handler retries with exponential
   backoff — base `0.5s`, capped at `30.0s`, with `0.2` jitter. A successful
   connect resets the backoff counter.

@@ -3,7 +3,14 @@
 from ..config import ValkeyConfig, optional_dependency_error
 
 try:
-    from glide import GlideClient, GlideClientConfiguration, NodeAddress, ServerCredentials
+    from glide import (
+        GlideClient,
+        GlideClientConfiguration,
+        NodeAddress,
+        ServerCredentials,
+        StreamAddOptions,
+        TrimByMaxLen,
+    )
 except ImportError as e:
     raise ImportError(optional_dependency_error("valkey-glide", "valkey"), name="glide") from e
 
@@ -24,6 +31,7 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
 
     Attributes:
         stream_name (str): The Valkey stream name where log entries are sent.
+        stream_maxlen (int | None): Approximate cap on retained stream entries.
         client (GlideClient | None): The Valkey client connection, or None if not connected.
 
     Methods:
@@ -43,6 +51,7 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
         client: GlideClient | None = None,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         queue_maxsize: int = 10000,
+        stream_maxlen: int | None = None,
     ) -> None:
         """
         Initialize the asynchronous Valkey logging handler.
@@ -65,9 +74,13 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
                 errors are reported via the ``scietex.logging`` module logger.
             queue_maxsize (int): Maximum number of records each backend queue can hold.
                 Defaults to 10000.
+            stream_maxlen (int | None): Approximate maximum number of entries retained
+                in the stream, applied as ``XADD ... MAXLEN ~ N`` on every write. ``None``
+                leaves the stream unbounded. Defaults to None.
 
         Attributes:
             stream_name (str): The Valkey stream name where log entries are sent.
+            stream_maxlen (int | None): Approximate cap on retained stream entries.
             client (GlideClient | None): The Valkey client connection, or None if not connected.
 
         Raises:
@@ -89,6 +102,7 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
             client=client,
         )
         self.stream_name = stream_name
+        self.stream_maxlen = stream_maxlen
 
     async def connect(self) -> None:
         """
@@ -141,6 +155,9 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
         """
         Send log record to Valkey asynchronously.
 
+        When ``stream_maxlen`` is set, the write carries an approximate
+        ``MAXLEN ~ N`` trim so the stream cannot grow without bound.
+
         Args:
             record (dict[str, str]): The log record to send as a dictionary.
 
@@ -150,4 +167,8 @@ class AsyncValkeyHandler(AsyncBrokerHandler):
 
         if self.client is None:
             raise RuntimeError("Valkey client is not connected; call connect() first.")
-        await self.client.xadd(self.stream_name, record.items())
+        if self.stream_maxlen is None:
+            await self.client.xadd(self.stream_name, record.items())
+            return
+        options = StreamAddOptions(trim=TrimByMaxLen(exact=False, threshold=self.stream_maxlen))
+        await self.client.xadd(self.stream_name, record.items(), options)

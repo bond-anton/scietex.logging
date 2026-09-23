@@ -7,6 +7,12 @@ try:
 except ImportError as e:
     raise ImportError(optional_dependency_error("aiomqtt", "mqtt"), name="aiomqtt") from e
 
+try:
+    from paho.mqtt.packettypes import PacketTypes
+    from paho.mqtt.properties import Properties
+except ImportError as e:
+    raise ImportError(optional_dependency_error("paho-mqtt", "mqtt"), name="paho") from e
+
 import json
 import logging
 from collections.abc import Callable
@@ -28,6 +34,7 @@ class AsyncMqttHandler(AsyncBrokerHandler):
         topic (str): The MQTT topic to which log entries are published.
         qos (int): The MQTT QoS level (0, 1, or 2) used for publication.
         retain (bool): Whether published messages are retained by the broker.
+        message_expiry (int | None): MQTT 5 message-expiry interval in seconds.
         client (aiomqtt.Client | None): The MQTT client connection, or None if not connected.
 
     Methods:
@@ -49,6 +56,7 @@ class AsyncMqttHandler(AsyncBrokerHandler):
         client: aiomqtt.Client | None = None,
         error_handler: Callable[[logging.LogRecord | None, Exception], None] | None = None,
         queue_maxsize: int = 10000,
+        message_expiry: int | None = None,
     ) -> None:
         """
         Initialize the asynchronous MQTT logging handler.
@@ -76,9 +84,14 @@ class AsyncMqttHandler(AsyncBrokerHandler):
                 errors are reported via the ``scietex.logging`` module logger.
             queue_maxsize (int): Maximum number of records each backend queue can hold.
                 Defaults to 10000.
+            message_expiry (int | None): MQTT 5 message-expiry interval in seconds,
+                attached to every publish as the ``MessageExpiryInterval`` property so the
+                broker discards undelivered messages after that window. ``None`` leaves
+                messages without an expiry. Defaults to None.
 
         Attributes:
             topic (str): The MQTT topic to which log entries are published.
+            message_expiry (int | None): MQTT 5 message-expiry interval in seconds.
             client (aiomqtt.Client | None): The MQTT client connection, or None if not connected.
 
         Raises:
@@ -102,6 +115,7 @@ class AsyncMqttHandler(AsyncBrokerHandler):
         self.topic = topic
         self.qos = qos
         self.retain = retain
+        self.message_expiry = message_expiry
 
     async def connect(self) -> None:
         """
@@ -143,6 +157,10 @@ class AsyncMqttHandler(AsyncBrokerHandler):
         """
         Send log record to MQTT asynchronously.
 
+        When ``message_expiry`` is set, the publish carries the MQTT 5
+        ``MessageExpiryInterval`` property so the broker discards the message
+        after that window.
+
         Args:
             record (dict[str, str]): The log record to send as a dictionary.
 
@@ -151,4 +169,14 @@ class AsyncMqttHandler(AsyncBrokerHandler):
         """
         if self.client is None:
             raise RuntimeError("MQTT client is not connected; call connect() first.")
-        await self.client.publish(self.topic, json.dumps(record), qos=self.qos, retain=self.retain)
+        properties = None
+        if self.message_expiry is not None:
+            properties = Properties(PacketTypes.PUBLISH)
+            properties.MessageExpiryInterval = self.message_expiry
+        await self.client.publish(
+            self.topic,
+            json.dumps(record),
+            qos=self.qos,
+            retain=self.retain,
+            properties=properties,
+        )

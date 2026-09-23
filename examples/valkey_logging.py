@@ -13,6 +13,8 @@ async def main():
 
     valkey_handler = AsyncValkeyHandler(
         stream_name="example_log_stream",
+        # Keep the stream bounded: every XADD trims it to ~1000 entries.
+        stream_maxlen=1000,
     )
     logger.addHandler(valkey_handler)
 

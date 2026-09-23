@@ -546,11 +546,12 @@ absent); `handler/broker.AsyncBrokerHandler`.
 **Purpose.** Concrete broker backend writing log entries to a Valkey stream via
 the `valkey-glide` client.
 
-**Class.** `AsyncValkeyHandler(AsyncBrokerHandler)` — `handler/valkey.py:17`
+**Class.** `AsyncValkeyHandler(AsyncBrokerHandler)` — `handler/valkey.py:24`
 
 **Public interface.**
 - `AsyncValkeyHandler(stream_name, *,
-  valkey_config=None, client=None, error_handler=None, queue_maxsize=10000)`
+  valkey_config=None, client=None, error_handler=None, queue_maxsize=10000,
+  stream_maxlen=None)`
   — passes `queue_name="_valkey"` to super. `valkey_config` is a **dict**
   (mirroring Redis's seam, AR-025) whose keys mirror
   `GlideClientConfiguration`'s scalar plain options; `addresses` is a list of
@@ -559,21 +560,26 @@ the `valkey-glide` client.
   is a read-only `asdict` view of it. An injected `client=` is an
   externally-managed `GlideClient` the
   handler never closes — the caller owns its lifetime and recovery; passing both
-  `client` and `valkey_config` raises `ValueError`.
-- `async connect()` — `handler/valkey.py:93`. Translates
+  `client` and `valkey_config` raises `ValueError`. `stream_maxlen` (default
+  `None`) is an approximate retained-entry cap applied as `XADD ... MAXLEN ~ N`
+  on every write; `None` leaves the stream unbounded.
+- `async connect()` — `handler/valkey.py:107`. Translates
   `self.backend_config` into a `GlideClientConfiguration` (`addresses`
   tuples → `NodeAddress` objects, `None`-valued fields dropped so glide applies
   its own defaults) and calls `await GlideClient.create(config)` if `client is
   None`.
-- `async disconnect()` — `handler/valkey.py:127`. `await client.close()`.
-- `async send_message(record)` — `handler/valkey.py:135`. Raises `RuntimeError`
-  when `self.client is None` (AR-034); otherwise `await client.xadd(stream_name, record.items())`.
+- `async disconnect()` — `handler/valkey.py:141`. `await client.close()`.
+- `async send_message(record)` — `handler/valkey.py:154`. Raises `RuntimeError`
+  when `self.client is None` (AR-034); otherwise `await client.xadd(stream_name, record.items())`,
+  or `await client.xadd(stream_name, record.items(), StreamAddOptions(trim=TrimByMaxLen(exact=False, threshold=stream_maxlen)))`
+  when `stream_maxlen` is set.
   Valkey-glide `xadd` expects `record.items()` rather than the dict itself — an
   intentional, documented adapter difference (see the adapter note under
   `AsyncBrokerHandler.send_message`).
 
 **Depends on.** `glide` (`GlideClient`, `GlideClientConfiguration`,
-`NodeAddress`) — hard import, raises descriptive ImportError if absent;
+`NodeAddress`, `StreamAddOptions`, `TrimByMaxLen`) — hard import, raises
+descriptive ImportError if absent;
 `handler/broker.AsyncBrokerHandler`.
 
 **Depended on by.** `__init__.py` (guarded); host apps; tests.
@@ -585,10 +591,10 @@ the `valkey-glide` client.
 **Purpose.** Concrete broker backend publishing log records as JSON payloads to
 an MQTT topic via the `aiomqtt` client.
 
-**Class.** `AsyncMqttHandler(AsyncBrokerHandler)` — `handler/mqtt.py:18`
+**Class.** `AsyncMqttHandler(AsyncBrokerHandler)` — `handler/mqtt.py:24`
 
 **Public interface.**
-- `AsyncMqttHandler(topic, *, mqtt_config=None, qos=0, retain=False, client=None, error_handler=None, queue_maxsize=10000)`
+- `AsyncMqttHandler(topic, *, mqtt_config=None, qos=0, retain=False, client=None, error_handler=None, queue_maxsize=10000, message_expiry=None)`
   — passes `queue_name="_mqtt"` to super. `mqtt_config` is a **dict** whose keys
   mirror `aiomqtt.Client`'s scalar plain options; a typed `MqttConfig` is stored
   as `self.backend_config` (defaulting to `{"host": "localhost", "port":
@@ -598,20 +604,26 @@ an MQTT topic via the `aiomqtt` client.
   its lifetime and recovery; passing both `client` and `mqtt_config` raises
   `ValueError`. An injected MQTT client must already be connected (inside its
   `async with` context) before `start_logging()`, because the handler never
-  enters the context on an injected client.
-- `async connect()` — `handler/mqtt.py:106`. Translates
+  enters the context on an injected client. `message_expiry` (default `None`) is
+  an MQTT 5 message-expiry interval in seconds attached to every publish as the
+  `MessageExpiryInterval` property; `None` leaves messages without an expiry.
+- `async connect()` — `handler/mqtt.py:120`. Translates
   `self.backend_config` into aiomqtt kwargs (`host` → `hostname`,
   `None`-valued fields dropped so aiomqtt applies its own defaults) and enters
   the client as an async context manager if `client is None`.
-- `async disconnect()` — `handler/mqtt.py:128`. `await client.__aexit__(None, None, None)`.
-- `async send_message(record)` — `handler/mqtt.py:136`. Raises `RuntimeError`
+- `async disconnect()` — `handler/mqtt.py:142`. `await client.__aexit__(None, None, None)`.
+- `async send_message(record)` — `handler/mqtt.py:156`. Raises `RuntimeError`
   when `self.client is None` (AR-034); otherwise
-  `await client.publish(self.topic, json.dumps(record), qos=self.qos, retain=self.retain)`.
+  `await client.publish(self.topic, json.dumps(record), qos=self.qos, retain=self.retain, properties=properties)`,
+  where `properties` is a paho `Properties(PacketTypes.PUBLISH)` carrying
+  `MessageExpiryInterval` when `message_expiry` is set, else `None`.
   The payload is the JSON text of the standard `{level, message, name, time}`
   dict; a subscriber must `json.loads` it.
 
 **Depends on.** `aiomqtt` (hard import, raises descriptive ImportError if
-absent); `handler/broker.AsyncBrokerHandler`.
+absent); `paho.mqtt.packettypes.PacketTypes` and `paho.mqtt.properties.Properties`
+(hard import, raises descriptive ImportError if absent — `paho-mqtt` is pulled
+in by the `mqtt` extra via `aiomqtt`); `handler/broker.AsyncBrokerHandler`.
 
 **Depended on by.** `__init__.py` (guarded); host apps; tests.
 

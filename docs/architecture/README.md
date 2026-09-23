@@ -41,7 +41,7 @@ plus 3 subpackage `__init__.py`) under `src/scietex/logging/`.
 
 ## Key Facts (quick reference)
 
-- **Package**: `scietex.logging`, version `2.1.0` (`src/scietex/logging/__init__.py:138`)
+- **Package**: `scietex.logging`, version `2.2.0` (`src/scietex/logging/__init__.py:138`)
 - **Python**: `>=3.10` (`pyproject.toml`)
 - **Build**: setuptools, `src/` layout; package data ships `py.typed`
 - **Runtime deps**: none (base); `redis>=5.0.0` (`[redis]`), `valkey-glide~=2.5.0` (`[valkey]`), `aiomqtt~=2.5.0` (`[mqtt]`)

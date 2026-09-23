@@ -181,8 +181,8 @@ is an **intentional, documented adapter difference**: the abstract
 `{level, message, name, time}`, and each concrete adapter translates it to the
 argument shape its client expects. No uniform client wrapper was added. All
 concrete `send_message` implementations raise `RuntimeError` when `self.client
-is None` (`handler/redis.py:133-134`, `handler/valkey.py:146-147`,
-`handler/mqtt.py`) rather than silently no-oping, so an unconnected send
+is None` (`handler/redis.py:133-134`, `handler/valkey.py:168`,
+`handler/mqtt.py:170`) rather than silently no-oping, so an unconnected send
 surfaces as a failure (AR-034). The file handlers (`AsyncFileHandler` and its
 rotation variants) are **not** broker backends — they subclass `AsyncLoggingHandler`
 directly and register a `FileBackend`, so they do not participate in this
@@ -195,8 +195,9 @@ examples); `handler/file.py`.
 
 ## 8. Optional-dependency guard duplication
 
-**Location.** `handler/redis.py:5-8`, `handler/valkey.py:5-8`, and the guarded
-imports in `__init__.py:191-213`.
+**Location.** `handler/redis.py:5-8`, `handler/valkey.py:5-14`,
+`handler/mqtt.py:5-13`, and the guarded
+imports in `__init__.py:194-210`.
 
 **What it appears to do.** Each backend module hard-imports its client and
 raises a descriptive `ImportError`; `__init__.py` wraps each import in
