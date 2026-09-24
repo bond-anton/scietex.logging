@@ -1,6 +1,5 @@
 """Tests for the optional client-injection seam in AsyncBrokerHandler."""
 
-
 import pytest
 from conftest import FlakyBrokerHandler, _make_record, _wait_for
 
