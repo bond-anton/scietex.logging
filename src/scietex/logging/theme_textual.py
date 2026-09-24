@@ -35,7 +35,7 @@ _DEFAULT_TEXT_MUTED = "auto 60%"
 
 # How much to darken the error color for a CRITICAL background on dark themes.
 # Textual has no direct equivalent; this mirrors the ScietexDark relationship
-# between error (#FF7B72) and critical_bg (#B62324).
+# between error (#FF0000) and critical_bg (#FF0000).
 _DEFAULT_CRITICAL_DARKEN = 0.12
 
 

@@ -5,6 +5,19 @@ All notable changes to `scietex.logging` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] - 2026-09-24
+
+### Changed
+
+- **`ScietexLight` / `ScietexDark` palettes now mirror `scietex.textual`**:
+  the per-level colors are aligned with the shared Textual theme palette so a
+  log line and a Textual widget render the same brand colors. `info` uses the
+  brand emerald (`#0CADB3`), `warning` the brand amber (`#E8A317`), `error`
+  and `critical_bg` the brand red (`#FF0000`), and `logger_name` the brand
+  yellow (`#FFDB1C`). `debug` follows the theme's secondary tone (`#31313B`
+  light, `#C9C9D4` dark). `critical` stays white as contrast text on the red
+  background.
+
 ## [2.2.0] - 2026-09-23
 
 ### Added

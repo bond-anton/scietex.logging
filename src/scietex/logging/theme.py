@@ -161,13 +161,13 @@ class ScietexLight(LoggingTheme):
         default_factory=lambda: Palette(
             background="#FFFFFF",
             foreground="#1F202A",
-            debug="#6B7280",
-            info="#116329",
-            warning="#9A6700",
-            error="#CF222E",
+            debug="#31313B",
+            info="#0CADB3",
+            warning="#E8A317",
+            error="#FF0000",
             critical="#FFFFFF",
-            critical_bg="#CF222E",
-            logger_name="#31313B",
+            critical_bg="#FF0000",
+            logger_name="#FFDB1C",
         )
     )
     color: bool = True
@@ -182,12 +182,12 @@ class ScietexDark(LoggingTheme):
         default_factory=lambda: Palette(
             background="#1F202A",
             foreground="#FFFFFF",
-            debug="#8B949E",
-            info="#7EE787",
-            warning="#FFDB1C",
-            error="#FF7B72",
+            debug="#C9C9D4",
+            info="#0CADB3",
+            warning="#E8A317",
+            error="#FF0000",
             critical="#FFFFFF",
-            critical_bg="#B62324",
+            critical_bg="#FF0000",
             logger_name="#FFDB1C",
         )
     )

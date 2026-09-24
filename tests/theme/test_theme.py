@@ -106,16 +106,31 @@ def test_monochrome_theme_palette_has_no_level_colors():
 
 
 def test_scietex_light_palette_hex_values():
-    """ScietexLight carries the brand dark-gray logger name and near-black foreground."""
-    assert SCIETEX_LIGHT.palette.logger_name == "#31313B"
-    assert SCIETEX_LIGHT.palette.foreground == "#1F202A"
+    """ScietexLight mirrors the scietex.textual light palette."""
+    palette = SCIETEX_LIGHT.palette
+    assert palette.background == "#FFFFFF"
+    assert palette.foreground == "#1F202A"
+    assert palette.debug == "#31313B"
+    assert palette.info == "#0CADB3"
+    assert palette.warning == "#E8A317"
+    assert palette.error == "#FF0000"
+    assert palette.critical == "#FFFFFF"
+    assert palette.critical_bg == "#FF0000"
+    assert palette.logger_name == "#FFDB1C"
 
 
 def test_scietex_dark_palette_hex_values():
-    """ScietexDark carries the brand-yellow logger/warning and brand-black background."""
-    assert SCIETEX_DARK.palette.logger_name == "#FFDB1C"
-    assert SCIETEX_DARK.palette.warning == "#FFDB1C"
-    assert SCIETEX_DARK.palette.background == "#1F202A"
+    """ScietexDark mirrors the scietex.textual dark palette."""
+    palette = SCIETEX_DARK.palette
+    assert palette.background == "#1F202A"
+    assert palette.foreground == "#FFFFFF"
+    assert palette.debug == "#C9C9D4"
+    assert palette.info == "#0CADB3"
+    assert palette.warning == "#E8A317"
+    assert palette.error == "#FF0000"
+    assert palette.critical == "#FFFFFF"
+    assert palette.critical_bg == "#FF0000"
+    assert palette.logger_name == "#FFDB1C"
 
 
 def test_formatter_default_monochrome_has_no_ansi():
